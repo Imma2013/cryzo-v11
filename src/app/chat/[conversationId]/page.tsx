@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useState, useCallback } from "react";
+import { use, useState, useCallback, useEffect } from "react";
 import { Panel, Group, Separator } from "react-resizable-panels";
 import { useQuery } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
@@ -25,9 +25,18 @@ export default function ConversationPage({
 
   const hasArtifacts = artifacts && artifacts.length > 0;
 
-  if (hasArtifacts && !workspaceOpen) {
-    setWorkspaceOpen(true);
-  }
+  // Reset workspace state when conversation changes
+  useEffect(() => {
+    setWorkspaceOpen(false);
+    setSelectedElement(null);
+  }, [id]);
+
+  // Auto-open workspace when artifacts appear for THIS conversation
+  useEffect(() => {
+    if (hasArtifacts) {
+      setWorkspaceOpen(true);
+    }
+  }, [hasArtifacts]);
 
   const handleElementSelected = useCallback((info: ElementInfo) => {
     setSelectedElement(info);

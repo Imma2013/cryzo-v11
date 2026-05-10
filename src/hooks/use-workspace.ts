@@ -83,7 +83,10 @@ export function useWorkspace(conversationId: Id<"conversations">) {
       appendOutput("Booting WebContainer...\r\n");
 
       try {
-        const wc = await getWebContainer();
+        const bootTimeout = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("WebContainer boot timed out after 30s. Try refreshing the page.")), 30000)
+        );
+        const wc = await Promise.race([getWebContainer(), bootTimeout]);
         appendOutput("WebContainer ready.\r\n\r\n");
 
         const allActions: ArtifactAction[] = artifacts.flatMap((a) => a.actions);
