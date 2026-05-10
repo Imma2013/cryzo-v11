@@ -161,7 +161,7 @@ export function ChatArea({
               >
                 {m.parts?.map((part, i) => {
                   if (part.type === "text") {
-                    const { cleanText, artifacts } = parseArtifacts(part.text);
+                    const { cleanText, artifacts, isStreaming, streamingTitle, streamingFiles } = parseArtifacts(part.text);
                     // Save artifacts to Convex (deduplicated)
                     for (const artifact of artifacts) {
                       if (!savedArtifactsRef.current.has(artifact.id)) {
@@ -203,6 +203,24 @@ export function ChatArea({
                         {artifacts.map((a) => (
                           <ArtifactBadge key={a.id} title={a.title} />
                         ))}
+                        {isStreaming && (
+                          <div className="my-2 rounded-lg border border-zinc-700 bg-zinc-800/50 px-3 py-2 text-sm">
+                            <div className="flex items-center gap-2 text-zinc-200">
+                              <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-blue-400" />
+                              <span className="font-medium">{streamingTitle}</span>
+                            </div>
+                            {streamingFiles.length > 0 && (
+                              <div className="mt-1.5 space-y-0.5">
+                                {streamingFiles.map((f, fi) => (
+                                  <div key={fi} className="flex items-center gap-1.5 text-xs text-zinc-400">
+                                    <span className="text-green-400">+</span>
+                                    <span className="font-mono">{f}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </span>
                     );
                   }

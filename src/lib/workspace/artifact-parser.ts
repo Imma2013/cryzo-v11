@@ -11,29 +11,46 @@ function extractAttr(tag: string, name: string): string {
 export function parseArtifacts(text: string): {
   cleanText: string;
   artifacts: ParsedArtifact[];
+  isStreaming: boolean;
+  streamingTitle: string | null;
+  streamingFiles: string[];
 } {
   const artifacts: ParsedArtifact[] = [];
 
-  // Find artifact boundaries using a more robust approach
-  // that handles nested angle brackets in file content
   const openPattern = new RegExp(`<${ARTIFACT_TAG}([^>]*)>`, "g");
   const closeTag = `</${ARTIFACT_TAG}>`;
 
   let cleanText = "";
   let lastEnd = 0;
   let match: RegExpExecArray | null;
+  let isStreaming = false;
+  let streamingTitle: string | null = null;
+  let streamingFiles: string[] = [];
 
   while ((match = openPattern.exec(text)) !== null) {
     const artifactStart = match.index;
     const attrs = match[1];
     const bodyStart = match.index + match[0].length;
 
-    // Find the closing tag — must handle nested content
     const closeIdx = text.indexOf(closeTag, bodyStart);
-    if (closeIdx === -1) break;
 
     // Add text before this artifact to cleanText
     cleanText += text.slice(lastEnd, artifactStart);
+
+    if (closeIdx === -1) {
+      // Artifact is still streaming — no closing tag yet
+      isStreaming = true;
+      streamingTitle = extractAttr(attrs, "title") || "Building...";
+      // Extract file paths from partial content for progress display
+      const partialBody = text.slice(bodyStart);
+      const filePattern = new RegExp(`<${ACTION_TAG}[^>]*filePath="([^"]*)"`, "g");
+      let fileMatch: RegExpExecArray | null;
+      while ((fileMatch = filePattern.exec(partialBody)) !== null) {
+        streamingFiles.push(fileMatch[1]);
+      }
+      lastEnd = text.length;
+      break;
+    }
 
     const artifactId = extractAttr(attrs, "id") || `artifact-${artifacts.length}`;
     const title = extractAttr(attrs, "title") || "Untitled Project";
@@ -49,8 +66,11 @@ export function parseArtifacts(text: string): {
     openPattern.lastIndex = lastEnd;
   }
 
-  cleanText += text.slice(lastEnd);
-  return { cleanText: cleanText.trim(), artifacts };
+  if (!isStreaming) {
+    cleanText += text.slice(lastEnd);
+  }
+
+  return { cleanText: cleanText.trim(), artifacts, isStreaming, streamingTitle, streamingFiles };
 }
 
 function parseActions(body: string): ArtifactAction[] {
