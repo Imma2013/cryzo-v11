@@ -2,11 +2,59 @@ import { openai } from "@ai-sdk/openai";
 import { Composio } from "@composio/core";
 import { VercelProvider } from "@composio/vercel";
 import { streamText, stepCountIs, convertToModelMessages, type UIMessage } from "ai";
+import { readFileSync } from "fs";
+import { join } from "path";
 
 let composio: Composio<VercelProvider>;
 function getComposio() {
   if (!composio) composio = new Composio<VercelProvider>({ provider: new VercelProvider() });
   return composio;
+}
+
+const RECIPE_KEYWORDS: Record<string, string[]> = {
+  "cryzo-10": ["dog", "pet", "cat", "animal", "puppy", "kitten", "vet"],
+  "cryzo-1": ["festival", "concert", "event", "lineup", "music event", "rave"],
+  "cryzo-2": ["3d", "futuristic", "immersive", "artifact"],
+  "cryzo-3": ["furniture", "interior", "home decor", "design studio"],
+  "cryzo-4": ["car rental", "vehicle", "fleet"],
+  "cryzo-5": ["hypercar", "supercar", "speed", "performance car"],
+  "cryzo-6": ["travel", "luxury travel", "concierge", "destination"],
+  "cryzo-7": ["restaurant", "dining", "food", "nightlife", "bar", "chef"],
+  "cryzo-8": ["book", "publisher", "author", "literary", "novel"],
+  "cryzo-9": ["luxury car", "motorsport", "automotive luxury"],
+  "airbnb": ["stay", "rental", "booking", "hotel", "accommodation", "airbnb"],
+  "stripe": ["payment", "billing", "api", "fintech", "merchant"],
+  "spotify": ["music", "streaming", "audio", "playlist", "podcast"],
+  "ferrari": ["ferrari", "racing", "supercar editorial"],
+  "tesla": ["electric", "ev", "tesla"],
+  "notion": ["productivity", "notes", "docs", "workspace", "wiki"],
+  "figma": ["design tool", "interface", "prototype", "figma"],
+  "vercel": ["deploy", "frontend", "developer platform"],
+  "apple": ["phone", "device", "product launch", "consumer tech"],
+  "coinbase": ["crypto", "exchange", "wallet", "bitcoin"],
+  "linear.app": ["issue", "project management", "sprint", "kanban"],
+  "framer": ["website builder", "motion", "animation"],
+  "cursor": ["code editor", "ai coding", "ide"],
+  "spacex": ["rocket", "space", "mission", "aerospace"],
+};
+
+function pickDesignRecipe(userMessage: string): string | null {
+  const msg = userMessage.toLowerCase();
+  for (const [slug, keywords] of Object.entries(RECIPE_KEYWORDS)) {
+    if (keywords.some((kw) => msg.includes(kw))) return slug;
+  }
+  return null;
+}
+
+function loadRecipeContent(slug: string): string {
+  try {
+    return readFileSync(
+      join(process.cwd(), `vendor/design-recipes/${slug}/DESIGN.md`),
+      "utf-8"
+    );
+  } catch {
+    return "";
+  }
 }
 
 export const dynamic = "force-dynamic";
@@ -24,6 +72,15 @@ export async function POST(req: Request) {
     : await client.create(userId || "anonymous");
 
   const tools = await session.tools();
+
+  // Pick and load design recipe based on user's latest message
+  const lastUserMsg = messages.filter((m) => m.role === "user").pop();
+  const lastUserText = lastUserMsg?.parts?.filter((p: any) => p.type === "text").map((p: any) => p.text).join(" ") || "";
+  const recipeSlug = pickDesignRecipe(lastUserText);
+  const recipeContent = recipeSlug ? loadRecipeContent(recipeSlug) : "";
+  const recipeBlock = recipeContent
+    ? `\n\n## ACTIVE DESIGN RECIPE — FOLLOW AS BINDING GUIDANCE (selected: ${recipeSlug})\n${recipeContent}\n\nCRITICAL: The above recipe controls your composition, typography attitude, palette behavior, section structure, imagery approach, and CTA styling. Do NOT deviate into generic startup template patterns. The output must be recognizably native to this reference family.`
+    : "";
 
   const result = streamText({
     model: openai("gpt-5.4"),
@@ -178,7 +235,7 @@ When you receive this context:
 - You know EXACTLY which element the user is referring to
 - Find that element in the source code by matching the selector/tag/text
 - Make the requested change and output an updated artifact
-- You can confidently edit the specific element without asking "which one?"`,
+- You can confidently edit the specific element without asking "which one?"${recipeBlock}`,
     messages: await convertToModelMessages(messages),
     tools,
     stopWhen: stepCountIs(10),
