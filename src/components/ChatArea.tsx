@@ -5,7 +5,6 @@ import { useChat } from "@ai-sdk/react";
 import {
   DefaultChatTransport,
   isToolUIPart,
-  getToolName,
   type FileUIPart,
   type UIMessage,
 } from "ai";
@@ -19,6 +18,16 @@ import { ArtifactBadge } from "./ArtifactBadge";
 import { parseArtifacts } from "@/lib/workspace/artifact-parser";
 import type { ElementInfo } from "./workspace/LivePreview";
 import { Id } from "../../convex/_generated/dataModel";
+
+function hasVisibleAssistantContent(message: UIMessage) {
+  return message.parts?.some((part) => {
+    if (part.type === "file") return true;
+    if (part.type !== "text") return false;
+
+    const { cleanText, artifacts, isStreaming } = parseArtifacts(part.text);
+    return cleanText.trim().length > 0 || artifacts.length > 0 || isStreaming;
+  }) ?? false;
+}
 
 export function ChatArea({
   conversationId,
@@ -223,11 +232,15 @@ export function ChatArea({
         )}
 
         <div className="mx-auto max-w-3xl space-y-4">
-          {messages.map((m) => (
-            <div
-              key={m.id}
-              className={`flex gap-3 ${m.role === "user" ? "justify-end" : ""}`}
-            >
+          {messages.map((m) => {
+            const hasAssistantContent =
+              m.role === "assistant" && hasVisibleAssistantContent(m);
+
+            return (
+              <div
+                key={m.id}
+                className={`flex gap-3 ${m.role === "user" ? "justify-end" : ""}`}
+              >
               <div
                 className={`max-w-[80%] rounded-lg px-4 py-3 text-sm ${
                   m.role === "user"
@@ -304,14 +317,12 @@ export function ChatArea({
                     return (
                       <ToolCallDisplay
                         key={i}
-                        toolName={getToolName(part)}
-                        args={part.input}
-                        result={part.output}
                         state={
                           part.state === "output-available"
                             ? "result"
                             : "call"
                         }
+                        hideWhenComplete={hasAssistantContent}
                       />
                     );
                   }
@@ -319,7 +330,8 @@ export function ChatArea({
                 })}
               </div>
             </div>
-          ))}
+            );
+          })}
 
           {isLoading && messages[messages.length - 1]?.role === "user" && (
             <div className="flex gap-3">
