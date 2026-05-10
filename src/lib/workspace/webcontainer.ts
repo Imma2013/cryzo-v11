@@ -2,12 +2,22 @@ import { WebContainer } from "@webcontainer/api";
 import type { ArtifactAction } from "./types";
 
 let instance: WebContainer | null = null;
+let booting = false;
 
 export async function getWebContainer(): Promise<WebContainer> {
-  if (!instance) {
-    instance = await WebContainer.boot({ coep: "credentialless" });
+  if (instance) return instance;
+  if (booting) {
+    // Wait for existing boot to finish
+    while (booting) await new Promise((r) => setTimeout(r, 100));
+    if (instance) return instance;
   }
-  return instance;
+  booting = true;
+  try {
+    instance = await WebContainer.boot({ coep: "credentialless" });
+    return instance;
+  } finally {
+    booting = false;
+  }
 }
 
 export async function teardownWebContainer() {
@@ -17,10 +27,7 @@ export async function teardownWebContainer() {
   }
 }
 
-export async function writeFiles(
-  wc: WebContainer,
-  actions: ArtifactAction[]
-) {
+export async function writeFiles(wc: WebContainer, actions: ArtifactAction[]) {
   for (const action of actions) {
     if (action.type === "file" && action.filePath) {
       const parts = action.filePath.split("/");
@@ -36,13 +43,15 @@ export async function writeFiles(
 export async function runCommand(
   wc: WebContainer,
   command: string,
-  onOutput: (data: string) => void
+  onOutput: (data: string) => void,
+  timeoutMs = 120000
 ): Promise<number> {
-  const args = command.split(" ");
-  const cmd = args.shift()!;
-  const process = await wc.spawn(cmd, args);
+  const parts = command.trim().split(/\s+/);
+  const cmd = parts.shift()!;
+  const process = await wc.spawn(cmd, parts);
 
-  process.output.pipeTo(
+  let done = false;
+  const outputPromise = process.output.pipeTo(
     new WritableStream({
       write(data) {
         onOutput(data);
@@ -50,5 +59,23 @@ export async function runCommand(
     })
   );
 
-  return process.exit;
+  const exitPromise = process.exit.then((code) => {
+    done = true;
+    return code;
+  });
+
+  const timeoutPromise = new Promise<number>((_, reject) => {
+    setTimeout(() => {
+      if (!done) reject(new Error(`Command timed out after ${timeoutMs / 1000}s: ${command}`));
+    }, timeoutMs);
+  });
+
+  try {
+    const exitCode = await Promise.race([exitPromise, timeoutPromise]);
+    await outputPromise.catch(() => {});
+    return exitCode;
+  } catch (err) {
+    process.kill();
+    throw err;
+  }
 }
