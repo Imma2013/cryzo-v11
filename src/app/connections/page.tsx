@@ -6,7 +6,7 @@ import { Loader2 } from "lucide-react";
 type Toolkit = {
   slug: string;
   name: string;
-  logo?: string;
+  logoUrl?: string;
   isConnected: boolean;
   connectedAccountId?: string;
 };
@@ -14,6 +14,9 @@ type Toolkit = {
 export default function ConnectionsPage() {
   const [toolkits, setToolkits] = useState<Toolkit[]>([]);
   const [loading, setLoading] = useState(true);
+  const [failedLogoSlugs, setFailedLogoSlugs] = useState<Set<string>>(
+    () => new Set(),
+  );
 
   const fetchToolkits = async () => {
     setLoading(true);
@@ -24,7 +27,23 @@ export default function ConnectionsPage() {
   };
 
   useEffect(() => {
-    fetchToolkits();
+    let cancelled = false;
+
+    async function loadToolkits() {
+      const res = await fetch("/api/connections");
+      const data = await res.json();
+
+      if (!cancelled) {
+        setToolkits(data.toolkits);
+        setLoading(false);
+      }
+    }
+
+    void loadToolkits();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const connect = async (slug: string) => {
@@ -48,6 +67,14 @@ export default function ConnectionsPage() {
     fetchToolkits();
   };
 
+  const markLogoFailed = (slug: string) => {
+    setFailedLogoSlugs((current) => {
+      const next = new Set(current);
+      next.add(slug);
+      return next;
+    });
+  };
+
   return (
     <div className="min-h-screen bg-black p-8">
       <div className="mx-auto max-w-4xl">
@@ -62,54 +89,58 @@ export default function ConnectionsPage() {
           </div>
         ) : (
           <div className="grid gap-3">
-            {toolkits.map((t) => (
-              <div
-                key={t.slug}
-                className="flex items-center gap-4 border-b border-zinc-800 py-4"
-              >
-                <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded bg-zinc-900">
-                  {t.logo ? (
-                    <img
-                      src={t.logo}
-                      alt={t.name}
-                      className="h-6 w-6 object-contain"
-                      crossOrigin="anonymous"
-                    />
+            {toolkits.map((t) => {
+              const showLogo = t.logoUrl && !failedLogoSlugs.has(t.slug);
+
+              return (
+                <div
+                  key={t.slug}
+                  className="flex items-center gap-4 border-b border-zinc-800 py-4"
+                >
+                  <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded bg-zinc-900">
+                    {showLogo ? (
+                      <img
+                        src={t.logoUrl}
+                        alt={t.name}
+                        className="h-6 w-6 object-contain"
+                        onError={() => markLogoFailed(t.slug)}
+                      />
+                    ) : (
+                      <span className="text-xs text-zinc-500">
+                        {t.name.charAt(0)}
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="flex-1">
+                    <p className="text-sm font-medium text-white">{t.name}</p>
+                    <p
+                      className={`text-xs ${
+                        t.isConnected ? "text-green-400" : "text-zinc-500"
+                      }`}
+                    >
+                      {t.isConnected ? "Connected" : "Not connected"}
+                    </p>
+                  </div>
+
+                  {t.isConnected ? (
+                    <button
+                      onClick={() => disconnect(t.connectedAccountId!)}
+                      className="rounded border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 transition-colors hover:border-red-800 hover:text-red-400"
+                    >
+                      Disconnect
+                    </button>
                   ) : (
-                    <span className="text-xs text-zinc-500">
-                      {t.name.charAt(0)}
-                    </span>
+                    <button
+                      onClick={() => connect(t.slug)}
+                      className="rounded bg-white px-3 py-1.5 text-xs font-medium text-black transition-colors hover:bg-zinc-200"
+                    >
+                      Connect
+                    </button>
                   )}
                 </div>
-
-                <div className="flex-1">
-                  <p className="text-sm font-medium text-white">{t.name}</p>
-                  <p
-                    className={`text-xs ${
-                      t.isConnected ? "text-green-400" : "text-zinc-500"
-                    }`}
-                  >
-                    {t.isConnected ? "Connected" : "Not connected"}
-                  </p>
-                </div>
-
-                {t.isConnected ? (
-                  <button
-                    onClick={() => disconnect(t.connectedAccountId!)}
-                    className="rounded border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 transition-colors hover:border-red-800 hover:text-red-400"
-                  >
-                    Disconnect
-                  </button>
-                ) : (
-                  <button
-                    onClick={() => connect(t.slug)}
-                    className="rounded bg-white px-3 py-1.5 text-xs font-medium text-black transition-colors hover:bg-zinc-200"
-                  >
-                    Connect
-                  </button>
-                )}
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
