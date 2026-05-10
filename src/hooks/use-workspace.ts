@@ -22,11 +22,12 @@ export function useWorkspace(conversationId: Id<"conversations">) {
     conversationId,
   });
 
-  // Reset when conversation changes
+  // Reset state when conversation changes (but keep WebContainer alive)
   useEffect(() => {
     if (conversationId !== convIdRef.current) {
       convIdRef.current = conversationId;
       bootedRef.current = false;
+      appliedArtifactsRef.current = new Set();
       setFiles({});
       setPreviewUrl(null);
       setTerminalOutput("");
@@ -34,10 +35,6 @@ export function useWorkspace(conversationId: Id<"conversations">) {
       setError(null);
       setIsBooting(true);
       setSelectedFile(null);
-
-      import("@/lib/workspace/webcontainer").then(({ teardownWebContainer }) => {
-        teardownWebContainer();
-      });
     }
   }, [conversationId]);
 

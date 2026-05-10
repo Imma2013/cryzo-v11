@@ -74,7 +74,7 @@ export async function runActions(
         onOutput("\r\nTimeout: dev server did not start within 60 seconds.\r\n");
         onProgress("error");
       }
-    }, 60000);
+    }, 120000);
   } else if (!serverReadyFired) {
     onOutput("\r\nNo start command provided. Cannot start dev server.\r\n");
     onProgress("error");

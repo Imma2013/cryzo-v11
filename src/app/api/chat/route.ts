@@ -133,7 +133,17 @@ Example edit response:
 <cryzoAction type="file" filePath="src/App.tsx">
 ...complete updated file content...
 </cryzoAction>
-</cryzoArtifact>`,
+</cryzoArtifact>
+
+## ELEMENT SELECTION
+The user has an element picker tool. When they select an element on the preview, you will receive context like:
+[User selected element: <h1> with selector "h1.text-4xl" containing text "Welcome to..."]
+
+When you receive this context:
+- You know EXACTLY which element the user is referring to
+- Find that element in the source code by matching the selector/tag/text
+- Make the requested change and output an updated artifact
+- You can confidently edit the specific element without asking "which one?"`,
     messages: await convertToModelMessages(messages),
     tools,
     stopWhen: stepCountIs(10),
