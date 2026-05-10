@@ -49,14 +49,12 @@ export async function writeFiles(wc: WebContainer, actions: ArtifactAction[]) {
 export async function runCommand(
   wc: WebContainer,
   command: string,
-  onOutput: (data: string) => void,
-  timeoutMs = 120000
+  onOutput: (data: string) => void
 ): Promise<number> {
   const parts = command.trim().split(/\s+/);
   const cmd = parts.shift()!;
   const process = await wc.spawn(cmd, parts);
 
-  let done = false;
   const outputPromise = process.output.pipeTo(
     new WritableStream({
       write(data) {
@@ -65,23 +63,7 @@ export async function runCommand(
     })
   );
 
-  const exitPromise = process.exit.then((code) => {
-    done = true;
-    return code;
-  });
-
-  const timeoutPromise = new Promise<number>((_, reject) => {
-    setTimeout(() => {
-      if (!done) reject(new Error(`Command timed out after ${timeoutMs / 1000}s: ${command}`));
-    }, timeoutMs);
-  });
-
-  try {
-    const exitCode = await Promise.race([exitPromise, timeoutPromise]);
-    await outputPromise.catch(() => {});
-    return exitCode;
-  } catch (err) {
-    process.kill();
-    throw err;
-  }
+  const exitCode = await process.exit;
+  await outputPromise.catch(() => {});
+  return exitCode;
 }

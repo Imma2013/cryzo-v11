@@ -4,6 +4,15 @@ import { writeFiles, runCommand } from "./webcontainer";
 
 export type ProgressStage = "writing" | "installing" | "starting" | "ready" | "error";
 
+async function nodeModulesExist(wc: WebContainer): Promise<boolean> {
+  try {
+    await wc.fs.readdir("node_modules");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function runActions(
   wc: WebContainer,
   actions: ArtifactAction[],
@@ -31,12 +40,20 @@ export async function runActions(
     onServerReady(url);
   });
 
-  // 3. Run shell commands (npm install, etc.) — await each
+  // 3. Run shell commands — skip npm install if node_modules already exists
   onProgress("installing");
   for (const action of shellActions) {
+    const isInstall = action.content.includes("npm install") || action.content.includes("npm i");
+
+    if (isInstall && (await nodeModulesExist(wc))) {
+      onOutput("node_modules exists, skipping install.\r\n\r\n");
+      continue;
+    }
+
     onOutput(`$ ${action.content}\r\n`);
     try {
-      const exitCode = await runCommand(wc, action.content, onOutput, 120000);
+      // No timeout for install — let it run as long as needed
+      const exitCode = await runCommand(wc, action.content, onOutput);
       if (exitCode !== 0) {
         onOutput(`\r\nExited with code ${exitCode}\r\n`);
         onProgress("error");
@@ -67,14 +84,6 @@ export async function runActions(
         },
       })
     );
-
-    // Timeout: if server doesn't start in 60s, report error
-    setTimeout(() => {
-      if (!serverReadyFired) {
-        onOutput("\r\nTimeout: dev server did not start within 60 seconds.\r\n");
-        onProgress("error");
-      }
-    }, 120000);
   } else if (!serverReadyFired) {
     onOutput("\r\nNo start command provided. Cannot start dev server.\r\n");
     onProgress("error");
