@@ -1,14 +1,13 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { useChat } from "@ai-sdk/react";
-import { DefaultChatTransport, isToolUIPart, getToolName } from "ai";
-import { useQuery, useMutation } from "convex/react";
-import { api } from "../../convex/_generated/api";
-import { Id } from "../../convex/_generated/dataModel";
+import { DefaultChatTransport, isToolUIPart, getToolName, type UIMessage } from "ai";
 import { useAuth } from "@/providers/AuthProvider";
+import { useChatHistory } from "@/hooks/use-chat-history";
 import { ChatInput } from "./ChatInput";
 import { ToolCallDisplay } from "./ToolCallDisplay";
+import { Id } from "../../convex/_generated/dataModel";
 
 export function ChatArea({
   conversationId,
@@ -19,13 +18,10 @@ export function ChatArea({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [input, setInput] = useState("");
 
-  const conversation = useQuery(api.conversations.get, { id: conversationId });
-  const savedMessages = useQuery(api.messages.list, { conversationId });
-  const createMessage = useMutation(api.messages.create);
-  const updateTitle = useMutation(api.conversations.updateTitle);
-  const updateSession = useMutation(api.conversations.updateComposioSession);
+  const { conversation, loadedMessages, saveMessages, generateTitle } =
+    useChatHistory(convexUserId, conversationId);
 
-  const { messages, sendMessage, status, error } = useChat({
+  const { messages, setMessages, sendMessage, status, error } = useChat({
     id: conversationId,
     transport: new DefaultChatTransport({
       api: "/api/chat",
@@ -35,41 +31,85 @@ export function ChatArea({
         composioSessionId: conversation?.composioSessionId ?? null,
       },
     }),
-    onFinish: async ({ message }) => {
-      const textContent = message.parts
-        ?.filter((p): p is { type: "text"; text: string } => p.type === "text")
-        .map((p) => p.text)
-        .join("") || "";
-
-      await createMessage({
-        conversationId,
-        role: "assistant",
-        content: textContent,
-        toolCalls: message.parts?.filter((p) => isToolUIPart(p as any)) || undefined,
-      });
-
-      if (savedMessages && savedMessages.length <= 1 && textContent.length > 0) {
-        const title = textContent.slice(0, 50) + (textContent.length > 50 ? "..." : "");
-        await updateTitle({ id: conversationId, title });
-      }
-    },
   });
 
+  // Hydrate messages when conversation changes
+  const prevConvIdRef = useRef<string | null>(null);
+  const loadedRef = useRef(false);
+  useEffect(() => {
+    if (conversationId !== prevConvIdRef.current) {
+      prevConvIdRef.current = conversationId;
+      loadedRef.current = false;
+    }
+    if (!loadedRef.current && loadedMessages !== undefined) {
+      loadedRef.current = true;
+      if (loadedMessages.length > 0) {
+        setMessages(loadedMessages);
+      } else {
+        setMessages([]);
+      }
+    }
+  }, [conversationId, loadedMessages, setMessages]);
+
+  // Debounced save
+  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const messagesRef = useRef<UIMessage[]>(messages);
+  messagesRef.current = messages;
+
+  const debouncedSave = useCallback(() => {
+    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+    saveTimeoutRef.current = setTimeout(() => {
+      if (messagesRef.current.length > 0) {
+        saveMessages(conversationId, messagesRef.current);
+      }
+    }, 1000);
+  }, [conversationId, saveMessages]);
+
+  // Save when streaming finishes
+  const prevStatusRef = useRef(status);
+  useEffect(() => {
+    if (prevStatusRef.current === "streaming" && status === "ready") {
+      debouncedSave();
+      // Auto-title on first assistant response
+      if (conversation?.title === "New Chat") {
+        const lastAssistant = messagesRef.current
+          .filter((m) => m.role === "assistant")
+          .pop();
+        if (lastAssistant) {
+          const text =
+            lastAssistant.parts
+              ?.filter(
+                (p): p is { type: "text"; text: string } => p.type === "text"
+              )
+              .map((p) => p.text)
+              .join("") || "";
+          if (text) generateTitle(conversationId, text);
+        }
+      }
+    }
+    prevStatusRef.current = status;
+  }, [status, debouncedSave, conversation?.title, conversationId, generateTitle]);
+
+  // Save on unmount
+  useEffect(() => {
+    return () => {
+      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+      if (messagesRef.current.length > 0) {
+        saveMessages(conversationId, messagesRef.current);
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Auto-scroll
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  const handleSend = async () => {
+  const handleSend = () => {
     if (!input.trim()) return;
     const text = input;
     setInput("");
-
-    await createMessage({
-      conversationId,
-      role: "user",
-      content: text,
-    });
-
     sendMessage({ text });
   };
 
@@ -78,7 +118,7 @@ export function ChatArea({
   return (
     <div className="flex h-full flex-col">
       <div className="flex-1 overflow-y-auto p-6">
-        {messages.length === 0 && savedMessages?.length === 0 && (
+        {messages.length === 0 && (
           <div className="flex h-full items-center justify-center">
             <p className="text-zinc-500">
               Try: &quot;Star the composio repo on GitHub&quot;
@@ -103,25 +143,27 @@ export function ChatArea({
                   if (part.type === "text") {
                     return (
                       <span key={i} className="whitespace-pre-wrap">
-                        {part.text.split(/(https?:\/\/[^\s)]+)/g).map((seg, j) =>
-                          seg.match(/^https?:\/\//) ? (
-                            <a
-                              key={j}
-                              href={seg}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className={`underline ${
-                                m.role === "user"
-                                  ? "text-blue-600"
-                                  : "text-blue-400"
-                              }`}
-                            >
-                              {seg}
-                            </a>
-                          ) : (
-                            seg
-                          )
-                        )}
+                        {part.text
+                          .split(/(https?:\/\/[^\s)]+)/g)
+                          .map((seg, j) =>
+                            seg.match(/^https?:\/\//) ? (
+                              <a
+                                key={j}
+                                href={seg}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className={`underline ${
+                                  m.role === "user"
+                                    ? "text-blue-600"
+                                    : "text-blue-400"
+                                }`}
+                              >
+                                {seg}
+                              </a>
+                            ) : (
+                              seg
+                            )
+                          )}
                       </span>
                     );
                   }
@@ -133,7 +175,11 @@ export function ChatArea({
                         toolName={getToolName(toolPart)}
                         args={toolPart.input}
                         result={toolPart.output}
-                        state={toolPart.state === "output-available" ? "result" : "call"}
+                        state={
+                          toolPart.state === "output-available"
+                            ? "result"
+                            : "call"
+                        }
                       />
                     );
                   }

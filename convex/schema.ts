@@ -21,6 +21,7 @@ export default defineSchema({
     conversationId: v.id("conversations"),
     role: v.union(v.literal("user"), v.literal("assistant")),
     content: v.string(),
+    parts: v.optional(v.any()),
     toolCalls: v.optional(v.any()),
     createdAt: v.number(),
   }).index("by_conversation", ["conversationId", "createdAt"]),
