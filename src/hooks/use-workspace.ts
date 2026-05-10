@@ -128,7 +128,7 @@ export function useWorkspace(conversationId: Id<"conversations">) {
     boot();
   }, [artifacts, appendOutput, handleServerReady, handleProgress, selectedFile]);
 
-  // Apply NEW artifacts after initial boot (edits/updates)
+  // Apply NEW artifacts after initial boot (edits/updates) — files only, no shell re-run
   useEffect(() => {
     if (!artifacts || !bootedRef.current) return;
 
@@ -157,7 +157,7 @@ export function useWorkspace(conversationId: Id<"conversations">) {
         );
 
         if (fileActions.length > 0) {
-          appendOutput(`\r\nApplying ${fileActions.length} file update(s)...\r\n`);
+          appendOutput(`\r\nWriting ${fileActions.length} file(s)...\r\n`);
           await writeFiles(wc, fileActions);
           appendOutput("Done. HMR should refresh.\r\n");
 
@@ -176,9 +176,9 @@ export function useWorkspace(conversationId: Id<"conversations">) {
           });
         }
 
-        // Run shell commands if any (e.g., new dependency installs)
+        // Only run shell commands if they add NEW dependencies (not npm install again)
         const shellActions = newArtifacts.flatMap((a) =>
-          a.actions.filter((act) => act.type === "shell")
+          a.actions.filter((act) => act.type === "shell" && !act.content.includes("npm install") && !act.content.includes("npm i"))
         );
         if (shellActions.length > 0) {
           const { runCommand } = await import("@/lib/workspace/webcontainer");

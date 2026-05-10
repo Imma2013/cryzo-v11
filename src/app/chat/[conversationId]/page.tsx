@@ -42,13 +42,11 @@ export default function ConversationPage({
     setSelectedElement(info);
   }, []);
 
-  if (!workspaceOpen) {
-    return <ChatArea conversationId={id} onArtifactCreated={() => setWorkspaceOpen(true)} />;
-  }
-
+  // Always render the split layout to prevent ChatArea from remounting
+  // (remounting loses in-memory messages from useChat)
   return (
     <Group orientation="horizontal" className="h-full">
-      <Panel defaultSize={35} minSize={20}>
+      <Panel defaultSize={workspaceOpen ? 35 : 100} minSize={20}>
         <ChatArea
           conversationId={id}
           onArtifactCreated={() => setWorkspaceOpen(true)}
@@ -56,12 +54,16 @@ export default function ConversationPage({
           onElementUsed={() => setSelectedElement(null)}
         />
       </Panel>
-      <Separator className="w-1 bg-zinc-800 hover:bg-zinc-600 cursor-col-resize" />
-      <Panel defaultSize={65} minSize={30}>
-        <div className="h-full p-1">
-          <WorkspacePanel conversationId={id} onElementSelected={handleElementSelected} />
-        </div>
-      </Panel>
+      {workspaceOpen && (
+        <>
+          <Separator className="w-1 bg-zinc-800 hover:bg-zinc-600 cursor-col-resize" />
+          <Panel defaultSize={65} minSize={30}>
+            <div className="h-full p-1">
+              <WorkspacePanel conversationId={id} onElementSelected={handleElementSelected} />
+            </div>
+          </Panel>
+        </>
+      )}
     </Group>
   );
 }
