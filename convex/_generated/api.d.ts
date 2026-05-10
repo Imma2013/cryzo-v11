@@ -8,6 +8,7 @@
  * @module
  */
 
+import type * as artifacts from "../artifacts.js";
 import type * as conversations from "../conversations.js";
 import type * as messages from "../messages.js";
 import type * as users from "../users.js";
@@ -19,6 +20,7 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  artifacts: typeof artifacts;
   conversations: typeof conversations;
   messages: typeof messages;
   users: typeof users;

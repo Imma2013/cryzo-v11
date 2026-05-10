@@ -3,10 +3,14 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport, isToolUIPart, getToolName, type UIMessage } from "ai";
+import { useMutation } from "convex/react";
+import { api } from "../../convex/_generated/api";
 import { useAuth } from "@/providers/AuthProvider";
 import { useChatHistory } from "@/hooks/use-chat-history";
 import { ChatInput } from "./ChatInput";
 import { ToolCallDisplay } from "./ToolCallDisplay";
+import { ArtifactBadge } from "./ArtifactBadge";
+import { parseArtifacts } from "@/lib/workspace/artifact-parser";
 import { Id } from "../../convex/_generated/dataModel";
 
 export function ChatArea({
@@ -20,6 +24,8 @@ export function ChatArea({
 
   const { conversation, loadedMessages, saveMessages, generateTitle } =
     useChatHistory(convexUserId, conversationId);
+  const createArtifact = useMutation(api.artifacts.create);
+  const savedArtifactsRef = useRef<Set<string>>(new Set());
 
   const { messages, setMessages, sendMessage, status, error } = useChat({
     id: conversationId,
@@ -141,29 +147,51 @@ export function ChatArea({
               >
                 {m.parts?.map((part, i) => {
                   if (part.type === "text") {
+                    const { cleanText, artifacts } = parseArtifacts(part.text);
+                    // Save artifacts to Convex (deduplicated)
+                    for (const artifact of artifacts) {
+                      if (!savedArtifactsRef.current.has(artifact.id)) {
+                        savedArtifactsRef.current.add(artifact.id);
+                        createArtifact({
+                          conversationId,
+                          artifactId: artifact.id,
+                          title: artifact.title,
+                          actions: artifact.actions,
+                        });
+                      }
+                    }
                     return (
-                      <span key={i} className="whitespace-pre-wrap">
-                        {part.text
-                          .split(/(https?:\/\/[^\s)]+)/g)
-                          .map((seg, j) =>
-                            seg.match(/^https?:\/\//) ? (
-                              <a
-                                key={j}
-                                href={seg}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className={`underline ${
-                                  m.role === "user"
-                                    ? "text-blue-600"
-                                    : "text-blue-400"
-                                }`}
-                              >
-                                {seg}
-                              </a>
-                            ) : (
-                              seg
-                            )
-                          )}
+                      <span key={i}>
+                        <span className="whitespace-pre-wrap">
+                          {cleanText
+                            .split(/(https?:\/\/[^\s)]+)/g)
+                            .map((seg, j) =>
+                              seg.match(/^https?:\/\//) ? (
+                                <a
+                                  key={j}
+                                  href={seg}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className={`underline ${
+                                    m.role === "user"
+                                      ? "text-blue-600"
+                                      : "text-blue-400"
+                                  }`}
+                                >
+                                  {seg}
+                                </a>
+                              ) : (
+                                seg
+                              )
+                            )}
+                        </span>
+                        {artifacts.map((a) => (
+                          <ArtifactBadge
+                            key={a.id}
+                            title={a.title}
+                            conversationId={conversationId}
+                          />
+                        ))}
                       </span>
                     );
                   }

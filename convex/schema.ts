@@ -25,4 +25,18 @@ export default defineSchema({
     toolCalls: v.optional(v.any()),
     createdAt: v.number(),
   }).index("by_conversation", ["conversationId", "createdAt"]),
+
+  artifacts: defineTable({
+    conversationId: v.id("conversations"),
+    artifactId: v.string(),
+    title: v.string(),
+    actions: v.array(
+      v.object({
+        type: v.union(v.literal("file"), v.literal("shell"), v.literal("start")),
+        filePath: v.optional(v.string()),
+        content: v.string(),
+      })
+    ),
+    createdAt: v.number(),
+  }).index("by_conversation", ["conversationId", "createdAt"]),
 });
