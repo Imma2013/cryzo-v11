@@ -2,12 +2,18 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useChat } from "@ai-sdk/react";
-import { DefaultChatTransport, isToolUIPart, getToolName, type UIMessage } from "ai";
+import {
+  DefaultChatTransport,
+  isToolUIPart,
+  getToolName,
+  type FileUIPart,
+  type UIMessage,
+} from "ai";
 import { useMutation } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { useAuth } from "@/providers/AuthProvider";
 import { useChatHistory } from "@/hooks/use-chat-history";
-import { ChatInput } from "./ChatInput";
+import { ChatInput, type ChatMode } from "./ChatInput";
 import { ToolCallDisplay } from "./ToolCallDisplay";
 import { ArtifactBadge } from "./ArtifactBadge";
 import { parseArtifacts } from "@/lib/workspace/artifact-parser";
@@ -28,13 +34,18 @@ export function ChatArea({
   const { convexUserId } = useAuth();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [input, setInput] = useState("");
+  const [optimisticMode, setOptimisticMode] = useState<{
+    conversationId: string;
+    mode: ChatMode;
+  } | null>(null);
 
   const { conversation, loadedMessages, saveMessages, generateTitle } =
     useChatHistory(convexUserId, conversationId);
   const createArtifact = useMutation(api.artifacts.create);
+  const updateChatMode = useMutation(api.conversations.updateChatMode);
   const savedArtifactsRef = useRef<Set<string>>(new Set());
 
-  const { messages, setMessages, sendMessage, status, error } = useChat({
+  const { messages, setMessages, sendMessage, stop, status, error } = useChat({
     id: conversationId,
     transport: new DefaultChatTransport({
       api: "/api/chat",
@@ -45,6 +56,11 @@ export function ChatArea({
       },
     }),
   });
+
+  const chatMode =
+    optimisticMode?.conversationId === conversationId
+      ? optimisticMode.mode
+      : conversation?.chatMode ?? "build";
 
   // Hydrate messages when conversation changes
   const prevConvIdRef = useRef<string | null>(null);
@@ -67,7 +83,10 @@ export function ChatArea({
   // Debounced save
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const messagesRef = useRef<UIMessage[]>(messages);
-  messagesRef.current = messages;
+
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
 
   const debouncedSave = useCallback(() => {
     if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
@@ -119,9 +138,57 @@ export function ChatArea({
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  const handleSend = () => {
-    if (!input.trim()) return;
-    let text = input;
+  useEffect(() => {
+    for (const message of messages) {
+      if (message.role !== "assistant") continue;
+
+      for (const part of message.parts ?? []) {
+        if (part.type !== "text") continue;
+
+        const { artifacts } = parseArtifacts(part.text);
+        for (const artifact of artifacts) {
+          if (savedArtifactsRef.current.has(artifact.id)) continue;
+
+          savedArtifactsRef.current.add(artifact.id);
+          createArtifact({
+            conversationId,
+            artifactId: artifact.id,
+            title: artifact.title,
+            actions: artifact.actions,
+          });
+          onArtifactCreated?.();
+        }
+      }
+    }
+  }, [messages, conversationId, createArtifact, onArtifactCreated]);
+
+  const handleChatModeChange = useCallback(
+    (mode: ChatMode) => {
+      setOptimisticMode({ conversationId, mode });
+      updateChatMode({ id: conversationId, chatMode: mode });
+    },
+    [conversationId, updateChatMode]
+  );
+
+  const fileToUIPart = async (file: File): Promise<FileUIPart> => {
+    const url = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(file);
+    });
+
+    return {
+      type: "file",
+      mediaType: file.type || "application/octet-stream",
+      filename: file.name,
+      url,
+    };
+  };
+
+  const handleSend = async (files: File[] = []) => {
+    if (!input.trim() && files.length === 0) return;
+    let text = input.trim();
 
     // Inject selected element context so AI knows what to edit
     if (selectedElement) {
@@ -129,8 +196,17 @@ export function ChatArea({
       onElementUsed?.();
     }
 
+    if (!text && files.length > 0) {
+      text = "Use the attached image as context.";
+    }
+
+    const fileParts = await Promise.all(files.map(fileToUIPart));
+
     setInput("");
-    sendMessage({ text });
+    await sendMessage(
+      fileParts.length > 0 ? { text, files: fileParts } : { text },
+      { body: { chatMode } }
+    );
   };
 
   const isLoading = status === "streaming" || status === "submitted";
@@ -162,19 +238,6 @@ export function ChatArea({
                 {m.parts?.map((part, i) => {
                   if (part.type === "text") {
                     const { cleanText, artifacts, isStreaming, streamingTitle, streamingFiles } = parseArtifacts(part.text);
-                    // Save artifacts to Convex (deduplicated)
-                    for (const artifact of artifacts) {
-                      if (!savedArtifactsRef.current.has(artifact.id)) {
-                        savedArtifactsRef.current.add(artifact.id);
-                        createArtifact({
-                          conversationId,
-                          artifactId: artifact.id,
-                          title: artifact.title,
-                          actions: artifact.actions,
-                        });
-                        onArtifactCreated?.();
-                      }
-                    }
                     return (
                       <span key={i}>
                         <span className="whitespace-pre-wrap">
@@ -224,16 +287,28 @@ export function ChatArea({
                       </span>
                     );
                   }
-                  if (isToolUIPart(part as any)) {
-                    const toolPart = part as any;
+                  if (part.type === "file") {
+                    const isImage = part.mediaType.startsWith("image/");
+                    if (!isImage) return null;
+
+                    return (
+                      <img
+                        key={i}
+                        src={part.url}
+                        alt={part.filename ?? "Attached image"}
+                        className="mb-2 max-h-64 rounded-lg border border-zinc-700 object-contain"
+                      />
+                    );
+                  }
+                  if (isToolUIPart(part)) {
                     return (
                       <ToolCallDisplay
                         key={i}
-                        toolName={getToolName(toolPart)}
-                        args={toolPart.input}
-                        result={toolPart.output}
+                        toolName={getToolName(part)}
+                        args={part.input}
+                        result={part.output}
                         state={
-                          toolPart.state === "output-available"
+                          part.state === "output-available"
                             ? "result"
                             : "call"
                         }
@@ -275,7 +350,11 @@ export function ChatArea({
         value={input}
         onChange={setInput}
         onSubmit={handleSend}
-        disabled={isLoading}
+        onStop={stop}
+        isLoading={isLoading}
+        disabled={!convexUserId}
+        chatMode={chatMode}
+        onChatModeChange={handleChatModeChange}
       />
     </div>
   );

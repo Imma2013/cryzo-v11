@@ -40,6 +40,19 @@ export const updateTitle = mutation({
   },
 });
 
+export const updateChatMode = mutation({
+  args: {
+    id: v.id("conversations"),
+    chatMode: v.union(v.literal("build"), v.literal("plan")),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.id, {
+      chatMode: args.chatMode,
+      updatedAt: Date.now(),
+    });
+  },
+});
+
 export const updateComposioSession = mutation({
   args: { id: v.id("conversations"), composioSessionId: v.string() },
   handler: async (ctx, args) => {

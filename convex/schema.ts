@@ -12,6 +12,7 @@ export default defineSchema({
   conversations: defineTable({
     userId: v.id("users"),
     title: v.string(),
+    chatMode: v.optional(v.union(v.literal("build"), v.literal("plan"))),
     composioSessionId: v.union(v.string(), v.null()),
     createdAt: v.number(),
     updatedAt: v.number(),

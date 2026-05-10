@@ -60,11 +60,51 @@ function loadRecipeContent(slug: string): string {
 export const dynamic = "force-dynamic";
 
 export async function POST(req: Request) {
-  const { messages, userId, composioSessionId } = await req.json() as {
+  const { messages, userId, composioSessionId, chatMode } = await req.json() as {
     messages: UIMessage[];
     userId: string;
     composioSessionId: string | null;
+    chatMode?: "build" | "plan";
   };
+  const mode = chatMode === "plan" ? "plan" : "build";
+
+  // Pick and load design recipe based on user's latest message
+  const lastUserMsg = messages.filter((m) => m.role === "user").pop();
+  const lastUserText =
+    lastUserMsg?.parts
+      ?.filter((p) => p.type === "text")
+      .map((p) => p.text)
+      .join(" ") || "";
+  const recipeSlug = pickDesignRecipe(lastUserText);
+  const recipeContent = recipeSlug ? loadRecipeContent(recipeSlug) : "";
+  const recipeBlock = recipeContent
+    ? `\n\n## ACTIVE DESIGN RECIPE — FOLLOW AS BINDING GUIDANCE (selected: ${recipeSlug})\n${recipeContent}\n\nCRITICAL: The above recipe controls your composition, typography attitude, palette behavior, section structure, imagery approach, and CTA styling. Do NOT deviate into generic startup template patterns. The output must be recognizably native to this reference family.`
+    : "";
+
+  if (mode === "plan") {
+    const result = streamText({
+      model: openai("gpt-5.4"),
+      system: `You are Cryzo in Plan mode.
+
+Plan mode is for discussion, requirements, tradeoffs, debugging strategy, and implementation plans.
+
+Rules:
+- Do NOT call tools.
+- Do NOT output <cryzoArtifact> or <cryzoAction> tags.
+- Do NOT generate full code files unless the user explicitly asks for a small explanatory snippet.
+- For build requests, produce a concise implementation plan with concrete steps and acceptance checks.
+- If the user wants execution, tell them to switch to Build mode.
+- You may analyze attached images as visual context and reference them in your plan.${recipeBlock}`,
+      messages: await convertToModelMessages(messages),
+      stopWhen: stepCountIs(5),
+    });
+
+    return result.toUIMessageStreamResponse({
+      headers: composioSessionId
+        ? { "x-composio-session-id": composioSessionId }
+        : undefined,
+    });
+  }
 
   const client = getComposio();
   const session = composioSessionId
@@ -72,15 +112,6 @@ export async function POST(req: Request) {
     : await client.create(userId || "anonymous");
 
   const tools = await session.tools();
-
-  // Pick and load design recipe based on user's latest message
-  const lastUserMsg = messages.filter((m) => m.role === "user").pop();
-  const lastUserText = lastUserMsg?.parts?.filter((p: any) => p.type === "text").map((p: any) => p.text).join(" ") || "";
-  const recipeSlug = pickDesignRecipe(lastUserText);
-  const recipeContent = recipeSlug ? loadRecipeContent(recipeSlug) : "";
-  const recipeBlock = recipeContent
-    ? `\n\n## ACTIVE DESIGN RECIPE — FOLLOW AS BINDING GUIDANCE (selected: ${recipeSlug})\n${recipeContent}\n\nCRITICAL: The above recipe controls your composition, typography attitude, palette behavior, section structure, imagery approach, and CTA styling. Do NOT deviate into generic startup template patterns. The output must be recognizably native to this reference family.`
-    : "";
 
   const result = streamText({
     model: openai("gpt-5.4"),
