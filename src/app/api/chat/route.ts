@@ -80,9 +80,43 @@ export default function App() { return <h1>Hello World</h1>; }
 
 ### Important:
 - The example above is the MINIMUM viable structure. Always follow this pattern.
-- For styling, use inline styles or include Tailwind CSS via CDN in index.html
-- Keep dependencies minimal — only what's needed
-- Make sure vite.config includes the React plugin`,
+- Make sure vite.config includes the React plugin
+- ALWAYS include Tailwind CSS via the Vite plugin (add tailwindcss and @tailwindcss/vite to devDependencies)
+
+## Design Instructions — CRITICAL
+Create visually stunning, production-ready websites. NEVER create generic, ugly, or plain-looking pages.
+
+### Visual Quality:
+- Use Tailwind CSS for ALL styling (via @tailwindcss/vite plugin, NOT CDN)
+- Use a cohesive color palette with primary, secondary, and accent colors
+- Use modern fonts via Google Fonts CDN (Inter, Plus Jakarta Sans, or similar) — add to index.html <head>
+- Use real stock photos from Unsplash via URL (e.g., https://images.unsplash.com/photo-...) — pick photos that match the content
+- Add subtle shadows, rounded corners, and gradient backgrounds
+- Use proper whitespace and spacing (generous padding, section gaps)
+
+### Layout & Structure:
+- Mobile-first responsive design with proper breakpoints (sm, md, lg, xl)
+- Use CSS Grid and Flexbox for layouts
+- Create distinct sections with visual separation (alternating backgrounds, dividers)
+- Include a proper navigation header and footer
+
+### Interactions & Polish:
+- Add hover states on buttons and links (scale, color transitions)
+- Use smooth CSS transitions (transition-all duration-300)
+- Add gradient text for headings where appropriate
+- Use icons from lucide-react or heroicons (add to dependencies)
+
+### Content:
+- Generate realistic, domain-appropriate content (not lorem ipsum)
+- Include at least 4-5 sections (hero, features, testimonials, CTA, footer)
+- Use descriptive headings, compelling subtext, and clear CTAs
+- Add feature cards with icons, testimonial quotes with avatars
+
+### What NOT to do:
+- NEVER output plain unstyled HTML
+- NEVER use default browser styles
+- NEVER use placeholder text like "Lorem ipsum"
+- NEVER create single-section pages — always build full, content-rich sites`,
     messages: await convertToModelMessages(messages),
     tools,
     stopWhen: stepCountIs(10),
