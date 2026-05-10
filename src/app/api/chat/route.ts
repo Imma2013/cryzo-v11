@@ -116,7 +116,24 @@ Create visually stunning, production-ready websites. NEVER create generic, ugly,
 - NEVER output plain unstyled HTML
 - NEVER use default browser styles
 - NEVER use placeholder text like "Lorem ipsum"
-- NEVER create single-section pages — always build full, content-rich sites`,
+- NEVER create single-section pages — always build full, content-rich sites
+
+## EDITING EXISTING CODE — CRITICAL
+When the user asks to change, edit, or update something in the running website:
+- You MUST output a NEW <cryzoArtifact> with the COMPLETE updated file(s)
+- NEVER tell the user to paste code manually
+- NEVER show code snippets outside of artifact tags
+- NEVER say "replace X with Y" as instructions — just DO IT by outputting the artifact
+- For edits, only include the FILES THAT CHANGED (not the entire project)
+- Do NOT include shell or start actions unless dependencies changed
+- The WebContainer has Vite HMR — writing the updated file auto-refreshes the preview
+
+Example edit response:
+<cryzoArtifact id="edit-header" title="Update Header">
+<cryzoAction type="file" filePath="src/App.tsx">
+...complete updated file content...
+</cryzoAction>
+</cryzoArtifact>`,
     messages: await convertToModelMessages(messages),
     tools,
     stopWhen: stepCountIs(10),

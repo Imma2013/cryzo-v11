@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { Id } from "../../convex/_generated/dataModel";
@@ -69,6 +69,10 @@ export function useWorkspace(conversationId: Id<"conversations">) {
     }
   }, []);
 
+  // Track which artifacts have been applied
+  const appliedArtifactsRef = useRef<Set<string>>(new Set());
+
+  // Initial boot — only runs once
   useEffect(() => {
     if (!artifacts || artifacts.length === 0 || bootedRef.current) return;
     bootedRef.current = true;
@@ -86,6 +90,11 @@ export function useWorkspace(conversationId: Id<"conversations">) {
         appendOutput("WebContainer ready.\r\n\r\n");
 
         const allActions: ArtifactAction[] = artifacts.flatMap((a) => a.actions);
+
+        // Mark all current artifacts as applied
+        for (const a of artifacts) {
+          appliedArtifactsRef.current.add(a._id);
+        }
 
         // Build file map
         const fileMap: FileMap = {};
@@ -118,6 +127,73 @@ export function useWorkspace(conversationId: Id<"conversations">) {
 
     boot();
   }, [artifacts, appendOutput, handleServerReady, handleProgress, selectedFile]);
+
+  // Apply NEW artifacts after initial boot (edits/updates)
+  useEffect(() => {
+    if (!artifacts || !bootedRef.current) return;
+
+    const newArtifacts = artifacts.filter(
+      (a) => !appliedArtifactsRef.current.has(a._id)
+    );
+    if (newArtifacts.length === 0) return;
+
+    // Mark as applied immediately to prevent double-apply
+    for (const a of newArtifacts) {
+      appliedArtifactsRef.current.add(a._id);
+    }
+
+    const applyUpdates = async () => {
+      const { getWebContainer, writeFiles } = await import(
+        "@/lib/workspace/webcontainer"
+      );
+
+      try {
+        const wc = await getWebContainer();
+        const fileActions = newArtifacts.flatMap((a) =>
+          a.actions.filter(
+            (act): act is ArtifactAction & { filePath: string } =>
+              act.type === "file" && !!act.filePath
+          )
+        );
+
+        if (fileActions.length > 0) {
+          appendOutput(`\r\nApplying ${fileActions.length} file update(s)...\r\n`);
+          await writeFiles(wc, fileActions);
+          appendOutput("Done. HMR should refresh.\r\n");
+
+          // Update file map
+          setFiles((prev) => {
+            const next = { ...prev };
+            for (const action of fileActions) {
+              next[action.filePath] = { type: "file", content: action.content };
+              const parts = action.filePath.split("/");
+              for (let i = 1; i < parts.length; i++) {
+                const dir = parts.slice(0, i).join("/");
+                if (!next[dir]) next[dir] = { type: "folder" };
+              }
+            }
+            return next;
+          });
+        }
+
+        // Run shell commands if any (e.g., new dependency installs)
+        const shellActions = newArtifacts.flatMap((a) =>
+          a.actions.filter((act) => act.type === "shell")
+        );
+        if (shellActions.length > 0) {
+          const { runCommand } = await import("@/lib/workspace/webcontainer");
+          for (const action of shellActions) {
+            appendOutput(`\r\n$ ${action.content}\r\n`);
+            await runCommand(wc, action.content, appendOutput);
+          }
+        }
+      } catch (err: any) {
+        appendOutput(`\r\nError applying update: ${err.message}\r\n`);
+      }
+    };
+
+    applyUpdates();
+  }, [artifacts, appendOutput]);
 
   return {
     files,
