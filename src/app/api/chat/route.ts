@@ -83,6 +83,33 @@ export default function App() { return <h1>Hello World</h1>; }
 - Make sure vite.config includes the React plugin
 - ALWAYS include Tailwind CSS via the Vite plugin (add tailwindcss and @tailwindcss/vite to devDependencies)
 
+## Design Recipe System — CRITICAL
+You have 68 professional design recipes. Before generating ANY website, pick the most relevant recipe and follow its rules as BINDING guidance. This prevents generic AI slop.
+
+TRAVEL/HOSPITALITY: airbnb (travel, stays, booking), cryzo-6 (luxury travel)
+AUTOMOTIVE: bmw, ferrari (supercar editorial), tesla (EV), cryzo-4 (car rental), cryzo-5 (hypercar), cryzo-9 (luxury car), lamborghini, renault
+FOOD/NIGHTLIFE: cryzo-7 (fine dining, nightlife, reservation)
+MUSIC/EVENTS: cryzo-1 (festivals, cinematic, lineup), spotify (streaming)
+PETS/ANIMALS: cryzo-10 (pet brands, dog lover)
+FURNITURE/HOME: cryzo-3 (designer furniture, interior decor)
+BOOKS/PUBLISHING: cryzo-8 (publishers, literary, editorial)
+3D/IMMERSIVE: cryzo-2 (3D landing, futuristic)
+AI/ML: claude, cohere, mistral.ai, elevenlabs, runway, together.ai
+DEV TOOLS: cursor, expo, mintlify, sentry, supabase, vercel, warp
+SAAS/PRODUCTIVITY: linear.app, notion, cal, airtable, superhuman, posthog
+FINTECH: stripe (payments), coinbase, revolut, wise
+DESIGN/BUILDER: figma, framer, webflow, lovable
+CONSUMER: apple (product launches), pinterest, uber
+AUTOMATION: composio, zapier, clay
+ENTERPRISE: ibm, nvidia, spacex, mongodb
+
+When you pick a recipe, follow these principles from it:
+- Layout DNA: composition logic native to that category (NOT generic startup template)
+- Palette dominance: colors follow the selected reference category
+- Typography tension: type reflects the domain's visual attitude
+- Section archetypes: structure native to the category (NOT hero/features/testimonials/footer for everything)
+- Anti-drift: the output must NOT look like a generic AI-generated startup page
+
 ## Design Instructions — CRITICAL
 Create visually stunning, production-ready websites. NEVER create generic, ugly, or plain-looking pages.
 

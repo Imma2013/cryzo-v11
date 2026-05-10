@@ -1,0 +1,77 @@
+{
+  "slug": "linear.app",
+  "title": "Linear",
+  "visualIntent": "A premium product-work system with surgical hierarchy, minimal surfaces, and velocity-oriented product clarity.",
+  "compositionRecipes": [
+    {
+      "id": "default",
+      "label": "Linear default",
+      "whenToUse": "Use this as the default build recipe whenever Linear is the locked primary reference.",
+      "heroStructure": "Build a technical product hero around one crisp product frame or UI surface, with severe hierarchy and no decorative lifestyle composition.",
+      "sectionOrder": [
+        "Technical product hero.",
+        "Platform capability or workflow explainer band.",
+        "Proof, ecosystem, or integration chapter.",
+        "Focused product CTA close."
+      ],
+      "headlineImageRelationship": "Keep the headline structurally tied to the product surface or code frame, but avoid loud overlap that would make the page feel editorial instead of technical.",
+      "layeringRules": [
+        "Keep layering sparse and exact so the product remains dominant and the composition stays severe.",
+        "Use one dominant foreground relationship and one subordinate supporting layer; do not stack decorative layers without purpose.",
+        "Every overlap, crop, or z-index shift should strengthen the selected reference rather than adding generic drama."
+      ],
+      "typeScaleRelationship": "Keep scale controlled and deliberate so one product frame or one precise headline leads the page.",
+      "paletteDistribution": "Palette dominance should stay restrained, tonal, and disciplined, with accent color used sparingly.",
+      "imageFraming": "Imagery should privilege product surfaces, code-adjacent UI, diagrams, or technical framing over lifestyle stock scenes.",
+      "asymmetry": "Keep asymmetry restrained and category-correct rather than theatrical for its own sake.",
+      "ctaPosture": "Keep CTAs sparse, exact, and product-native."
+    }
+  ],
+  "headlineImageRelationships": [
+    "Keep the headline structurally tied to the product surface or code frame, but avoid loud overlap that would make the page feel editorial instead of technical."
+  ],
+  "layeringRules": [
+    "Keep layering sparse and exact so the product remains dominant and the composition stays severe.",
+    "Use one dominant foreground relationship and one subordinate supporting layer; do not stack decorative layers without purpose.",
+    "Every overlap, crop, or z-index shift should strengthen the selected reference rather than adding generic drama."
+  ],
+  "typeSystemBehavior": [
+    "Use typography to reinforce the product category and reference family rather than generic startup-safe hierarchy.",
+    "Keep the type system restrained, exact, and highly disciplined.",
+    "Keep supporting typography crisp, technical, and structurally informative."
+  ],
+  "paletteBehavior": [
+    "Palette dominance should stay restrained, tonal, and disciplined, with accent color used sparingly.",
+    "Use color to support hierarchy and domain clarity before decoration.",
+    "Keep accents sparse and product-led rather than cinematic or lifestyle-driven."
+  ],
+  "sectionSkeletons": [
+    "Technical product hero.",
+    "Platform capability or workflow explainer band.",
+    "Proof, ecosystem, or integration chapter.",
+    "Focused product CTA close."
+  ],
+  "antiPatterns": [
+    "Do not normalize the selected reference into a tidier generic startup homepage just because the prompt is broad.",
+    "Do not drift into friendly bubbly consumer styling.",
+    "Do not drift into heavy editorial moodboards.",
+    "Do not drift into generic purple AI hero pages.",
+    "Do not let runtime overrides overpower the selected primary reference."
+  ],
+  "allowedVariation": [
+    "Content, brand naming, and product specifics may change freely as long as the composition DNA remains recognizably native to the selected reference family.",
+    "You may vary product details and supporting section order, but not the core restraint or system logic of the reference.",
+    "Do not use variety as an excuse to fall back to generic AI-generated landing-page patterns."
+  ],
+  "exemplarCues": [
+    {
+      "id": "technical-product-frame",
+      "label": "Technical product framing",
+      "cues": [
+        "Use crisp product surfaces or code-adjacent frames as the hero anchor.",
+        "Favor modular product chapters over decorative storytelling.",
+        "Keep the system exact, sparse, and structurally legible."
+      ]
+    }
+  ]
+}

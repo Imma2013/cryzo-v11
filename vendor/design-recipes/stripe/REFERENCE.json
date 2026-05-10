@@ -1,0 +1,75 @@
+{
+  "slug": "stripe",
+  "title": "Stripe",
+  "visualIntent": "A developer-fintech system with precise hierarchy, confident product explanation, modular sections, and quiet technical polish.",
+  "compositionRecipes": [
+    {
+      "id": "default",
+      "label": "Stripe default",
+      "whenToUse": "Use this as the default build recipe whenever Stripe is the locked primary reference.",
+      "heroStructure": "Build a technical product hero around one crisp product frame or UI surface, with severe hierarchy and no decorative lifestyle composition.",
+      "sectionOrder": [
+        "Trust-heavy product hero with headline, subcopy, and precise CTA structure.",
+        "Modular platform or workflow explainer sections.",
+        "Infrastructure, API, or payments network proof bands.",
+        "Credibility close with ecosystem, metrics, or enterprise trust signals."
+      ],
+      "headlineImageRelationship": "Keep the headline structurally tied to the product surface or code frame, but avoid loud overlap that would make the page feel editorial instead of technical.",
+      "layeringRules": [
+        "Keep layering sparse and exact so the product remains dominant and the composition stays severe.",
+        "Use one dominant foreground relationship and one subordinate supporting layer; do not stack decorative layers without purpose.",
+        "Every overlap, crop, or z-index shift should strengthen the selected reference rather than adding generic drama."
+      ],
+      "typeScaleRelationship": "Keep scale controlled and deliberate so one product frame or one precise headline leads the page.",
+      "paletteDistribution": "Palette dominance should clearly follow the selected reference category rather than a default purple-on-dark fallback.",
+      "imageFraming": "Imagery should privilege product surfaces, code-adjacent UI, diagrams, or technical framing over lifestyle stock scenes.",
+      "asymmetry": "Keep asymmetry restrained and category-correct rather than theatrical for its own sake.",
+      "ctaPosture": "Keep CTAs sparse, exact, and product-native."
+    }
+  ],
+  "headlineImageRelationships": [
+    "Keep the headline structurally tied to the product surface or code frame, but avoid loud overlap that would make the page feel editorial instead of technical."
+  ],
+  "layeringRules": [
+    "Keep layering sparse and exact so the product remains dominant and the composition stays severe.",
+    "Use one dominant foreground relationship and one subordinate supporting layer; do not stack decorative layers without purpose.",
+    "Every overlap, crop, or z-index shift should strengthen the selected reference rather than adding generic drama."
+  ],
+  "typeSystemBehavior": [
+    "Use typography to reinforce the product category and reference family rather than generic startup-safe hierarchy.",
+    "Keep the type system restrained, exact, and highly disciplined.",
+    "Keep supporting typography crisp, technical, and structurally informative."
+  ],
+  "paletteBehavior": [
+    "Palette dominance should clearly follow the selected reference category rather than a default purple-on-dark fallback.",
+    "Use color to support hierarchy and domain clarity before decoration.",
+    "Keep accents sparse and product-led rather than cinematic or lifestyle-driven."
+  ],
+  "sectionSkeletons": [
+    "Trust-heavy product hero with headline, subcopy, and precise CTA structure.",
+    "Modular platform or workflow explainer sections.",
+    "Infrastructure, API, or payments network proof bands.",
+    "Credibility close with ecosystem, metrics, or enterprise trust signals."
+  ],
+  "antiPatterns": [
+    "Do not turn Stripe into a moody AI brand world or editorial luxury magazine.",
+    "Do not let decorative gradients replace product clarity.",
+    "Do not flatten everything into one hero plus generic three-column features."
+  ],
+  "allowedVariation": [
+    "Content, brand naming, and product specifics may change freely as long as the composition DNA remains recognizably native to the selected reference family.",
+    "You may vary product details and supporting section order, but not the core restraint or system logic of the reference.",
+    "Do not use variety as an excuse to fall back to generic AI-generated landing-page patterns."
+  ],
+  "exemplarCues": [
+    {
+      "id": "technical-product-frame",
+      "label": "Technical product framing",
+      "cues": [
+        "Use crisp product surfaces or code-adjacent frames as the hero anchor.",
+        "Favor modular product chapters over decorative storytelling.",
+        "Keep the system exact, sparse, and structurally legible."
+      ]
+    }
+  ]
+}

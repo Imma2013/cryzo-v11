@@ -1,0 +1,78 @@
+{
+  "slug": "cryzo-3",
+  "title": "Cryzo 3",
+  "visualIntent": "The Cryzo furniture-showcase lane: tactile, showroom-led, editorial, soft-luxury, and object-focused.",
+  "compositionRecipes": [
+    {
+      "id": "default",
+      "label": "Cryzo 3 default",
+      "whenToUse": "Use this as the default build recipe whenever Cryzo 3 is the locked primary reference.",
+      "heroStructure": "Build a chapter-like hero with one dominant visual field, aggressive display hierarchy, and enough compositional tension that the page cannot be mistaken for a generic startup homepage.",
+      "sectionOrder": [
+        "Scene-setting hero chapter.",
+        "Editorial story or manifesto section.",
+        "Collection, showcase, or narrative spread.",
+        "Closing chapter that preserves the reference tone."
+      ],
+      "headlineImageRelationship": "Allow direct overlap or hard adjacency between headline and imagery when that preserves the reference tension; do not split them into disconnected polite columns.",
+      "layeringRules": [
+        "Use overlap, crop tension, or chapter-field layering to keep the composition visibly art-directed.",
+        "Use one dominant foreground relationship and one subordinate supporting layer; do not stack decorative layers without purpose.",
+        "Every overlap, crop, or z-index shift should strengthen the selected reference rather than adding generic drama."
+      ],
+      "typeScaleRelationship": "Use at least one oversized moment that sets the emotional scale before explanatory content arrives.",
+      "paletteDistribution": "Palette dominance should clearly follow the selected reference category rather than a default purple-on-dark fallback.",
+      "imageFraming": "Imagery should behave like part of the design system's DNA, not a last-minute decorative filler layer.",
+      "asymmetry": "Allow tension, crop pressure, and asymmetry when it preserves the reference family.",
+      "ctaPosture": "Make CTAs feel native to the reference family instead of generic bright buttons."
+    }
+  ],
+  "headlineImageRelationships": [
+    "Allow direct overlap or hard adjacency between headline and imagery when that preserves the reference tension; do not split them into disconnected polite columns."
+  ],
+  "layeringRules": [
+    "Use overlap, crop tension, or chapter-field layering to keep the composition visibly art-directed.",
+    "Use one dominant foreground relationship and one subordinate supporting layer; do not stack decorative layers without purpose.",
+    "Every overlap, crop, or z-index shift should strengthen the selected reference rather than adding generic drama."
+  ],
+  "typeSystemBehavior": [
+    "Use display type with visible scale tension and chapter rhythm instead of evenly weighted marketing hierarchy.",
+    "Allow one or two dominant type moments to set the emotional scale of the page.",
+    "Keep supporting typography subordinate to the primary visual system instead of flattening everything into one neutral sans rhythm."
+  ],
+  "paletteBehavior": [
+    "Palette dominance should clearly follow the selected reference category rather than a default purple-on-dark fallback.",
+    "Use color as a real field or chapter device, not just an accent sprinkled over otherwise generic layout.",
+    "Keep palette choices visibly native to the selected reference family."
+  ],
+  "sectionSkeletons": [
+    "Scene-setting hero chapter.",
+    "Editorial story or manifesto section.",
+    "Collection, showcase, or narrative spread.",
+    "Closing chapter that preserves the reference tone."
+  ],
+  "antiPatterns": [
+    "Do not normalize the selected reference into a tidier generic startup homepage just because the prompt is broad.",
+    "Do not drift into generic ecommerce grids.",
+    "Do not drift into hard-tech developer styling.",
+    "Do not drift into automotive or festival energy.",
+    "Do not flatten the page into balanced cards and polite spacing if the reference depends on tension.",
+    "Do not let runtime overrides overpower the selected primary reference."
+  ],
+  "allowedVariation": [
+    "Content, brand naming, and product specifics may change freely as long as the composition DNA remains recognizably native to the selected reference family.",
+    "You may vary the exact crop, chapter sequencing, or copy cadence, but the page must stay visibly editorial and reference-led.",
+    "Do not use variety as an excuse to fall back to generic AI-generated landing-page patterns."
+  ],
+  "exemplarCues": [
+    {
+      "id": "editorial-hero",
+      "label": "Editorial hero composition",
+      "cues": [
+        "Use one dominant image field and one dominant display-type move.",
+        "Keep the composition tense enough that it avoids generic startup symmetry.",
+        "Let section rhythm feel chaptered rather than repetitively modular."
+      ]
+    }
+  ]
+}

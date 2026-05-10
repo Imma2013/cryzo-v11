@@ -1,0 +1,74 @@
+{
+  "slug": "nvidia",
+  "title": "Nvidia",
+  "visualIntent": "Nvidia should be treated as a category-correct reference system for ai, developer, hardware, using technical, futuristic as the guiding visual attitude.",
+  "compositionRecipes": [
+    {
+      "id": "default",
+      "label": "Nvidia default",
+      "whenToUse": "Use this as the default build recipe whenever Nvidia is the locked primary reference.",
+      "heroStructure": "Build a keynote-style hero anchored by one dominant product object, quiet negative space, and a compact copy block that frames the object rather than competing with it.",
+      "sectionOrder": [
+        "Keynote-style hero focused on one product object.",
+        "Capability bands or product detail callouts.",
+        "Gallery, finish, or ecosystem story section.",
+        "Purchase, compare, or learn-more close."
+      ],
+      "headlineImageRelationship": "Keep the headline framing the product from above, beside, or just over the object with disciplined restraint; only use overlap when it strengthens the product keynote feel.",
+      "layeringRules": [
+        "Use one dominant foreground relationship and one subordinate supporting layer; do not stack decorative layers without purpose.",
+        "Every overlap, crop, or z-index shift should strengthen the selected reference rather than adding generic drama."
+      ],
+      "typeScaleRelationship": "Use hierarchy with obvious focal moments instead of evenly weighted generic sections.",
+      "paletteDistribution": "Palette dominance should clearly follow the selected reference category rather than a default purple-on-dark fallback.",
+      "imageFraming": "Imagery should center the product object and make the hardware feel tangible, premium, and hero-worthy.",
+      "asymmetry": "Keep asymmetry restrained and category-correct rather than theatrical for its own sake.",
+      "ctaPosture": "Keep CTAs sparse, exact, and product-native."
+    }
+  ],
+  "headlineImageRelationships": [
+    "Keep the headline framing the product from above, beside, or just over the object with disciplined restraint; only use overlap when it strengthens the product keynote feel."
+  ],
+  "layeringRules": [
+    "Use one dominant foreground relationship and one subordinate supporting layer; do not stack decorative layers without purpose.",
+    "Every overlap, crop, or z-index shift should strengthen the selected reference rather than adding generic drama."
+  ],
+  "typeSystemBehavior": [
+    "Use typography to reinforce the product category and reference family rather than generic startup-safe hierarchy.",
+    "Allow one or two dominant type moments to set the emotional scale of the page.",
+    "Keep supporting typography crisp, technical, and structurally informative."
+  ],
+  "paletteBehavior": [
+    "Palette dominance should clearly follow the selected reference category rather than a default purple-on-dark fallback.",
+    "Use color to support hierarchy and domain clarity before decoration.",
+    "Keep accents sparse and product-led rather than cinematic or lifestyle-driven."
+  ],
+  "sectionSkeletons": [
+    "Keynote-style hero focused on one product object.",
+    "Capability bands or product detail callouts.",
+    "Gallery, finish, or ecosystem story section.",
+    "Purchase, compare, or learn-more close."
+  ],
+  "antiPatterns": [
+    "Do not normalize the selected reference into a tidier generic startup homepage just because the prompt is broad.",
+    "Do not drift into generic AI-generated SaaS hero stacks.",
+    "Do not drift into purple-on-dark Bolt defaults.",
+    "Do not let runtime overrides overpower the selected primary reference."
+  ],
+  "allowedVariation": [
+    "Content, brand naming, and product specifics may change freely as long as the composition DNA remains recognizably native to the selected reference family.",
+    "You may vary product details and supporting section order, but not the core restraint or system logic of the reference.",
+    "Do not use variety as an excuse to fall back to generic AI-generated landing-page patterns."
+  ],
+  "exemplarCues": [
+    {
+      "id": "keynote-object",
+      "label": "Keynote object framing",
+      "cues": [
+        "One hero object dominates the viewport.",
+        "Headline and copy frame the object with severe restraint.",
+        "Supporting sections stay quieter than the hero."
+      ]
+    }
+  ]
+}

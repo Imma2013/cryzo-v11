@@ -1,0 +1,75 @@
+{
+  "slug": "apple",
+  "title": "Apple",
+  "visualIntent": "A launch-first consumer hardware system built on obsessive restraint, oversized product imagery, near-silent chrome, and premium confidence.",
+  "compositionRecipes": [
+    {
+      "id": "default",
+      "label": "Apple default",
+      "whenToUse": "Use this as the default build recipe whenever Apple is the locked primary reference.",
+      "heroStructure": "Build a keynote-style hero anchored by one dominant product object, quiet negative space, and a compact copy block that frames the object rather than competing with it.",
+      "sectionOrder": [
+        "Hero keynote frame with one product image and one dominant statement.",
+        "Focused product detail bands or capability callouts with careful hierarchy.",
+        "Cinematic product gallery or finish/color story section.",
+        "Quiet purchase, compare, or learn-more close instead of a noisy CTA wall."
+      ],
+      "headlineImageRelationship": "Keep the headline framing the product from above, beside, or just over the object with disciplined restraint; only use overlap when it strengthens the product keynote feel.",
+      "layeringRules": [
+        "Keep layering sparse and exact so the product remains dominant and the composition stays severe.",
+        "Use one dominant foreground relationship and one subordinate supporting layer; do not stack decorative layers without purpose.",
+        "Every overlap, crop, or z-index shift should strengthen the selected reference rather than adding generic drama."
+      ],
+      "typeScaleRelationship": "Keep scale controlled and deliberate so one product frame or one precise headline leads the page.",
+      "paletteDistribution": "Palette dominance should stay restrained, tonal, and disciplined, with accent color used sparingly.",
+      "imageFraming": "Imagery should center the product object and make the hardware feel tangible, premium, and hero-worthy.",
+      "asymmetry": "Keep asymmetry restrained and category-correct rather than theatrical for its own sake.",
+      "ctaPosture": "Keep CTAs sparse, exact, and product-native."
+    }
+  ],
+  "headlineImageRelationships": [
+    "Keep the headline framing the product from above, beside, or just over the object with disciplined restraint; only use overlap when it strengthens the product keynote feel."
+  ],
+  "layeringRules": [
+    "Keep layering sparse and exact so the product remains dominant and the composition stays severe.",
+    "Use one dominant foreground relationship and one subordinate supporting layer; do not stack decorative layers without purpose.",
+    "Every overlap, crop, or z-index shift should strengthen the selected reference rather than adding generic drama."
+  ],
+  "typeSystemBehavior": [
+    "Use typography to reinforce the product category and reference family rather than generic startup-safe hierarchy.",
+    "Keep the type system restrained, exact, and highly disciplined.",
+    "Keep supporting typography subordinate to the primary visual system instead of flattening everything into one neutral sans rhythm."
+  ],
+  "paletteBehavior": [
+    "Palette dominance should stay restrained, tonal, and disciplined, with accent color used sparingly.",
+    "Use color to support hierarchy and domain clarity before decoration.",
+    "Keep palette choices visibly native to the selected reference family."
+  ],
+  "sectionSkeletons": [
+    "Hero keynote frame with one product image and one dominant statement.",
+    "Focused product detail bands or capability callouts with careful hierarchy.",
+    "Cinematic product gallery or finish/color story section.",
+    "Quiet purchase, compare, or learn-more close instead of a noisy CTA wall."
+  ],
+  "antiPatterns": [
+    "Do not inject busy feature-card grids just to make the page feel complete.",
+    "Do not drift into developer-platform darkness, generic startup gradients, or editorial chaos.",
+    "Do not let runtime overrides overpower the near-silent Apple restraint."
+  ],
+  "allowedVariation": [
+    "Content, brand naming, and product specifics may change freely as long as the composition DNA remains recognizably native to the selected reference family.",
+    "You may vary product details and supporting section order, but not the core restraint or system logic of the reference.",
+    "Do not use variety as an excuse to fall back to generic AI-generated landing-page patterns."
+  ],
+  "exemplarCues": [
+    {
+      "id": "keynote-object",
+      "label": "Keynote object framing",
+      "cues": [
+        "One hero object dominates the viewport.",
+        "Headline and copy frame the object with severe restraint.",
+        "Supporting sections stay quieter than the hero."
+      ]
+    }
+  ]
+}

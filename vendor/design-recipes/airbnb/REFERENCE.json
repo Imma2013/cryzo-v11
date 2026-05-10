@@ -1,0 +1,75 @@
+{
+  "slug": "airbnb",
+  "title": "Airbnb",
+  "visualIntent": "A travel-marketplace system built around inviting imagery, human warmth, soft premium utility, and destination-led browsing.",
+  "compositionRecipes": [
+    {
+      "id": "default",
+      "label": "Airbnb default",
+      "whenToUse": "Use this as the default build recipe whenever Airbnb is the locked primary reference.",
+      "heroStructure": "Build an atmospheric destination-led hero with one dominant scene and enough editorial restraint that service guidance feels curated rather than marketplace-generic.",
+      "sectionOrder": [
+        "Atmospheric destination hero.",
+        "Curated journey or collection chapter.",
+        "Trust, process, or concierge/service proof band.",
+        "Plan or book close with calm guidance."
+      ],
+      "headlineImageRelationship": "Tie the headline closely to the hero imagery so they read as one composition instead of two unrelated blocks.",
+      "layeringRules": [
+        "Use one dominant foreground relationship and one subordinate supporting layer; do not stack decorative layers without purpose.",
+        "Every overlap, crop, or z-index shift should strengthen the selected reference rather than adding generic drama."
+      ],
+      "typeScaleRelationship": "Use hierarchy with obvious focal moments instead of evenly weighted generic sections.",
+      "paletteDistribution": "Palette dominance should clearly follow the selected reference category rather than a default purple-on-dark fallback.",
+      "imageFraming": "Imagery should be destination-led and atmospheric, carrying mood and aspiration rather than acting as generic filler.",
+      "asymmetry": "Keep asymmetry restrained and category-correct rather than theatrical for its own sake.",
+      "ctaPosture": "Make CTAs feel native to the reference family instead of generic bright buttons."
+    }
+  ],
+  "headlineImageRelationships": [
+    "Tie the headline closely to the hero imagery so they read as one composition instead of two unrelated blocks."
+  ],
+  "layeringRules": [
+    "Use one dominant foreground relationship and one subordinate supporting layer; do not stack decorative layers without purpose.",
+    "Every overlap, crop, or z-index shift should strengthen the selected reference rather than adding generic drama."
+  ],
+  "typeSystemBehavior": [
+    "Use typography to reinforce the product category and reference family rather than generic startup-safe hierarchy.",
+    "Allow one or two dominant type moments to set the emotional scale of the page.",
+    "Keep supporting typography subordinate to the primary visual system instead of flattening everything into one neutral sans rhythm."
+  ],
+  "paletteBehavior": [
+    "Palette dominance should clearly follow the selected reference category rather than a default purple-on-dark fallback.",
+    "Use color to support hierarchy and domain clarity before decoration.",
+    "Keep palette choices visibly native to the selected reference family."
+  ],
+  "sectionSkeletons": [
+    "Atmospheric destination hero.",
+    "Curated journey or collection chapter.",
+    "Trust, process, or concierge/service proof band.",
+    "Plan or book close with calm guidance."
+  ],
+  "antiPatterns": [
+    "Do not normalize the selected reference into a tidier generic startup homepage just because the prompt is broad.",
+    "Do not drift into hard enterprise tone.",
+    "Do not drift into developer-platform minimalism.",
+    "Do not drift into luxury car theatrics.",
+    "Do not let runtime overrides overpower the selected primary reference."
+  ],
+  "allowedVariation": [
+    "Content, brand naming, and product specifics may change freely as long as the composition DNA remains recognizably native to the selected reference family.",
+    "You may vary product details and supporting section order, but not the core restraint or system logic of the reference.",
+    "Do not use variety as an excuse to fall back to generic AI-generated landing-page patterns."
+  ],
+  "exemplarCues": [
+    {
+      "id": "reference-default",
+      "label": "Reference-default composition",
+      "cues": [
+        "Keep one dominant focal moment per viewport.",
+        "Tie text hierarchy directly to the primary visual system.",
+        "Avoid generic text-left image-right marketing defaults."
+      ]
+    }
+  ]
+}

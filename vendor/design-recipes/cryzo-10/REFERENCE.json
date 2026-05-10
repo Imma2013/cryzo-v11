@@ -1,0 +1,88 @@
+{
+  "slug": "cryzo-10",
+  "title": "Cryzo 10",
+  "visualIntent": "The Cryzo playful-editorial pet lane: fashion-forward, expressive, premium, and character-rich without becoming childish.",
+  "compositionRecipes": [
+    {
+      "id": "default",
+      "label": "Cryzo 10 default",
+      "whenToUse": "Use this as the default build recipe whenever Cryzo 10 is the locked primary reference.",
+      "heroStructure": "Build a poster-field hero with one dominant surreal pet-fashion image, a hard color block, and giant condensed type that overlaps the subject instead of sitting in a safe adjacent column.",
+      "sectionOrder": [
+        "Poster hero with giant headline, hard color field, and one surreal pet-fashion image.",
+        "Manifesto or attitude chapter using sparse copy and confrontational scale shifts.",
+        "Collection, drop, or styling section framed like a fashion spread rather than a store grid.",
+        "Editorial story or culture chapter with asymmetric imagery and serif interruption.",
+        "Commanding CTA close that still feels like a poster panel, not a generic footer CTA."
+      ],
+      "headlineImageRelationship": "Place the oversized headline in front of or directly over the hero subject so the type and image visibly compete; the subject should remain legible behind the typography instead of being isolated in a separate panel.",
+      "layeringRules": [
+        "Keep the hero subject partially behind the giant display type or inside a hard poster field instead of isolated in a clean adjacent panel.",
+        "Let color fields, image planes, and typography create visible depth even before motion is applied.",
+        "Use one dominant foreground relationship and one subordinate supporting layer; do not stack decorative layers without purpose.",
+        "Every overlap, crop, or z-index shift should strengthen the selected reference rather than adding generic drama."
+      ],
+      "typeScaleRelationship": "Use at least one oversized moment that sets the emotional scale before explanatory content arrives.",
+      "paletteDistribution": "Palette dominance should use one or two assertive brand colors as intentional fields rather than generic accent sprinkles.",
+      "imageFraming": "Imagery should feel character-led, art-directed, and specific to the selected pet-fashion or pet-brand tone.",
+      "asymmetry": "Allow tension, crop pressure, and asymmetry when it preserves the reference family.",
+      "ctaPosture": "Make CTAs feel native to the reference family instead of generic bright buttons."
+    }
+  ],
+  "headlineImageRelationships": [
+    "Place the oversized headline in front of or directly over the hero subject so the type and image visibly compete; the subject should remain legible behind the typography instead of being isolated in a separate panel."
+  ],
+  "layeringRules": [
+    "Keep the hero subject partially behind the giant display type or inside a hard poster field instead of isolated in a clean adjacent panel.",
+    "Let color fields, image planes, and typography create visible depth even before motion is applied.",
+    "Use one dominant foreground relationship and one subordinate supporting layer; do not stack decorative layers without purpose.",
+    "Every overlap, crop, or z-index shift should strengthen the selected reference rather than adding generic drama."
+  ],
+  "typeSystemBehavior": [
+    "Use display type with visible scale tension and chapter rhythm instead of evenly weighted marketing hierarchy.",
+    "Allow one or two dominant type moments to set the emotional scale of the page.",
+    "Keep supporting typography subordinate to the primary visual system instead of flattening everything into one neutral sans rhythm."
+  ],
+  "paletteBehavior": [
+    "Palette dominance should use one or two assertive brand colors as intentional fields rather than generic accent sprinkles.",
+    "Use color as a real field or chapter device, not just an accent sprinkled over otherwise generic layout.",
+    "Keep palette choices visibly native to the selected reference family."
+  ],
+  "sectionSkeletons": [
+    "Poster hero with giant headline, hard color field, and one surreal pet-fashion image.",
+    "Manifesto or attitude chapter using sparse copy and confrontational scale shifts.",
+    "Collection, drop, or styling section framed like a fashion spread rather than a store grid.",
+    "Editorial story or culture chapter with asymmetric imagery and serif interruption.",
+    "Commanding CTA close that still feels like a poster panel, not a generic footer CTA."
+  ],
+  "antiPatterns": [
+    "Do not tidy the composition into a normal centered hero with balanced cards.",
+    "Do not soften the palette into tasteful beige-neutral premium branding.",
+    "Do not replace fashion-editorial pet imagery with cute consumer pet-shop visuals.",
+    "Do not flatten the type into one safe sans-serif system with predictable line lengths."
+  ],
+  "allowedVariation": [
+    "Content, brand naming, and product specifics may change freely as long as the composition DNA remains recognizably native to the selected reference family.",
+    "You may vary the exact crop, chapter sequencing, or copy cadence, but the page must stay visibly editorial and reference-led.",
+    "Do not use variety as an excuse to fall back to generic AI-generated landing-page patterns."
+  ],
+  "exemplarCues": [
+    {
+      "id": "poster-overlap",
+      "label": "Poster overlap hero",
+      "cues": [
+        "Oversized condensed headline sits in front of the subject.",
+        "Hero subject remains readable behind typography instead of living in a detached panel.",
+        "Hard color fields and image planes create immediate poster tension."
+      ]
+    },
+    {
+      "id": "editorial-chapters",
+      "label": "Editorial chapter rhythm",
+      "cues": [
+        "Use hard section breaks and chapter-like pacing rather than feature-card repetition.",
+        "Let at least one section feel sparse and attitude-led instead of explanatory."
+      ]
+    }
+  ]
+}

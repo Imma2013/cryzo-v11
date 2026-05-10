@@ -1,0 +1,74 @@
+{
+  "slug": "wise",
+  "title": "Wise",
+  "visualIntent": "Wise should be treated as a category-correct reference system for banking-app, using trustworthy, minimal as the guiding visual attitude.",
+  "compositionRecipes": [
+    {
+      "id": "default",
+      "label": "Wise default",
+      "whenToUse": "Use this as the default build recipe whenever Wise is the locked primary reference.",
+      "heroStructure": "Build a reference-native hero with one dominant focal moment, strong hierarchy, and no fallback to generic text-left image-right startup composition.",
+      "sectionOrder": [
+        "Primary hero aligned to the selected reference.",
+        "Reference-native proof or capability section.",
+        "A supporting showcase or narrative section.",
+        "A close that still preserves the chosen system."
+      ],
+      "headlineImageRelationship": "Tie the headline closely to the hero imagery so they read as one composition instead of two unrelated blocks.",
+      "layeringRules": [
+        "Use one dominant foreground relationship and one subordinate supporting layer; do not stack decorative layers without purpose.",
+        "Every overlap, crop, or z-index shift should strengthen the selected reference rather than adding generic drama."
+      ],
+      "typeScaleRelationship": "Use hierarchy with obvious focal moments instead of evenly weighted generic sections.",
+      "paletteDistribution": "Palette dominance should stay restrained, tonal, and disciplined, with accent color used sparingly.",
+      "imageFraming": "Imagery should behave like part of the design system's DNA, not a last-minute decorative filler layer.",
+      "asymmetry": "Keep asymmetry restrained and category-correct rather than theatrical for its own sake.",
+      "ctaPosture": "Make CTAs feel native to the reference family instead of generic bright buttons."
+    }
+  ],
+  "headlineImageRelationships": [
+    "Tie the headline closely to the hero imagery so they read as one composition instead of two unrelated blocks."
+  ],
+  "layeringRules": [
+    "Use one dominant foreground relationship and one subordinate supporting layer; do not stack decorative layers without purpose.",
+    "Every overlap, crop, or z-index shift should strengthen the selected reference rather than adding generic drama."
+  ],
+  "typeSystemBehavior": [
+    "Use typography to reinforce the product category and reference family rather than generic startup-safe hierarchy.",
+    "Allow one or two dominant type moments to set the emotional scale of the page.",
+    "Keep supporting typography subordinate to the primary visual system instead of flattening everything into one neutral sans rhythm."
+  ],
+  "paletteBehavior": [
+    "Palette dominance should stay restrained, tonal, and disciplined, with accent color used sparingly.",
+    "Use color to support hierarchy and domain clarity before decoration.",
+    "Keep palette choices visibly native to the selected reference family."
+  ],
+  "sectionSkeletons": [
+    "Primary hero aligned to the selected reference.",
+    "Reference-native proof or capability section.",
+    "A supporting showcase or narrative section.",
+    "A close that still preserves the chosen system."
+  ],
+  "antiPatterns": [
+    "Do not normalize the selected reference into a tidier generic startup homepage just because the prompt is broad.",
+    "Do not drift into generic AI-generated SaaS hero stacks.",
+    "Do not drift into purple-on-dark Bolt defaults.",
+    "Do not let runtime overrides overpower the selected primary reference."
+  ],
+  "allowedVariation": [
+    "Content, brand naming, and product specifics may change freely as long as the composition DNA remains recognizably native to the selected reference family.",
+    "You may vary product details and supporting section order, but not the core restraint or system logic of the reference.",
+    "Do not use variety as an excuse to fall back to generic AI-generated landing-page patterns."
+  ],
+  "exemplarCues": [
+    {
+      "id": "reference-default",
+      "label": "Reference-default composition",
+      "cues": [
+        "Keep one dominant focal moment per viewport.",
+        "Tie text hierarchy directly to the primary visual system.",
+        "Avoid generic text-left image-right marketing defaults."
+      ]
+    }
+  ]
+}

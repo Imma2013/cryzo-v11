@@ -1,0 +1,76 @@
+{
+  "slug": "bmw",
+  "title": "Bmw",
+  "visualIntent": "Bmw should be treated as a category-correct reference system for car-commerce, using premium, technical as the guiding visual attitude.",
+  "compositionRecipes": [
+    {
+      "id": "default",
+      "label": "Bmw default",
+      "whenToUse": "Use this as the default build recipe whenever Bmw is the locked primary reference.",
+      "heroStructure": "Build a reference-native hero with one dominant focal moment, strong hierarchy, and no fallback to generic text-left image-right startup composition.",
+      "sectionOrder": [
+        "Image-led hero with one dominant vehicle or machine frame.",
+        "Story or performance chapter rather than a generic features grid.",
+        "Collection, gallery, or ownership section with curated product emphasis.",
+        "Booking, inquiry, or launch close with premium restraint."
+      ],
+      "headlineImageRelationship": "Tie the headline closely to the hero imagery so they read as one composition instead of two unrelated blocks.",
+      "layeringRules": [
+        "Keep layering sparse and exact so the product remains dominant and the composition stays severe.",
+        "Use one dominant foreground relationship and one subordinate supporting layer; do not stack decorative layers without purpose.",
+        "Every overlap, crop, or z-index shift should strengthen the selected reference rather than adding generic drama."
+      ],
+      "typeScaleRelationship": "Keep scale controlled and deliberate so one product frame or one precise headline leads the page.",
+      "paletteDistribution": "Palette dominance should clearly follow the selected reference category rather than a default purple-on-dark fallback.",
+      "imageFraming": "Imagery should be vehicle-led, cropped with intent, and treated as the page’s emotional anchor instead of a supporting thumbnail.",
+      "asymmetry": "Keep asymmetry restrained and category-correct rather than theatrical for its own sake.",
+      "ctaPosture": "Keep CTAs sparse, exact, and product-native."
+    }
+  ],
+  "headlineImageRelationships": [
+    "Tie the headline closely to the hero imagery so they read as one composition instead of two unrelated blocks."
+  ],
+  "layeringRules": [
+    "Keep layering sparse and exact so the product remains dominant and the composition stays severe.",
+    "Use one dominant foreground relationship and one subordinate supporting layer; do not stack decorative layers without purpose.",
+    "Every overlap, crop, or z-index shift should strengthen the selected reference rather than adding generic drama."
+  ],
+  "typeSystemBehavior": [
+    "Use typography to reinforce the product category and reference family rather than generic startup-safe hierarchy.",
+    "Keep the type system restrained, exact, and highly disciplined.",
+    "Keep supporting typography subordinate to the primary visual system instead of flattening everything into one neutral sans rhythm."
+  ],
+  "paletteBehavior": [
+    "Palette dominance should clearly follow the selected reference category rather than a default purple-on-dark fallback.",
+    "Use color to support hierarchy and domain clarity before decoration.",
+    "Keep palette choices visibly native to the selected reference family."
+  ],
+  "sectionSkeletons": [
+    "Image-led hero with one dominant vehicle or machine frame.",
+    "Story or performance chapter rather than a generic features grid.",
+    "Collection, gallery, or ownership section with curated product emphasis.",
+    "Booking, inquiry, or launch close with premium restraint."
+  ],
+  "antiPatterns": [
+    "Do not normalize the selected reference into a tidier generic startup homepage just because the prompt is broad.",
+    "Do not drift into generic AI-generated SaaS hero stacks.",
+    "Do not drift into purple-on-dark Bolt defaults.",
+    "Do not let runtime overrides overpower the selected primary reference."
+  ],
+  "allowedVariation": [
+    "Content, brand naming, and product specifics may change freely as long as the composition DNA remains recognizably native to the selected reference family.",
+    "You may vary product details and supporting section order, but not the core restraint or system logic of the reference.",
+    "Do not use variety as an excuse to fall back to generic AI-generated landing-page patterns."
+  ],
+  "exemplarCues": [
+    {
+      "id": "reference-default",
+      "label": "Reference-default composition",
+      "cues": [
+        "Keep one dominant focal moment per viewport.",
+        "Tie text hierarchy directly to the primary visual system.",
+        "Avoid generic text-left image-right marketing defaults."
+      ]
+    }
+  ]
+}
