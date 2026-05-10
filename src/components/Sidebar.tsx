@@ -7,6 +7,7 @@ import { useAuth } from "@/providers/AuthProvider";
 import { useRouter, useParams } from "next/navigation";
 import { formatRelativeTime } from "@/lib/utils";
 import {
+  Plug,
   Plus,
   LogOut,
   MessageSquare,
@@ -132,6 +133,17 @@ export function Sidebar() {
           </div>
         ))}
       </nav>
+
+      <div className="border-t border-zinc-800 px-2 py-2">
+        <div
+          onClick={() => router.push("/connections")}
+          className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-sm text-zinc-400 transition-colors hover:bg-zinc-800/50 hover:text-white"
+          title={isCollapsed ? "Connections" : undefined}
+        >
+          <Plug size={14} className="shrink-0" />
+          {!isCollapsed && <span>Connections</span>}
+        </div>
+      </div>
 
       <div className="border-t border-zinc-800 p-3">
         {isCollapsed ? (
