@@ -55,7 +55,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         });
         setConvexUserId(userId);
       } else {
-        setConvexUserId(null);
+        // TEST MODE: create a test user when no Firebase auth
+        const userId = await getOrCreateUser({
+          firebaseUid: "test-user-001",
+          email: "test@cryzo.dev",
+          name: "Test User",
+        });
+        setConvexUserId(userId);
       }
       setLoading(false);
     });

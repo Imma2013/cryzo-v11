@@ -2,17 +2,13 @@
 
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { useAuth } from "@/providers/AuthProvider";
 
 export default function Home() {
-  const { firebaseUser, loading } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
-    if (!loading) {
-      router.push(firebaseUser ? "/chat" : "/login");
-    }
-  }, [firebaseUser, loading, router]);
+    router.push("/chat");
+  }, [router]);
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-black">
