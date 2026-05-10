@@ -3,9 +3,9 @@ import { Composio } from "@composio/core";
 import { VercelProvider } from "@composio/vercel";
 import { streamText, stepCountIs, convertToModelMessages, type UIMessage } from "ai";
 
-let composio: Composio;
+let composio: Composio<VercelProvider>;
 function getComposio() {
-  if (!composio) composio = new Composio({ provider: new VercelProvider() });
+  if (!composio) composio = new Composio<VercelProvider>({ provider: new VercelProvider() });
   return composio;
 }
 
