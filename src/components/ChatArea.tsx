@@ -11,14 +11,19 @@ import { ChatInput } from "./ChatInput";
 import { ToolCallDisplay } from "./ToolCallDisplay";
 import { ArtifactBadge } from "./ArtifactBadge";
 import { parseArtifacts } from "@/lib/workspace/artifact-parser";
+import type { ElementInfo } from "./workspace/LivePreview";
 import { Id } from "../../convex/_generated/dataModel";
 
 export function ChatArea({
   conversationId,
   onArtifactCreated,
+  selectedElement,
+  onElementUsed,
 }: {
   conversationId: Id<"conversations">;
   onArtifactCreated?: () => void;
+  selectedElement?: ElementInfo | null;
+  onElementUsed?: () => void;
 }) {
   const { convexUserId } = useAuth();
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -116,7 +121,14 @@ export function ChatArea({
 
   const handleSend = () => {
     if (!input.trim()) return;
-    const text = input;
+    let text = input;
+
+    // Inject selected element context so AI knows what to edit
+    if (selectedElement) {
+      text = `[User selected element: <${selectedElement.tagName}> with selector "${selectedElement.selector}" containing text "${selectedElement.textContent.slice(0, 60)}"]\n\n${text}`;
+      onElementUsed?.();
+    }
+
     setInput("");
     sendMessage({ text });
   };
@@ -234,6 +246,13 @@ export function ChatArea({
         </div>
       </div>
 
+      {selectedElement && (
+        <div className="mx-4 mb-1 flex items-center gap-2 rounded bg-blue-900/30 px-3 py-1.5 text-xs text-blue-300">
+          <span className="font-medium">Selected:</span>
+          <code className="truncate">{selectedElement.selector}</code>
+          <button onClick={onElementUsed} className="ml-auto text-blue-400 hover:text-white">&times;</button>
+        </div>
+      )}
       <ChatInput
         value={input}
         onChange={setInput}

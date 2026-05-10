@@ -14,6 +14,12 @@ export async function getWebContainer(): Promise<WebContainer> {
   booting = true;
   try {
     instance = await WebContainer.boot();
+    // Inject inspector script into all preview iframes
+    try {
+      const res = await fetch("/inspector-script.js");
+      const script = await res.text();
+      await instance.setPreviewScript(script);
+    } catch {}
     return instance;
   } finally {
     booting = false;

@@ -6,7 +6,7 @@ import { Code2, Eye, Loader2, AlertCircle } from "lucide-react";
 import { useWorkspace } from "@/hooks/use-workspace";
 import { FileTree } from "./FileTree";
 import { CodeEditor } from "./CodeEditor";
-import { LivePreview } from "./LivePreview";
+import { LivePreview, type ElementInfo } from "./LivePreview";
 import { WorkspaceTerminal } from "./WorkspaceTerminal";
 import { Id } from "../../../convex/_generated/dataModel";
 
@@ -14,8 +14,10 @@ type ViewMode = "preview" | "code";
 
 export function WorkspacePanel({
   conversationId,
+  onElementSelected,
 }: {
   conversationId: Id<"conversations">;
+  onElementSelected?: (info: ElementInfo) => void;
 }) {
   const [viewMode, setViewMode] = useState<ViewMode>("preview");
 
@@ -85,7 +87,7 @@ export function WorkspacePanel({
       <Group orientation="vertical" className="flex-1">
         <Panel defaultSize={70} minSize={30}>
           {viewMode === "preview" ? (
-            <LivePreview url={previewUrl} isBooting={isBooting} progress={progress} />
+            <LivePreview url={previewUrl} isBooting={isBooting} progress={progress} onElementSelected={onElementSelected} />
           ) : (
             <div className="flex h-full">
               {/* File tree */}
