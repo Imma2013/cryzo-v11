@@ -15,8 +15,10 @@ import { Id } from "../../convex/_generated/dataModel";
 
 export function ChatArea({
   conversationId,
+  onArtifactCreated,
 }: {
   conversationId: Id<"conversations">;
+  onArtifactCreated?: () => void;
 }) {
   const { convexUserId } = useAuth();
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -158,6 +160,7 @@ export function ChatArea({
                           title: artifact.title,
                           actions: artifact.actions,
                         });
+                        onArtifactCreated?.();
                       }
                     }
                     return (
@@ -186,11 +189,7 @@ export function ChatArea({
                             )}
                         </span>
                         {artifacts.map((a) => (
-                          <ArtifactBadge
-                            key={a.id}
-                            title={a.title}
-                            conversationId={conversationId}
-                          />
+                          <ArtifactBadge key={a.id} title={a.title} />
                         ))}
                       </span>
                     );

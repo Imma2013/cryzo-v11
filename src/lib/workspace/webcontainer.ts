@@ -13,7 +13,7 @@ export async function getWebContainer(): Promise<WebContainer> {
   }
   booting = true;
   try {
-    instance = await WebContainer.boot({ coep: "credentialless" });
+    instance = await WebContainer.boot();
     return instance;
   } finally {
     booting = false;
