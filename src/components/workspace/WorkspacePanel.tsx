@@ -8,6 +8,7 @@ import { FileTree } from "./FileTree";
 import { CodeEditor } from "./CodeEditor";
 import { LivePreview, type ElementInfo } from "./LivePreview";
 import { WorkspaceTerminal } from "./WorkspaceTerminal";
+import { PublishControls } from "./PublishControls";
 import { Id } from "../../../convex/_generated/dataModel";
 
 type ViewMode = "preview" | "code";
@@ -63,23 +64,31 @@ export function WorkspacePanel({
           </button>
         </div>
 
-        {/* Status indicator */}
-        <div className="ml-auto flex items-center gap-2 text-xs">
-          {error ? (
-            <span className="flex items-center gap-1 text-red-400">
-              <AlertCircle size={12} />
-              Error
-            </span>
-          ) : isBooting ? (
-            <span className="flex items-center gap-1 text-zinc-400">
-              <Loader2 size={12} className="animate-spin" />
-              {progress === "writing" && "Writing files..."}
-              {progress === "installing" && "Installing..."}
-              {progress === "starting" && "Starting server..."}
-            </span>
-          ) : progress === "ready" ? (
-            <span className="text-green-400">Ready</span>
-          ) : null}
+        <div className="ml-auto flex items-center gap-3">
+          <PublishControls
+            files={files}
+            conversationId={conversationId}
+            disabled={isBooting || !!error}
+          />
+
+          {/* Status indicator */}
+          <div className="flex items-center gap-2 text-xs">
+            {error ? (
+              <span className="flex items-center gap-1 text-red-400">
+                <AlertCircle size={12} />
+                Error
+              </span>
+            ) : isBooting ? (
+              <span className="flex items-center gap-1 text-zinc-400">
+                <Loader2 size={12} className="animate-spin" />
+                {progress === "writing" && "Writing files..."}
+                {progress === "installing" && "Installing..."}
+                {progress === "starting" && "Starting server..."}
+              </span>
+            ) : progress === "ready" ? (
+              <span className="text-green-400">Ready</span>
+            ) : null}
+          </div>
         </div>
       </div>
 
