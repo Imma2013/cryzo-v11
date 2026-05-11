@@ -325,6 +325,12 @@ function GitHubPublishModal({
           onChange={setToken}
           type="password"
           placeholder="ghp_..."
+          helper={
+            <TokenHelp
+              href="https://github.com/settings/tokens/new"
+              note="Required scopes: repo, read:user"
+            />
+          }
         />
         <TextField label="Repository name" value={repoName} onChange={setRepoName} />
         <label className="flex items-center gap-2 text-sm text-zinc-300">
@@ -479,6 +485,7 @@ function DeployPublishModal({
               onChange={setVercelToken}
               type="password"
               placeholder="vercel token"
+              helper={<TokenHelp href="https://vercel.com/account/tokens" />}
             />
             <button
               type="button"
@@ -498,6 +505,9 @@ function DeployPublishModal({
               onChange={setNetlifyToken}
               type="password"
               placeholder="netlify token"
+              helper={
+                <TokenHelp href="https://app.netlify.com/user/applications#personal-access-tokens" />
+              }
             />
             <button
               type="button"
@@ -557,12 +567,14 @@ function TextField({
   onChange,
   type = "text",
   placeholder,
+  helper,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
   type?: string;
   placeholder?: string;
+  helper?: ReactNode;
 }) {
   return (
     <label className="block">
@@ -574,6 +586,29 @@ function TextField({
         placeholder={placeholder}
         className="h-10 w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 text-sm text-white outline-none transition-colors placeholder:text-zinc-600 focus:border-zinc-600"
       />
+      {helper && <span className="mt-2 block">{helper}</span>}
     </label>
+  );
+}
+
+function TokenHelp({ href, note }: { href: string; note?: string }) {
+  return (
+    <span className="inline-flex flex-wrap items-center gap-2 text-xs text-zinc-500">
+      <a
+        href={href}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="inline-flex items-center gap-1 text-blue-400 transition-colors hover:text-blue-300"
+      >
+        Get your token
+        <ExternalLink size={12} />
+      </a>
+      {note && (
+        <>
+          <span className="text-zinc-700">|</span>
+          <span>{note}</span>
+        </>
+      )}
+    </span>
   );
 }
