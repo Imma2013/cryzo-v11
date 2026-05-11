@@ -46,11 +46,18 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-  const { toolkit }: { toolkit: string } = await req.json();
+  const {
+    toolkit,
+    returnPath,
+  }: { toolkit: string; returnPath?: string } = await req.json();
   const origin = new URL(req.url).origin;
+  const callbackPath =
+    returnPath?.startsWith("/") && !returnPath.startsWith("//")
+      ? returnPath
+      : "/chat?connections=1";
   const session = await getComposio().create("user_123");
   const connectionRequest = await session.authorize(toolkit, {
-    callbackUrl: origin + "/connections",
+    callbackUrl: origin + callbackPath,
   });
 
   return Response.json({ redirectUrl: connectionRequest.redirectUrl });
