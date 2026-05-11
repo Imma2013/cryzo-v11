@@ -1,36 +1,73 @@
 "use client";
 
-import { Plus } from "lucide-react";
-import { useAuth } from "@/providers/AuthProvider";
+import { useState } from "react";
 import { useMutation } from "convex/react";
-import { api } from "../../../convex/_generated/api";
 import { useRouter } from "next/navigation";
+import { api } from "../../../convex/_generated/api";
+import { useAuth } from "@/providers/AuthProvider";
+import { ChatInput, type ChatMode } from "@/components/ChatInput";
+import {
+  filesToUIParts,
+  saveInitialChatMessage,
+} from "@/lib/chat/initial-message";
 
 export default function ChatEmptyPage() {
   const { convexUserId } = useAuth();
   const createConversation = useMutation(api.conversations.create);
   const router = useRouter();
+  const [input, setInput] = useState("");
+  const [chatMode, setChatMode] = useState<ChatMode>("build");
+  const [isStarting, setIsStarting] = useState(false);
 
-  const handleNewChat = async () => {
-    if (!convexUserId) return;
-    const id = await createConversation({ userId: convexUserId });
-    router.push(`/chat/${id}`);
+  const handleSubmit = async (files: File[] = []) => {
+    if (!convexUserId || isStarting) return;
+
+    setIsStarting(true);
+    try {
+      const text = input.trim();
+      const fileParts = await filesToUIParts(files);
+      const id = await createConversation({
+        userId: convexUserId,
+        chatMode,
+      });
+
+      saveInitialChatMessage({
+        conversationId: id,
+        text: text || "Use the attached image as context.",
+        chatMode,
+        files: fileParts,
+      });
+
+      setInput("");
+      router.push(`/chat/${id}`);
+    } finally {
+      setIsStarting(false);
+    }
   };
 
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-4">
-      <h2 className="text-xl font-semibold text-white">Welcome to Cryzo</h2>
-      <p className="max-w-md text-center text-sm text-zinc-400">
-        Your AI assistant with access to Gmail, GitHub, Slack, Notion, and 1000+
-        other apps via Composio.
-      </p>
-      <button
-        onClick={handleNewChat}
-        className="flex items-center gap-2 rounded-lg bg-white px-4 py-2 text-sm font-medium text-black transition-colors hover:bg-zinc-200"
-      >
-        <Plus size={16} />
-        New Chat
-      </button>
+    <div className="flex h-full items-center justify-center px-5 py-8">
+      <div className="w-full max-w-4xl">
+        <div className="mb-8 text-center">
+          <h1 className="text-4xl font-semibold tracking-normal text-white sm:text-5xl">
+            What will you build today?
+          </h1>
+          <p className="mt-3 text-base text-zinc-400 sm:text-lg">
+            Create a business by chatting with AI.
+          </p>
+        </div>
+        <ChatInput
+          value={input}
+          onChange={setInput}
+          onSubmit={handleSubmit}
+          onStop={() => setIsStarting(false)}
+          isLoading={isStarting}
+          disabled={!convexUserId}
+          chatMode={chatMode}
+          onChatModeChange={setChatMode}
+          variant="hero"
+        />
+      </div>
     </div>
   );
 }

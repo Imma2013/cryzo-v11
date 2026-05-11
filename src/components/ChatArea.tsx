@@ -16,6 +16,10 @@ import { ChatInput, type ChatMode } from "./ChatInput";
 import { ToolCallDisplay } from "./ToolCallDisplay";
 import { ArtifactBadge } from "./ArtifactBadge";
 import { parseArtifacts } from "@/lib/workspace/artifact-parser";
+import {
+  filesToUIParts,
+  takeInitialChatMessage,
+} from "@/lib/chat/initial-message";
 import type { ElementInfo } from "./workspace/LivePreview";
 import { Id } from "../../convex/_generated/dataModel";
 
@@ -180,20 +184,25 @@ export function ChatArea({
   );
 
   const fileToUIPart = async (file: File): Promise<FileUIPart> => {
-    const url = await new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(String(reader.result));
-      reader.onerror = () => reject(reader.error);
-      reader.readAsDataURL(file);
-    });
-
-    return {
-      type: "file",
-      mediaType: file.type || "application/octet-stream",
-      filename: file.name,
-      url,
-    };
+    const [part] = await filesToUIParts([file]);
+    return part;
   };
+
+  const sendPreparedMessage = useCallback(
+    async (
+      text: string,
+      fileParts: FileUIPart[] = [],
+      mode: ChatMode = chatMode,
+    ) => {
+      if (!text.trim() && fileParts.length === 0) return;
+
+      await sendMessage(
+        fileParts.length > 0 ? { text, files: fileParts } : { text },
+        { body: { chatMode: mode } }
+      );
+    },
+    [chatMode, sendMessage],
+  );
 
   const handleSend = async (files: File[] = []) => {
     if (!input.trim() && files.length === 0) return;
@@ -212,25 +221,56 @@ export function ChatArea({
     const fileParts = await Promise.all(files.map(fileToUIPart));
 
     setInput("");
-    await sendMessage(
-      fileParts.length > 0 ? { text, files: fileParts } : { text },
-      { body: { chatMode } }
-    );
+    await sendPreparedMessage(text, fileParts);
   };
 
   const isLoading = status === "streaming" || status === "submitted";
+  const initialMessageSentRef = useRef(false);
+
+  useEffect(() => {
+    if (initialMessageSentRef.current) return;
+    if (loadedMessages === undefined || messages.length > 0) return;
+
+    const initialMessage = takeInitialChatMessage(conversationId);
+    if (!initialMessage) return;
+
+    initialMessageSentRef.current = true;
+    void sendPreparedMessage(
+      initialMessage.text,
+      initialMessage.files,
+      initialMessage.chatMode,
+    );
+  }, [conversationId, loadedMessages, messages.length, sendPreparedMessage]);
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex-1 overflow-y-auto p-6">
-        {messages.length === 0 && (
-          <div className="flex h-full items-center justify-center">
-            <p className="text-zinc-500">
-              Try: &quot;Star the composio repo on GitHub&quot;
-            </p>
+      {messages.length === 0 ? (
+        <div className="flex flex-1 items-center justify-center px-5 py-8">
+          <div className="w-full max-w-4xl">
+            <div className="mb-8 text-center">
+              <h1 className="text-4xl font-semibold tracking-normal text-white sm:text-5xl">
+                What will you build today?
+              </h1>
+              <p className="mt-3 text-base text-zinc-400 sm:text-lg">
+                Create a business by chatting with AI.
+              </p>
+            </div>
+            <ChatInput
+              value={input}
+              onChange={setInput}
+              onSubmit={handleSend}
+              onStop={stop}
+              isLoading={isLoading}
+              disabled={!convexUserId}
+              chatMode={chatMode}
+              onChatModeChange={handleChatModeChange}
+              variant="hero"
+            />
           </div>
-        )}
-
+        </div>
+      ) : (
+        <>
+      <div className="flex-1 overflow-y-auto p-6">
         <div className="mx-auto max-w-3xl space-y-4">
           {messages.map((m) => {
             const hasAssistantContent =
@@ -368,6 +408,8 @@ export function ChatArea({
         chatMode={chatMode}
         onChatModeChange={handleChatModeChange}
       />
+        </>
+      )}
     </div>
   );
 }

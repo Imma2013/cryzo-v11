@@ -91,6 +91,7 @@ export function ChatInput({
   disabled,
   chatMode,
   onChatModeChange,
+  variant = "dock",
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -100,6 +101,7 @@ export function ChatInput({
   disabled: boolean;
   chatMode: ChatMode;
   onChatModeChange: (mode: ChatMode) => void;
+  variant?: "dock" | "hero";
 }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -259,12 +261,18 @@ export function ChatInput({
   };
 
   const canSend = value.trim().length > 0 || attachments.length > 0;
+  const isHero = variant === "hero";
 
   return (
-    <div className="border-t border-zinc-800 bg-black px-4 py-4">
+    <div
+      className={cn(
+        isHero ? "w-full px-0 py-0" : "border-t border-zinc-800 bg-black px-4 py-4",
+      )}
+    >
       <div
         className={cn(
-          "mx-auto max-w-3xl rounded-2xl border border-zinc-800 bg-zinc-950 shadow-2xl shadow-black/30 transition-colors",
+          "mx-auto max-w-3xl rounded-2xl border bg-zinc-950 shadow-2xl shadow-black/30 transition-colors",
+          isHero ? "border-zinc-700/80" : "border-zinc-800",
           "focus-within:border-zinc-600",
           isDragging && "border-blue-500 ring-2 ring-blue-500/30",
         )}
@@ -315,7 +323,9 @@ export function ChatInput({
           placeholder={
             chatMode === "plan"
               ? "Plan before building..."
-              : "Ask Cryzo to build, edit, or connect apps..."
+              : isHero
+                ? "Describe what you want to build..."
+                : "Ask Cryzo to build, edit, or connect apps..."
           }
           disabled={disabled}
           rows={1}
