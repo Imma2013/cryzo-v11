@@ -1,5 +1,20 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
+import { getAuthUserId } from "@convex-dev/auth/server";
+import type { QueryCtx, MutationCtx } from "./_generated/server";
+import type { Id } from "./_generated/dataModel";
+
+async function requireOwner(
+  ctx: QueryCtx | MutationCtx,
+  conversationId: Id<"conversations">,
+) {
+  const authUserId = await getAuthUserId(ctx);
+  const conversation = await ctx.db.get(conversationId);
+  if (!authUserId || !conversation || conversation.userId !== authUserId) {
+    throw new Error("Conversation not found");
+  }
+  return conversation;
+}
 
 export const create = mutation({
   args: {
@@ -7,6 +22,11 @@ export const create = mutation({
     chatMode: v.optional(v.union(v.literal("build"), v.literal("plan"))),
   },
   handler: async (ctx, args) => {
+    const authUserId = await getAuthUserId(ctx);
+    if (!authUserId || authUserId !== args.userId) {
+      throw new Error("Unauthorized");
+    }
+
     const now = Date.now();
     return await ctx.db.insert("conversations", {
       userId: args.userId,
@@ -22,6 +42,9 @@ export const create = mutation({
 export const list = query({
   args: { userId: v.id("users") },
   handler: async (ctx, args) => {
+    const authUserId = await getAuthUserId(ctx);
+    if (!authUserId || authUserId !== args.userId) return [];
+
     return await ctx.db
       .query("conversations")
       .withIndex("by_user", (q) => q.eq("userId", args.userId))
@@ -33,13 +56,19 @@ export const list = query({
 export const get = query({
   args: { id: v.id("conversations") },
   handler: async (ctx, args) => {
-    return await ctx.db.get(args.id);
+    const authUserId = await getAuthUserId(ctx);
+    const conversation = await ctx.db.get(args.id);
+    if (!authUserId || !conversation || conversation.userId !== authUserId) {
+      return null;
+    }
+    return conversation;
   },
 });
 
 export const updateTitle = mutation({
   args: { id: v.id("conversations"), title: v.string() },
   handler: async (ctx, args) => {
+    await requireOwner(ctx, args.id);
     await ctx.db.patch(args.id, { title: args.title, updatedAt: Date.now() });
   },
 });
@@ -50,6 +79,7 @@ export const updateChatMode = mutation({
     chatMode: v.union(v.literal("build"), v.literal("plan")),
   },
   handler: async (ctx, args) => {
+    await requireOwner(ctx, args.id);
     await ctx.db.patch(args.id, {
       chatMode: args.chatMode,
       updatedAt: Date.now(),
@@ -60,6 +90,7 @@ export const updateChatMode = mutation({
 export const updateComposioSession = mutation({
   args: { id: v.id("conversations"), composioSessionId: v.string() },
   handler: async (ctx, args) => {
+    await requireOwner(ctx, args.id);
     await ctx.db.patch(args.id, {
       composioSessionId: args.composioSessionId,
       updatedAt: Date.now(),
@@ -70,6 +101,8 @@ export const updateComposioSession = mutation({
 export const remove = mutation({
   args: { id: v.id("conversations") },
   handler: async (ctx, args) => {
+    const conversation = await requireOwner(ctx, args.id);
+
     const messages = await ctx.db
       .query("messages")
       .withIndex("by_conversation", (q) => q.eq("conversationId", args.id))
@@ -77,6 +110,25 @@ export const remove = mutation({
     for (const msg of messages) {
       await ctx.db.delete(msg._id);
     }
+
+    const artifacts = await ctx.db
+      .query("artifacts")
+      .withIndex("by_conversation", (q) => q.eq("conversationId", args.id))
+      .collect();
+    for (const artifact of artifacts) {
+      await ctx.db.delete(artifact._id);
+    }
+
+    const publishTargets = await ctx.db
+      .query("publishTargets")
+      .withIndex("by_user_conversation_provider", (q) =>
+        q.eq("userId", conversation.userId).eq("conversationId", args.id),
+      )
+      .collect();
+    for (const target of publishTargets) {
+      await ctx.db.delete(target._id);
+    }
+
     await ctx.db.delete(args.id);
   },
 });

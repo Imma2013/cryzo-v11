@@ -6,6 +6,17 @@ import { api } from "../../convex/_generated/api";
 import { Id } from "../../convex/_generated/dataModel";
 import type { UIMessage } from "ai";
 
+function cleanConversationTitle(text: string) {
+  const withoutArtifacts = text
+    .replace(/<cryzoArtifact\b[\s\S]*?<\/cryzoArtifact>/g, "")
+    .replace(/<cryzoAction\b[\s\S]*?<\/cryzoAction>/g, "")
+    .replace(/<[^>]+>/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return withoutArtifacts || "Generated website";
+}
+
 export function useChatHistory(
   userId: Id<"users"> | null,
   conversationId?: Id<"conversations">
@@ -87,7 +98,8 @@ export function useChatHistory(
 
   const generateTitle = useCallback(
     (convId: Id<"conversations">, text: string) => {
-      const title = text.slice(0, 50) + (text.length > 50 ? "..." : "");
+      const cleaned = cleanConversationTitle(text);
+      const title = cleaned.slice(0, 50) + (cleaned.length > 50 ? "..." : "");
       updateTitle({ id: convId, title });
     },
     [updateTitle]

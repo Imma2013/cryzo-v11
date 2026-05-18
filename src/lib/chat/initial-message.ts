@@ -10,7 +10,10 @@ export type InitialChatMessage = {
   files: FileUIPart[];
 };
 
+export type PendingAuthChatMessage = Omit<InitialChatMessage, "conversationId">;
+
 let pendingInitialChatMessage: InitialChatMessage | null = null;
+let pendingAuthChatMessage: PendingAuthChatMessage | null = null;
 
 export function saveInitialChatMessage(message: InitialChatMessage) {
   pendingInitialChatMessage = message;
@@ -21,6 +24,16 @@ export function takeInitialChatMessage(conversationId: string) {
 
   const message = pendingInitialChatMessage;
   pendingInitialChatMessage = null;
+  return message;
+}
+
+export function savePendingAuthChatMessage(message: PendingAuthChatMessage) {
+  pendingAuthChatMessage = message;
+}
+
+export function takePendingAuthChatMessage() {
+  const message = pendingAuthChatMessage;
+  pendingAuthChatMessage = null;
   return message;
 }
 
