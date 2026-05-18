@@ -15,6 +15,7 @@ import { useChatHistory } from "@/hooks/use-chat-history";
 import { ChatInput, type ChatMode } from "./ChatInput";
 import { ToolCallDisplay } from "./ToolCallDisplay";
 import { ArtifactBadge } from "./ArtifactBadge";
+import AgentPlan from "@/components/ui/agent-plan";
 import { parseArtifacts } from "@/lib/workspace/artifact-parser";
 import {
   filesToUIParts,
@@ -320,21 +321,25 @@ export function ChatArea({
                           <ArtifactBadge key={a.id} title={a.title} />
                         ))}
                         {isStreaming && (
-                          <div className="my-2 rounded-lg border border-zinc-700 bg-zinc-800/50 px-3 py-2 text-sm">
-                            <div className="flex items-center gap-2 text-zinc-200">
-                              <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-blue-400" />
-                              <span className="font-medium">{streamingTitle}</span>
-                            </div>
-                            {streamingFiles.length > 0 && (
-                              <div className="mt-1.5 space-y-0.5">
-                                {streamingFiles.map((f, fi) => (
-                                  <div key={fi} className="flex items-center gap-1.5 text-xs text-zinc-400">
-                                    <span className="text-green-400">+</span>
-                                    <span className="font-mono">{f}</span>
-                                  </div>
-                                ))}
-                              </div>
-                            )}
+                          <div className="my-2">
+                            <AgentPlan tasks={[
+                              {
+                                id: "build",
+                                title: streamingTitle || "Building project",
+                                description: "Generating your application",
+                                status: "in-progress",
+                                priority: "high",
+                                level: 0,
+                                dependencies: [],
+                                subtasks: streamingFiles.map((f, fi) => ({
+                                  id: `file-${fi}`,
+                                  title: f,
+                                  description: `Writing ${f}`,
+                                  status: "completed",
+                                  priority: "medium",
+                                })),
+                              },
+                            ]} />
                           </div>
                         )}
                       </span>
@@ -382,9 +387,22 @@ export function ChatArea({
           )}
 
           {error && (
-            <div className="rounded-lg border border-red-800 bg-red-900/20 px-4 py-3 text-sm text-red-400">
-              Error: {error.message}
-            </div>
+            error.message?.includes("no_credits") || error.message?.includes("402") ? (
+              <div className="rounded-lg border border-yellow-800 bg-yellow-900/20 px-4 py-3 text-sm text-yellow-300">
+                <p className="font-medium">Out of credits</p>
+                <p className="mt-1 text-yellow-400/80">You&apos;ve used all your available credits.</p>
+                <a
+                  href="/chat/billing"
+                  className="mt-2 inline-block rounded bg-white px-3 py-1.5 text-xs font-medium text-black hover:bg-zinc-200"
+                >
+                  View Plans & Top Up
+                </a>
+              </div>
+            ) : (
+              <div className="rounded-lg border border-red-800 bg-red-900/20 px-4 py-3 text-sm text-red-400">
+                Error: {error.message}
+              </div>
+            )
           )}
 
           <div ref={messagesEndRef} />
