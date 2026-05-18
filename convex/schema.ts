@@ -1,13 +1,19 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
+import { authTables } from "@convex-dev/auth/server";
 
 export default defineSchema({
+  ...authTables,
+
   users: defineTable({
-    firebaseUid: v.string(),
-    email: v.string(),
-    name: v.string(),
-    createdAt: v.number(),
-  }).index("by_firebase_uid", ["firebaseUid"]),
+    name: v.optional(v.string()),
+    email: v.optional(v.string()),
+    image: v.optional(v.string()),
+    emailVerificationTime: v.optional(v.number()),
+    isAnonymous: v.optional(v.boolean()),
+    firebaseUid: v.optional(v.string()),
+    createdAt: v.optional(v.number()),
+  }).index("email", ["email"]),
 
   conversations: defineTable({
     userId: v.id("users"),
@@ -40,4 +46,17 @@ export default defineSchema({
     ),
     createdAt: v.number(),
   }).index("by_conversation", ["conversationId", "createdAt"]),
+
+  publishTargets: defineTable({
+    userId: v.id("users"),
+    conversationId: v.id("conversations"),
+    provider: v.union(v.literal("netlify")),
+    targetId: v.string(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index("by_user_conversation_provider", [
+    "userId",
+    "conversationId",
+    "provider",
+  ]),
 });
