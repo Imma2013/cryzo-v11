@@ -67,7 +67,7 @@ function LoginContent() {
 
         <button
           onClick={handleGoogle}
-          disabled={submitting}
+          disabled={submitting || isLoading}
           className="flex w-full items-center justify-center gap-3 rounded-lg border border-zinc-700 bg-zinc-900 px-4 py-3 text-sm text-white transition-colors hover:bg-zinc-800 disabled:opacity-50"
         >
           <svg className="h-5 w-5" viewBox="0 0 24 24">

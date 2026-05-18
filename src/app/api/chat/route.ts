@@ -2,8 +2,13 @@ import { google } from "@ai-sdk/google";
 import { Composio } from "@composio/core";
 import { VercelProvider } from "@composio/vercel";
 import { streamText, stepCountIs, convertToModelMessages, type UIMessage } from "ai";
+import { ConvexHttpClient } from "convex/browser";
+import { api } from "../../../../convex/_generated/api";
 import { readFileSync } from "fs";
 import { join } from "path";
+
+const convex = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
+
 
 let composio: Composio<VercelProvider>;
 function getComposio() {
@@ -67,6 +72,16 @@ export async function POST(req: Request) {
     chatMode?: "build" | "plan";
   };
   const mode = chatMode === "plan" ? "plan" : "build";
+
+  if (userId) {
+    const hasCredits = await convex.query(api.billing.hasCredits, {
+      userId: userId as any,
+      amount: 1,
+    });
+    if (!hasCredits) {
+      return Response.json({ error: "no_credits" }, { status: 402 });
+    }
+  }
 
   // Pick and load design recipe based on user's latest message
   const lastUserMsg = messages.filter((m) => m.role === "user").pop();
@@ -294,6 +309,14 @@ When you receive this context:
     tools,
     stopWhen: stepCountIs(10),
   });
+
+  if (userId) {
+    convex.mutation(api.billing.deductCredits, {
+      userId: userId as any,
+      amount: 1,
+      reason: "message",
+    });
+  }
 
   return result.toUIMessageStreamResponse({
     headers: {

@@ -21,6 +21,14 @@ export default function Home() {
   const [input, setInput] = useState("");
   const [chatMode, setChatMode] = useState<ChatMode>("build");
   const [isStarting, setIsStarting] = useState(false);
+  const [authSettled, setAuthSettled] = useState(false);
+
+  useEffect(() => {
+    if (!loading) {
+      const timer = setTimeout(() => setAuthSettled(true), 150);
+      return () => clearTimeout(timer);
+    }
+  }, [loading]);
 
   useEffect(() => {
     if (!loading && isAuthenticated) {
@@ -28,7 +36,7 @@ export default function Home() {
     }
   }, [loading, isAuthenticated, router]);
 
-  if (loading || isAuthenticated) {
+  if (loading || isAuthenticated || !authSettled) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-black">
         <div className="text-sm text-zinc-400">Loading...</div>
