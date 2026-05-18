@@ -1,16 +1,21 @@
 import { Composio } from "@composio/core";
+import { invalidateConnectionsCache } from "@/lib/composio-connection-cache";
 
-let composio: Composio | undefined;
+let composio: Composio | null = null;
 
 function getComposio() {
-  composio ??= new Composio();
+  if (!composio) composio = new Composio();
   return composio;
 }
 
-export const dynamic = "force-dynamic";
-
 export async function POST(req: Request) {
-  const { connectedAccountId }: { connectedAccountId: string } = await req.json();
+  const { connectedAccountId, userId }: { connectedAccountId: string; userId?: string } =
+    await req.json();
+  if (!userId) {
+    return Response.json({ error: "unauthorized" }, { status: 401 });
+  }
+
   await getComposio().connectedAccounts.delete(connectedAccountId);
+  invalidateConnectionsCache(userId);
   return Response.json({ success: true });
 }

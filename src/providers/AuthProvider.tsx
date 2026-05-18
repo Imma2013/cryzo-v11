@@ -24,7 +24,9 @@ import { Id } from "../../convex/_generated/dataModel";
 interface AuthContextType {
   firebaseUser: User | null;
   convexUserId: Id<"users"> | null;
+  userId: Id<"users"> | null;
   loading: boolean;
+  isLoading: boolean;
   signInWithGoogle: () => Promise<void>;
   signInWithEmail: (email: string, password: string) => Promise<void>;
   signUpWithEmail: (email: string, password: string) => Promise<void>;
@@ -94,7 +96,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       value={{
         firebaseUser,
         convexUserId,
+        userId: convexUserId,
         loading,
+        isLoading: loading,
         signInWithGoogle: handleSignInWithGoogle,
         signInWithEmail: handleSignInWithEmail,
         signUpWithEmail: handleSignUpWithEmail,
