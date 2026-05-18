@@ -40,8 +40,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const getOrCreateUser = useMutation(api.users.getOrCreate);
   const convexUser = useQuery(
-    api.users.getByFirebaseUid,
-    firebaseUser ? { firebaseUid: firebaseUser.uid } : "skip"
+    api.users.getByEmail,
+    firebaseUser?.email ? { email: firebaseUser.email } : "skip"
   );
 
   useEffect(() => {
@@ -49,7 +49,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setFirebaseUser(user);
       if (user) {
         const userId = await getOrCreateUser({
-          firebaseUid: user.uid,
           email: user.email || "",
           name: user.displayName || user.email || "User",
         });
@@ -57,7 +56,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } else {
         // TEST MODE: create a test user when no Firebase auth
         const userId = await getOrCreateUser({
-          firebaseUid: "test-user-001",
           email: "test@cryzo.dev",
           name: "Test User",
         });
