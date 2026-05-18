@@ -62,6 +62,15 @@ function loadRecipeContent(slug: string): string {
   }
 }
 
+const COMPLEX_PATTERN = /\b(build|create|generate|redesign|clone|website|web app|app|dashboard|store|marketplace|auth|login|payment|billing|stripe|database|convex|firebase|api|webhook|oauth|integration|deploy|github|vercel|schema|storage|subscription|composio|fix error|debug|full|complete|production|professional)\b/i;
+
+function pickModel(userMessage: string) {
+  if (COMPLEX_PATTERN.test(userMessage) || userMessage.length > 200) {
+    return google("gemini-3.1-pro-preview");
+  }
+  return google("gemini-3-flash-preview");
+}
+
 export const dynamic = "force-dynamic";
 
 export async function POST(req: Request) {
@@ -100,9 +109,11 @@ export async function POST(req: Request) {
     ? `\n\n## ACTIVE DESIGN RECIPE — FOLLOW AS BINDING GUIDANCE (selected: ${recipeSlug})\n${recipeContent}\n\nCRITICAL: The above recipe controls your composition, typography attitude, palette behavior, section structure, imagery approach, and CTA styling. Do NOT deviate into generic startup template patterns. The output must be recognizably native to this reference family.`
     : "";
 
+  const model = pickModel(lastUserText);
+
   if (mode === "plan") {
     const result = streamText({
-      model: google("gemini-3-flash-preview"),
+      model,
       system: `You are Cryzo in Plan mode.
 
 Plan mode is for discussion, requirements, tradeoffs, debugging strategy, and implementation plans.
@@ -126,14 +137,12 @@ Rules:
   }
 
   const client = getComposio();
-  const session = composioSessionId
-    ? await client.use(composioSessionId)
-    : await client.create(userId || "anonymous");
+  const session = await client.create(userId || "anonymous");
 
   const tools = await session.tools();
 
   const result = streamText({
-    model: google("gemini-3.1-pro-preview"),
+    model,
     system: `You are Cryzo, an AI assistant that can perform actions via Composio tools AND build web applications.
 
 ## Tool Usage
