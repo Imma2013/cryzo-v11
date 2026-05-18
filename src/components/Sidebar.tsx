@@ -4,9 +4,9 @@ import { useState } from "react";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { useAuth } from "@/providers/AuthProvider";
-import { useRouter, useParams, useSearchParams } from "next/navigation";
+import { useRouter, useParams, usePathname } from "next/navigation";
+import Link from "next/link";
 import { formatRelativeTime } from "@/lib/utils";
-import { ConnectionsModal } from "@/components/ConnectionsModal";
 import {
   Plug,
   Plus,
@@ -15,6 +15,7 @@ import {
   Trash2,
   PanelLeftClose,
   PanelLeftOpen,
+  CreditCard,
 } from "lucide-react";
 import { Id } from "../../convex/_generated/dataModel";
 
@@ -22,49 +23,36 @@ export function Sidebar() {
   const { user, userId, signOut } = useAuth();
   const router = useRouter();
   const params = useParams();
-  const searchParams = useSearchParams();
+  const pathname = usePathname();
   const activeId = params?.conversationId as string | undefined;
 
-  const [connectionsOpen, setConnectionsOpen] = useState(false);
-  const hasConnectionsParam = searchParams.has("connections");
-  const [isCollapsed, setIsCollapsed] = useState(() => {
-    if (typeof window !== "undefined") {
-      return localStorage.getItem("sidebar-collapsed") === "true";
-    }
-    return false;
-  });
+  const [isCollapsed, setIsCollapsed] = useState(false);
 
   const conversations = useQuery(
     api.conversations.list,
-    userId ? { userId: userId } : "skip"
+    userId ? { userId } : "skip"
   );
   const createConversation = useMutation(api.conversations.create);
   const removeConversation = useMutation(api.conversations.remove);
 
-  const closeConnections = () => {
-    setConnectionsOpen(false);
-
+  const withNavigationFallback = (href: string) => {
     if (typeof window === "undefined") return;
-    if (!hasConnectionsParam) return;
+    if (window.location.pathname === href) return;
 
-    const url = new URL(window.location.href);
-    url.searchParams.delete("connections");
-    router.replace(`${url.pathname}${url.search}${url.hash}`, {
-      scroll: false,
-    });
+    window.setTimeout(() => {
+      if (window.location.pathname !== href) {
+        window.location.assign(href);
+      }
+    }, 300);
   };
 
   const toggleCollapse = () => {
-    setIsCollapsed((prev) => {
-      const next = !prev;
-      localStorage.setItem("sidebar-collapsed", String(next));
-      return next;
-    });
+    setIsCollapsed((prev) => !prev);
   };
 
   const handleNewChat = async () => {
     if (!userId) return;
-    const id = await createConversation({ userId: userId });
+    const id = await createConversation({ userId });
     router.push(`/chat/${id}`);
   };
 
@@ -74,11 +62,13 @@ export function Sidebar() {
   ) => {
     e.stopPropagation();
     await removeConversation({ id });
-    if (activeId === id) router.push("/chat");
+    if (activeId === id) {
+      router.push("/chat");
+      withNavigationFallback("/chat");
+    }
   };
 
   return (
-    <>
       <aside
         className={`flex h-full flex-col border-r border-zinc-800 bg-zinc-950 transition-all duration-200 ${
           isCollapsed ? "w-12" : "w-64"
@@ -125,7 +115,6 @@ export function Sidebar() {
           {conversations?.map((conv) => (
             <div
               key={conv._id}
-              onClick={() => router.push(`/chat/${conv._id}`)}
               className={`group mb-1 flex cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-sm transition-colors ${
                 activeId === conv._id
                   ? "bg-zinc-800 text-white"
@@ -133,6 +122,11 @@ export function Sidebar() {
               }`}
               title={isCollapsed ? conv.title : undefined}
             >
+              <Link
+                href={`/chat/${conv._id}`}
+                onClick={() => withNavigationFallback(`/chat/${conv._id}`)}
+                className="flex min-w-0 flex-1 items-center gap-2"
+              >
               <MessageSquare size={14} className="shrink-0" />
               {!isCollapsed && (
                 <>
@@ -140,34 +134,54 @@ export function Sidebar() {
                   <span className="hidden text-xs text-zinc-600 group-hover:block">
                     {formatRelativeTime(conv.updatedAt)}
                   </span>
-                  <button
-                    onClick={(e) => handleDelete(e, conv._id)}
-                    className="hidden rounded p-1 text-zinc-500 hover:text-red-400 group-hover:block"
-                  >
-                    <Trash2 size={12} />
-                  </button>
                 </>
+              )}
+              </Link>
+              {!isCollapsed && (
+                <button
+                  onClick={(e) => handleDelete(e, conv._id)}
+                  className="hidden rounded p-1 text-zinc-500 hover:text-red-400 group-hover:block"
+                >
+                  <Trash2 size={12} />
+                </button>
               )}
             </div>
           ))}
         </nav>
 
         <div className="border-t border-zinc-800 px-2 py-2">
-          <button
-            type="button"
-            onClick={() => setConnectionsOpen(true)}
-            className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-sm text-zinc-400 transition-colors hover:bg-zinc-800/50 hover:text-white"
-            title={isCollapsed ? "Connections" : undefined}
+          <Link
+            href="/chat/apps"
+            onClick={() => withNavigationFallback("/chat/apps")}
+            className={`flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-sm transition-colors ${
+              pathname === "/chat/apps"
+                ? "bg-zinc-800 text-white"
+                : "text-zinc-400 hover:bg-zinc-800/50 hover:text-white"
+            }`}
+            title={isCollapsed ? "Apps" : undefined}
           >
             <Plug size={14} className="shrink-0" />
-            {!isCollapsed && <span>Connections</span>}
-          </button>
+            {!isCollapsed && <span>Apps</span>}
+          </Link>
+          <Link
+            href="/chat/billing"
+            onClick={() => withNavigationFallback("/chat/billing")}
+            className={`flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-sm transition-colors ${
+              pathname === "/chat/billing"
+                ? "bg-zinc-800 text-white"
+                : "text-zinc-400 hover:bg-zinc-800/50 hover:text-white"
+            }`}
+            title={isCollapsed ? "Billing" : undefined}
+          >
+            <CreditCard size={14} className="shrink-0" />
+            {!isCollapsed && <span>Billing</span>}
+          </Link>
         </div>
 
         <div className="border-t border-zinc-800 p-3">
           {isCollapsed ? (
             <button
-              onClick={signOut}
+              onClick={() => signOut()}
               className="mx-auto block rounded-md p-2 text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-white"
             >
               <LogOut size={16} />
@@ -175,10 +189,10 @@ export function Sidebar() {
           ) : (
             <div className="flex items-center gap-2">
               <div className="flex-1 truncate text-sm text-zinc-400">
-                {user?.name || user?.email || "User"}
+                {user?.name || user?.email}
               </div>
               <button
-                onClick={signOut}
+                onClick={() => signOut()}
                 className="rounded-md p-2 text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-white"
               >
                 <LogOut size={16} />
@@ -187,10 +201,5 @@ export function Sidebar() {
           )}
         </div>
       </aside>
-      <ConnectionsModal
-        open={connectionsOpen || hasConnectionsParam}
-        onClose={closeConnections}
-      />
-    </>
   );
 }
