@@ -59,4 +59,56 @@ export default defineSchema({
     "conversationId",
     "provider",
   ]),
+
+  subscriptions: defineTable({
+    userId: v.id("users"),
+    plan: v.union(
+      v.literal("free"),
+      v.literal("pro"),
+      v.literal("pro_plus"),
+      v.literal("business"),
+    ),
+    stripeCustomerId: v.optional(v.string()),
+    stripeSubscriptionId: v.optional(v.string()),
+    status: v.union(
+      v.literal("active"),
+      v.literal("canceled"),
+      v.literal("past_due"),
+    ),
+    currentPeriodEnd: v.number(),
+    monthlyCredits: v.number(),
+    creditsUsed: v.number(),
+    rolloverCredits: v.number(),
+    rolloverExpiresAt: v.optional(v.number()),
+    topUpCredits: v.optional(v.number()),
+    topUpExpiresAt: v.optional(v.number()),
+    dailyCreditsUsed: v.optional(v.number()),
+    dailyResetAt: v.optional(v.number()),
+    freeMonthlyCreditsUsed: v.optional(v.number()),
+    freeMonthlyResetAt: v.optional(v.number()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_user", ["userId"])
+    .index("by_stripe_customer", ["stripeCustomerId"])
+    .index("by_stripe_subscription", ["stripeSubscriptionId"]),
+
+  creditLedger: defineTable({
+    userId: v.id("users"),
+    amount: v.number(),
+    balance: v.number(),
+    reason: v.string(),
+    description: v.optional(v.string()),
+    stripeEventId: v.optional(v.string()),
+    messageId: v.optional(v.id("messages")),
+    createdAt: v.number(),
+  })
+    .index("by_user", ["userId", "createdAt"])
+    .index("by_stripe_event", ["stripeEventId"]),
+
+  processedStripeEvents: defineTable({
+    eventId: v.string(),
+    eventType: v.string(),
+    createdAt: v.number(),
+  }).index("by_event", ["eventId"]),
 });
