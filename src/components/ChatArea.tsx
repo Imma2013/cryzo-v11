@@ -44,7 +44,7 @@ export function ChatArea({
   selectedElement?: ElementInfo | null;
   onElementUsed?: () => void;
 }) {
-  const { convexUserId } = useAuth();
+  const { userId } = useAuth();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [input, setInput] = useState("");
   const [optimisticMode, setOptimisticMode] = useState<{
@@ -53,7 +53,7 @@ export function ChatArea({
   } | null>(null);
 
   const { conversation, loadedMessages, saveMessages, generateTitle } =
-    useChatHistory(convexUserId, conversationId);
+    useChatHistory(userId, conversationId);
   const createArtifact = useMutation(api.artifacts.create);
   const updateChatMode = useMutation(api.conversations.updateChatMode);
   const savedArtifactsRef = useRef<Set<string>>(new Set());
@@ -64,7 +64,7 @@ export function ChatArea({
       api: "/api/chat",
       body: {
         conversationId,
-        userId: convexUserId,
+        userId: userId,
         composioSessionId: conversation?.composioSessionId ?? null,
       },
     }),
@@ -261,7 +261,7 @@ export function ChatArea({
               onSubmit={handleSend}
               onStop={stop}
               isLoading={isLoading}
-              disabled={!convexUserId}
+              disabled={!userId}
               chatMode={chatMode}
               onChatModeChange={handleChatModeChange}
               variant="hero"
@@ -404,7 +404,7 @@ export function ChatArea({
         onSubmit={handleSend}
         onStop={stop}
         isLoading={isLoading}
-        disabled={!convexUserId}
+        disabled={!userId}
         chatMode={chatMode}
         onChatModeChange={handleChatModeChange}
       />

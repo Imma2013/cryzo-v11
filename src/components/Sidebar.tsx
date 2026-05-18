@@ -19,7 +19,7 @@ import {
 import { Id } from "../../convex/_generated/dataModel";
 
 export function Sidebar() {
-  const { firebaseUser, convexUserId, logout } = useAuth();
+  const { user, userId, signOut } = useAuth();
   const router = useRouter();
   const params = useParams();
   const searchParams = useSearchParams();
@@ -36,7 +36,7 @@ export function Sidebar() {
 
   const conversations = useQuery(
     api.conversations.list,
-    convexUserId ? { userId: convexUserId } : "skip"
+    userId ? { userId: userId } : "skip"
   );
   const createConversation = useMutation(api.conversations.create);
   const removeConversation = useMutation(api.conversations.remove);
@@ -63,8 +63,8 @@ export function Sidebar() {
   };
 
   const handleNewChat = async () => {
-    if (!convexUserId) return;
-    const id = await createConversation({ userId: convexUserId });
+    if (!userId) return;
+    const id = await createConversation({ userId: userId });
     router.push(`/chat/${id}`);
   };
 
@@ -167,7 +167,7 @@ export function Sidebar() {
         <div className="border-t border-zinc-800 p-3">
           {isCollapsed ? (
             <button
-              onClick={logout}
+              onClick={signOut}
               className="mx-auto block rounded-md p-2 text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-white"
             >
               <LogOut size={16} />
@@ -175,10 +175,10 @@ export function Sidebar() {
           ) : (
             <div className="flex items-center gap-2">
               <div className="flex-1 truncate text-sm text-zinc-400">
-                {firebaseUser?.displayName || firebaseUser?.email}
+                {user?.name || user?.email || "User"}
               </div>
               <button
-                onClick={logout}
+                onClick={signOut}
                 className="rounded-md p-2 text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-white"
               >
                 <LogOut size={16} />

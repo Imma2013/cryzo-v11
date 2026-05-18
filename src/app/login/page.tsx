@@ -1,47 +1,56 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import { useAuth } from "@/providers/AuthProvider";
-import { useRouter } from "next/navigation";
-import { useEffect } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 
-export default function LoginPage() {
-  const { firebaseUser, loading, signInWithGoogle, signInWithEmail, signUpWithEmail } =
-    useAuth();
+function LoginContent() {
+  const { isAuthenticated, isLoading, signIn } = useAuth();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const rawNextRoute = searchParams.get("next");
+  const nextRoute = rawNextRoute?.startsWith("/") ? rawNextRoute : "/chat";
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isSignUp, setIsSignUp] = useState(false);
   const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
 
-  useEffect(() => {
-    if (firebaseUser && !loading) router.push("/chat");
-  }, [firebaseUser, loading, router]);
+  if (isAuthenticated && !isLoading) {
+    router.replace(nextRoute);
+    return null;
+  }
 
   const handleEmailAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
+    setSubmitting(true);
     try {
-      if (isSignUp) {
-        await signUpWithEmail(email, password);
-      } else {
-        await signInWithEmail(email, password);
-      }
+      await signIn("password", {
+        email,
+        password,
+        flow: isSignUp ? "signUp" : "signIn",
+      });
     } catch (err: any) {
       setError(err.message || "Authentication failed");
+    } finally {
+      setSubmitting(false);
     }
   };
 
   const handleGoogle = async () => {
     setError("");
     try {
-      await signInWithGoogle();
+      const result = await signIn("google", { redirectTo: nextRoute });
+      if (result.redirect) {
+        window.location.href = result.redirect.toString();
+      }
     } catch (err: any) {
       setError(err.message || "Google sign-in failed");
     }
   };
 
-  if (loading) {
+  if (isLoading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-black">
         <div className="text-zinc-400">Loading...</div>
@@ -54,14 +63,12 @@ export default function LoginPage() {
       <div className="w-full max-w-sm space-y-6">
         <div className="text-center">
           <h1 className="text-3xl font-bold text-white">Cryzo</h1>
-          <p className="mt-2 text-sm text-zinc-400">
-            AI assistant with 1000+ app integrations
-          </p>
         </div>
 
         <button
           onClick={handleGoogle}
-          className="flex w-full items-center justify-center gap-3 rounded-lg border border-zinc-700 bg-zinc-900 px-4 py-3 text-sm text-white transition-colors hover:bg-zinc-800"
+          disabled={submitting}
+          className="flex w-full items-center justify-center gap-3 rounded-lg border border-zinc-700 bg-zinc-900 px-4 py-3 text-sm text-white transition-colors hover:bg-zinc-800 disabled:opacity-50"
         >
           <svg className="h-5 w-5" viewBox="0 0 24 24">
             <path
@@ -110,7 +117,8 @@ export default function LoginPage() {
           />
           <button
             type="submit"
-            className="w-full rounded-lg bg-white py-3 text-sm font-medium text-black transition-colors hover:bg-zinc-200"
+            disabled={submitting}
+            className="w-full rounded-lg bg-white py-3 text-sm font-medium text-black transition-colors hover:bg-zinc-200 disabled:opacity-50"
           >
             {isSignUp ? "Sign Up" : "Sign In"}
           </button>
@@ -131,5 +139,19 @@ export default function LoginPage() {
         </p>
       </div>
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex min-h-screen items-center justify-center bg-black">
+          <div className="text-zinc-400">Loading...</div>
+        </div>
+      }
+    >
+      <LoginContent />
+    </Suspense>
   );
 }

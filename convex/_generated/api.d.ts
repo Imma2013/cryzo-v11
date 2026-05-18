@@ -9,6 +9,7 @@
  */
 
 import type * as artifacts from "../artifacts.js";
+import type * as auth from "../auth.js";
 import type * as conversations from "../conversations.js";
 import type * as messages from "../messages.js";
 import type * as users from "../users.js";
@@ -21,6 +22,7 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   artifacts: typeof artifacts;
+  auth: typeof auth;
   conversations: typeof conversations;
   messages: typeof messages;
   users: typeof users;

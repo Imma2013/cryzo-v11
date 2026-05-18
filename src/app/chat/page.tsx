@@ -12,7 +12,7 @@ import {
 } from "@/lib/chat/initial-message";
 
 export default function ChatEmptyPage() {
-  const { convexUserId } = useAuth();
+  const { userId } = useAuth();
   const createConversation = useMutation(api.conversations.create);
   const router = useRouter();
   const [input, setInput] = useState("");
@@ -20,14 +20,14 @@ export default function ChatEmptyPage() {
   const [isStarting, setIsStarting] = useState(false);
 
   const handleSubmit = async (files: File[] = []) => {
-    if (!convexUserId || isStarting) return;
+    if (!userId || isStarting) return;
 
     setIsStarting(true);
     try {
       const text = input.trim();
       const fileParts = await filesToUIParts(files);
       const id = await createConversation({
-        userId: convexUserId,
+        userId: userId,
         chatMode,
       });
 
@@ -62,7 +62,7 @@ export default function ChatEmptyPage() {
           onSubmit={handleSubmit}
           onStop={() => setIsStarting(false)}
           isLoading={isStarting}
-          disabled={!convexUserId}
+          disabled={!userId}
           chatMode={chatMode}
           onChatModeChange={setChatMode}
           variant="hero"
