@@ -1,4 +1,4 @@
-import { openai } from "@ai-sdk/openai";
+import { google } from "@ai-sdk/google";
 import { Composio } from "@composio/core";
 import { VercelProvider } from "@composio/vercel";
 import { streamText, stepCountIs, convertToModelMessages, type UIMessage } from "ai";
@@ -83,7 +83,7 @@ export async function POST(req: Request) {
 
   if (mode === "plan") {
     const result = streamText({
-      model: openai("gpt-5.4"),
+      model: google("gemini-3-flash-preview"),
       system: `You are Cryzo in Plan mode.
 
 Plan mode is for discussion, requirements, tradeoffs, debugging strategy, and implementation plans.
@@ -114,7 +114,7 @@ Rules:
   const tools = await session.tools();
 
   const result = streamText({
-    model: openai("gpt-5.4"),
+    model: google("gemini-3.1-pro-preview"),
     system: `You are Cryzo, an AI assistant that can perform actions via Composio tools AND build web applications.
 
 ## Tool Usage
