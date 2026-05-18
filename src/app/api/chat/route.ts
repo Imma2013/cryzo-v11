@@ -74,12 +74,16 @@ export async function POST(req: Request) {
   const mode = chatMode === "plan" ? "plan" : "build";
 
   if (userId) {
-    const hasCredits = await convex.query(api.billing.hasCredits, {
-      userId: userId as any,
-      amount: 1,
-    });
-    if (!hasCredits) {
-      return Response.json({ error: "no_credits" }, { status: 402 });
+    try {
+      const hasCredits = await convex.query(api.billing.hasCredits, {
+        userId: userId as any,
+        amount: 1,
+      });
+      if (!hasCredits) {
+        return Response.json({ error: "no_credits" }, { status: 402 });
+      }
+    } catch (e) {
+      console.error("[Billing] Credit check failed:", e);
     }
   }
 

@@ -40,6 +40,7 @@ function LoginContent() {
 
   const handleGoogle = async () => {
     setError("");
+    setSubmitting(true);
     try {
       const result = await signIn("google", { redirectTo: nextRoute });
       if (result.redirect) {
@@ -47,6 +48,7 @@ function LoginContent() {
       }
     } catch (err: any) {
       setError(err.message || "Google sign-in failed");
+      setSubmitting(false);
     }
   };
 
