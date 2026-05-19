@@ -218,14 +218,14 @@ export default function BillingPage() {
             title="Free"
             price="$0"
             cadence="/mo"
-            credits="10 daily credits, max 30/month"
+            credits="5 daily credits, max 30/month"
             features={["Private projects", "Chat workspace", "Community support"]}
             active={plan === "free"}
           />
           <PlanCard
             icon={<Sparkles size={18} />}
             title="Pro"
-            price="$20"
+            price="$15"
             cadence="/mo"
             credits="100 credits / month"
             features={[

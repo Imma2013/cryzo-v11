@@ -6,7 +6,7 @@ const DAY = 24 * 60 * 60 * 1000;
 const MONTH = 30 * DAY;
 const YEAR = 365 * DAY;
 
-const FREE_DAILY_CREDITS = 10;
+const FREE_DAILY_CREDITS = 5;
 const FREE_MONTHLY_CAP = 30;
 
 const PLAN_CREDITS = {
