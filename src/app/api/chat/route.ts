@@ -66,7 +66,7 @@ const COMPLEX_PATTERN = /\b(build|create|generate|redesign|clone|website|web app
 
 function pickModel(userMessage: string) {
   if (COMPLEX_PATTERN.test(userMessage) || userMessage.length > 200) {
-    return google("gemini-3.1-pro-preview");
+    return google("gemini-3.5-flash");
   }
   return google("gemini-3-flash-preview");
 }
