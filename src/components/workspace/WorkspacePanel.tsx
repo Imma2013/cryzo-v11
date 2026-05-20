@@ -93,13 +93,29 @@ export function WorkspacePanel({
       </div>
 
       {/* Main content area */}
-      <Group orientation="vertical" className="flex-1">
-        <Panel defaultSize={70} minSize={30}>
-          {viewMode === "preview" ? (
-            <LivePreview url={previewUrl} isBooting={isBooting} progress={progress} onElementSelected={onElementSelected} />
+      {viewMode === "preview" ? (
+        <div className="flex-1 overflow-hidden">
+          {isBooting || !previewUrl ? (
+            <div className="flex h-full flex-col items-center justify-center gap-3 bg-zinc-950">
+              <div className="relative">
+                <div className="h-10 w-10 rounded-full border-2 border-zinc-700 border-t-blue-400 animate-spin" />
+              </div>
+              <p className="text-sm text-zinc-400">
+                {progress === "writing" && "Writing files..."}
+                {progress === "installing" && "Installing dependencies..."}
+                {progress === "starting" && "Starting dev server..."}
+                {progress === "error" && "Something went wrong"}
+                {!progress && "Preparing workspace..."}
+              </p>
+            </div>
           ) : (
+            <LivePreview url={previewUrl} isBooting={isBooting} progress={progress} onElementSelected={onElementSelected} />
+          )}
+        </div>
+      ) : (
+        <Group orientation="vertical" className="flex-1">
+          <Panel defaultSize={65} minSize={30}>
             <div className="flex h-full">
-              {/* File tree */}
               <div className="w-48 border-r border-zinc-800 overflow-hidden">
                 <FileTree
                   files={files}
@@ -107,7 +123,6 @@ export function WorkspacePanel({
                   onSelect={setSelectedFile}
                 />
               </div>
-              {/* Editor */}
               <div className="flex-1 overflow-hidden">
                 {selectedFile ? (
                   <div className="flex h-full flex-col">
@@ -125,16 +140,15 @@ export function WorkspacePanel({
                 )}
               </div>
             </div>
-          )}
-        </Panel>
+          </Panel>
 
-        <Separator className="h-1 bg-zinc-800 hover:bg-zinc-700 cursor-row-resize" />
+          <Separator className="h-1 bg-zinc-800 hover:bg-zinc-700 cursor-row-resize" />
 
-        {/* Terminal */}
-        <Panel defaultSize={30} minSize={10} collapsible>
-          <WorkspaceTerminal output={terminalOutput} />
-        </Panel>
-      </Group>
+          <Panel defaultSize={35} minSize={10} collapsible>
+            <WorkspaceTerminal output={terminalOutput} />
+          </Panel>
+        </Group>
+      )}
     </div>
   );
 }
