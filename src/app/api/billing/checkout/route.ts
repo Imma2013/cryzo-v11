@@ -1,8 +1,4 @@
 import { getStripe, PLANS } from "@/lib/stripe";
-import { ConvexHttpClient } from "convex/browser";
-import { api } from "../../../../../convex/_generated/api";
-
-const convex = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
 
 export async function POST(req: Request) {
   const { plan, userId, email } = await req.json();
@@ -13,19 +9,15 @@ export async function POST(req: Request) {
 
   const planConfig = PLANS[plan as keyof typeof PLANS];
   if (!planConfig.priceId) {
-    return Response.json({ error: "Stripe price is not configured" }, { status: 500 });
+    return Response.json({ error: "Stripe price not configured" }, { status: 500 });
   }
 
   const origin = new URL(req.url).origin;
   const stripe = getStripe();
-  const subscription = await convex.query(api.billing.getSubscription, {
-    userId: userId as any,
-  });
 
   const session = await stripe.checkout.sessions.create({
     mode: "subscription",
-    customer: subscription.stripeCustomerId,
-    customer_email: subscription.stripeCustomerId ? undefined : email,
+    customer_email: email || undefined,
     line_items: [{ price: planConfig.priceId, quantity: 1 }],
     success_url: `${origin}/chat/billing?success=true`,
     cancel_url: `${origin}/chat/billing?canceled=true`,
