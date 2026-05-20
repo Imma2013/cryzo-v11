@@ -225,7 +225,7 @@ export default function BillingPage() {
           <PlanCard
             icon={<Sparkles size={18} />}
             title="Pro"
-            price="$15"
+            price="$20"
             cadence="/mo"
             credits="100 credits / month"
             features={[

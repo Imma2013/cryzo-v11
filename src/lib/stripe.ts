@@ -19,14 +19,14 @@ export function getStripe() {
 export const PLANS = {
   pro: {
     name: "Pro",
-    price: 1500,
+    price: 2000,
     credits: 100,
     priceId: process.env.STRIPE_PRO_PRICE_ID ?? "",
     topupPriceId:
       process.env.STRIPE_TOPUP_100_PRICE_ID ??
       process.env.STRIPE_TOPUP_PRO_PRICE_ID ??
       "",
-    topupPrice: 1500,
+    topupPrice: 2000,
     topupCredits: 100,
   },
   pro_plus: {
@@ -53,7 +53,7 @@ export const TOP_UP_OPTIONS = Array.from({ length: 10 }, (_, index) => {
   const credits = (index + 1) * 100;
   return {
     credits,
-    price: (credits / 100) * 1500,
+    price: (credits / 100) * 2000,
   };
 });
 
