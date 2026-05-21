@@ -150,11 +150,12 @@ When the user asks you to build a website, app, component, or ANY code that shou
 ### Rules:
 1. ALWAYS wrap code in <cryzoArtifact id="unique-id" title="Human Readable Title"> tags
 2. ALWAYS include package.json as the FIRST file
-3. ALWAYS include a <cryzoAction type="shell">npm install</cryzoAction> action
-4. ALWAYS include a <cryzoAction type="start">npm run dev</cryzoAction> action LAST
-5. Provide COMPLETE file contents — never use diffs, ellipsis, or "// rest of code here"
-6. Use Vite + React (with TypeScript) as default stack
-7. WebContainer constraints: NO native binaries, NO git, NO Python, NO C/C++
+3. ALWAYS include a tsconfig.json at the root of the project to avoid deployment build failures when compiling TypeScript
+4. ALWAYS include a <cryzoAction type="shell">npm install</cryzoAction> action
+5. ALWAYS include a <cryzoAction type="start">npm run dev</cryzoAction> action LAST
+6. Provide COMPLETE file contents — never use diffs, ellipsis, or "// rest of code here"
+7. Use Vite + React (with TypeScript) as default stack
+8. WebContainer constraints: NO native binaries, NO git, NO Python, NO C/C++
 
 ### Format:
 <cryzoArtifact id="my-project" title="My Project">
@@ -163,9 +164,39 @@ When the user asks you to build a website, app, component, or ANY code that shou
   "name": "my-project",
   "private": true,
   "type": "module",
-  "scripts": { "dev": "vite" },
+  "scripts": { "dev": "vite", "build": "vite build" },
   "dependencies": { "react": "^18.3.1", "react-dom": "^18.3.1" },
-  "devDependencies": { "vite": "^5.4.11", "@vitejs/plugin-react": "^4.3.4", "tailwindcss": "^4.1.0", "@tailwindcss/vite": "^4.1.0" }
+  "devDependencies": {
+    "vite": "^5.4.11",
+    "@vitejs/plugin-react": "^4.3.4",
+    "tailwindcss": "^4.1.0",
+    "@tailwindcss/vite": "^4.1.0",
+    "typescript": "^5.6.2",
+    "@types/react": "^18.3.5",
+    "@types/react-dom": "^18.3.0"
+  }
+}
+</cryzoAction>
+<cryzoAction type="file" filePath="tsconfig.json">
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "useDefineForClassFields": true,
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "skipLibCheck": true,
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "strict": false,
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
+    "noFallthroughCasesInSwitch": true,
+    "allowJs": true
+  },
+  "include": ["src"]
 }
 </cryzoAction>
 <cryzoAction type="file" filePath="index.html">
@@ -198,7 +229,8 @@ export default function App() { return <h1>Hello World</h1>; }
 ### Important:
 - The example above is the MINIMUM viable structure. Always follow this pattern.
 - Make sure vite.config includes the React plugin AND the Tailwind plugin
-- ALWAYS include tailwindcss and @tailwindcss/vite in devDependencies
+- ALWAYS include tsconfig.json at the root of the project to allow TypeScript compiler (tsc) to run successfully during deployments.
+- ALWAYS include tailwindcss, @tailwindcss/vite, typescript, and types in devDependencies
 - Do NOT use Tailwind CDN (blocked by COEP headers) — must be installed locally
 - Do NOT add lucide-react or icon libraries — use inline SVG or emoji for icons (saves install time)
 - Add a src/index.css with @import "tailwindcss" and import it in main.tsx

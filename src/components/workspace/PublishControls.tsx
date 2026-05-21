@@ -130,9 +130,68 @@ async function readWebContainerFiles(dir: string): Promise<PublishFile[]> {
   return files;
 }
 
-async function buildAndCollectStaticFiles(onOutput: (line: string) => void) {
+const DEFAULT_TSCONFIG = {
+  compilerOptions: {
+    target: "ES2020",
+    useDefineForClassFields: true,
+    lib: ["ES2020", "DOM", "DOM.Iterable"],
+    module: "ESNext",
+    skipLibCheck: true,
+    moduleResolution: "bundler",
+    allowImportingTsExtensions: true,
+    isolatedModules: true,
+    noEmit: true,
+    jsx: "react-jsx",
+    strict: false,
+    noUnusedLocals: false,
+    noUnusedParameters: false,
+    noFallthroughCasesInSwitch: true,
+    allowJs: true,
+  },
+  include: ["src"],
+};
+
+function ensureBuildConfig(files: PublishFile[]): PublishFile[] {
+  const packageJsonFile = files.find((f) => f.path.replace(/^\/+/, "") === "package.json");
+  const tsconfigFile = files.find((f) => f.path.replace(/^\/+/, "") === "tsconfig.json");
+
+  if (packageJsonFile && !tsconfigFile) {
+    try {
+      const pkg = JSON.parse(packageJsonFile.content);
+      const buildScript = pkg.scripts?.build || "";
+      if (buildScript.includes("tsc")) {
+        return [
+          ...files,
+          {
+            path: "tsconfig.json",
+            content: JSON.stringify(DEFAULT_TSCONFIG, null, 2),
+          },
+        ];
+      }
+    } catch {}
+  }
+  return files;
+}
+
+async function buildAndCollectStaticFiles(files: PublishFile[], onOutput: (line: string) => void) {
   const { getWebContainer, runCommand } = await import("@/lib/workspace/webcontainer");
   const wc = await getWebContainer();
+
+  const packageJsonFile = files.find((f) => f.path.replace(/^\/+/, "") === "package.json");
+  const tsconfigFile = files.find((f) => f.path.replace(/^\/+/, "") === "tsconfig.json");
+
+  if (packageJsonFile && !tsconfigFile) {
+    try {
+      const pkg = JSON.parse(packageJsonFile.content);
+      const buildScript = pkg.scripts?.build || "";
+      if (buildScript.includes("tsc")) {
+        onOutput("Injecting missing tsconfig.json to allow TypeScript build to succeed...\n");
+        await wc.fs.writeFile("tsconfig.json", JSON.stringify(DEFAULT_TSCONFIG, null, 2));
+      }
+    } catch (e) {
+      console.error("Failed to inject tsconfig.json to WebContainer", e);
+    }
+  }
 
   onOutput("$ npm run build\n");
   const exitCode = await runCommand(wc, "npm run build", onOutput);
@@ -378,13 +437,14 @@ function DeployPublishModal({
   const deployVercel = async () => {
     setStatus({ type: "loading", message: "Creating Vercel deployment..." });
     storeToken(VERCEL_TOKEN_KEY, vercelToken);
+    const filesWithConfig = ensureBuildConfig(files);
     const response = await fetch("/api/publish/vercel", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         token: vercelToken,
         projectName,
-        files,
+        files: filesWithConfig,
       }),
     });
     const data = await response.json();
@@ -411,7 +471,7 @@ function DeployPublishModal({
     storeToken(NETLIFY_TOKEN_KEY, netlifyToken);
 
     try {
-      const builtFiles = await buildAndCollectStaticFiles((line) =>
+      const builtFiles = await buildAndCollectStaticFiles(files, (line) =>
         setBuildLog((current) => current + line),
       );
 

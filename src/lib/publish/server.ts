@@ -173,6 +173,49 @@ export async function createOrUpdateGitHubRepo({
   };
 }
 
+const DEFAULT_TSCONFIG = {
+  compilerOptions: {
+    target: "ES2020",
+    useDefineForClassFields: true,
+    lib: ["ES2020", "DOM", "DOM.Iterable"],
+    module: "ESNext",
+    skipLibCheck: true,
+    moduleResolution: "bundler",
+    allowImportingTsExtensions: true,
+    isolatedModules: true,
+    noEmit: true,
+    jsx: "react-jsx",
+    strict: false,
+    noUnusedLocals: false,
+    noUnusedParameters: false,
+    noFallthroughCasesInSwitch: true,
+    allowJs: true,
+  },
+  include: ["src"],
+};
+
+export function ensureBuildConfig(files: PublishFile[]): PublishFile[] {
+  const packageJsonFile = files.find((f) => f.path.replace(/^\/+/, "") === "package.json");
+  const tsconfigFile = files.find((f) => f.path.replace(/^\/+/, "") === "tsconfig.json");
+
+  if (packageJsonFile && !tsconfigFile) {
+    try {
+      const pkg = JSON.parse(packageJsonFile.content);
+      const buildScript = pkg.scripts?.build || "";
+      if (buildScript.includes("tsc")) {
+        return [
+          ...files,
+          {
+            path: "tsconfig.json",
+            content: JSON.stringify(DEFAULT_TSCONFIG, null, 2),
+          },
+        ];
+      }
+    } catch {}
+  }
+  return files;
+}
+
 export async function createVercelDeployment({
   token,
   projectName,
@@ -183,7 +226,8 @@ export async function createVercelDeployment({
   files: PublishFile[];
 }) {
   const name = sanitizeProjectName(projectName, "cryzo-app");
-  const normalizedFiles = normalizePublishFiles(files);
+  const filesWithConfig = ensureBuildConfig(files);
+  const normalizedFiles = normalizePublishFiles(filesWithConfig);
   if (normalizedFiles.length === 0) throw new Error("No files to publish");
 
   const response = await fetch(
