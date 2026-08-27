@@ -19,22 +19,24 @@ export default function ChatLayout({ children }: { children: React.ReactNode }) 
 
   if (isLoading || !isAuthenticated) {
     return (
-      <div className="flex h-screen items-center justify-center bg-black">
+      <div className="flex h-dvh items-center justify-center bg-black">
         <div className="text-sm text-zinc-400">Loading...</div>
       </div>
     );
   }
 
   return (
-    <div className="flex h-screen bg-black">
-      <Suspense
-        fallback={
-          <div className="h-full w-64 border-r border-zinc-800 bg-zinc-950" />
-        }
-      >
-        <Sidebar />
-      </Suspense>
-      <main className="flex-1 overflow-hidden">{children}</main>
+    <div className="flex h-dvh overflow-hidden bg-black">
+      <div className="hidden h-full md:block">
+        <Suspense
+          fallback={
+            <div className="h-full w-64 border-r border-zinc-800 bg-zinc-950" />
+          }
+        >
+          <Sidebar />
+        </Suspense>
+      </div>
+      <main className="min-w-0 flex-1 overflow-hidden">{children}</main>
     </div>
   );
 }

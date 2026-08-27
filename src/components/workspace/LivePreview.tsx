@@ -24,20 +24,25 @@ export function LivePreview({
   isBooting,
   progress,
   onElementSelected,
+  mobile = false,
 }: {
   url: string | null;
   isBooting: boolean;
   progress: ProgressStage;
   onElementSelected?: (info: ElementInfo) => void;
+  mobile?: boolean;
 }) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [inspectorActive, setInspectorActive] = useState(false);
-  const [deviceIdx, setDeviceIdx] = useState(0);
+  const [deviceIdx, setDeviceIdx] = useState(mobile ? 2 : 0);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [selectedElement, setSelectedElement] = useState<ElementInfo | null>(null);
 
-  // Listen for inspector messages from iframe
+  useEffect(() => {
+    if (mobile) setDeviceIdx(2);
+  }, [mobile]);
+
   useEffect(() => {
     function handleMessage(e: MessageEvent) {
       if (!e.data?.type) return;
@@ -46,7 +51,6 @@ export function LivePreview({
         setSelectedElement(info);
         onElementSelected?.(info);
         setInspectorActive(false);
-        // Deactivate inspector after selection
         iframeRef.current?.contentWindow?.postMessage(
           { type: "INSPECTOR_ACTIVATE", active: false },
           "*"
@@ -68,9 +72,7 @@ export function LivePreview({
   }, [inspectorActive]);
 
   const handleRefresh = () => {
-    if (iframeRef.current && url) {
-      iframeRef.current.src = url;
-    }
+    if (iframeRef.current && url) iframeRef.current.src = url;
   };
 
   const toggleFullscreen = async () => {
@@ -89,10 +91,10 @@ export function LivePreview({
 
   if (!url) {
     return (
-      <div className="flex h-full flex-col items-center justify-center bg-zinc-900 text-sm text-zinc-500">
+      <div className={`flex h-full flex-col items-center justify-center text-sm ${mobile ? "bg-[#f8f8f6] text-zinc-500" : "bg-zinc-900 text-zinc-500"}`}>
         {isBooting ? (
           <div className="flex flex-col items-center gap-3">
-            <Loader2 size={24} className="animate-spin text-zinc-400" />
+            <Loader2 size={24} className="animate-spin" />
             <span>
               {progress === "writing" && "Writing project files..."}
               {progress === "installing" && "Installing dependencies..."}
@@ -101,7 +103,7 @@ export function LivePreview({
             </span>
           </div>
         ) : progress === "error" ? (
-          <span className="text-red-400">Dev server failed. Check terminal.</span>
+          <span className="text-red-500">Dev server failed. Check terminal.</span>
         ) : (
           <span>Waiting for dev server...</span>
         )}
@@ -112,36 +114,31 @@ export function LivePreview({
   const device = DEVICES[deviceIdx];
 
   return (
-    <div ref={containerRef} className="flex h-full flex-col bg-zinc-900">
-      {/* Toolbar */}
-      <div className="flex items-center gap-1 border-b border-zinc-800 px-2 py-1">
+    <div ref={containerRef} className={`flex h-full flex-col ${mobile ? "bg-[#f8f8f6]" : "bg-zinc-900"}`}>
+      <div className={`flex items-center gap-1 border-b px-2 py-1.5 ${mobile ? "border-zinc-200 bg-white" : "border-zinc-800"}`}>
         <button
           onClick={handleRefresh}
-          className="rounded p-1.5 text-zinc-400 hover:bg-zinc-800 hover:text-white"
+          className={`rounded-lg p-2 ${mobile ? "text-zinc-500 hover:bg-zinc-100 hover:text-zinc-950" : "text-zinc-400 hover:bg-zinc-800 hover:text-white"}`}
           title="Refresh"
         >
-          <RefreshCw size={13} />
+          <RefreshCw size={14} />
         </button>
 
-        <div className="mx-1 h-4 w-px bg-zinc-800" />
-
-        {/* Inspector toggle */}
         <button
           onClick={toggleInspector}
-          className={`rounded p-1.5 transition-colors ${
+          className={`rounded-lg p-2 transition-colors ${
             inspectorActive
               ? "bg-blue-600 text-white"
-              : "text-zinc-400 hover:bg-zinc-800 hover:text-white"
+              : mobile
+                ? "text-zinc-500 hover:bg-zinc-100 hover:text-zinc-950"
+                : "text-zinc-400 hover:bg-zinc-800 hover:text-white"
           }`}
           title="Select element"
         >
-          <Crosshair size={13} />
+          <Crosshair size={14} />
         </button>
 
-        <div className="mx-1 h-4 w-px bg-zinc-800" />
-
-        {/* Device size buttons */}
-        {DEVICES.map((d, i) => (
+        {!mobile && DEVICES.map((d, i) => (
           <button
             key={d.name}
             onClick={() => setDeviceIdx(i)}
@@ -156,32 +153,27 @@ export function LivePreview({
           </button>
         ))}
 
-        <div className="mx-1 h-4 w-px bg-zinc-800" />
-
-        {/* Fullscreen */}
         <button
           onClick={toggleFullscreen}
-          className="rounded p-1.5 text-zinc-400 hover:bg-zinc-800 hover:text-white"
+          className={`rounded-lg p-2 ${mobile ? "text-zinc-500 hover:bg-zinc-100 hover:text-zinc-950" : "text-zinc-400 hover:bg-zinc-800 hover:text-white"}`}
           title={isFullscreen ? "Exit fullscreen" : "Fullscreen"}
         >
-          {isFullscreen ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
+          {isFullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
         </button>
 
-        {/* Selected element indicator */}
         {selectedElement && (
-          <div className="ml-auto truncate rounded bg-zinc-800 px-2 py-0.5 text-[10px] text-zinc-400">
+          <div className={`ml-auto max-w-[42%] truncate rounded-md px-2 py-1 text-[10px] ${mobile ? "bg-zinc-100 text-zinc-500" : "bg-zinc-800 text-zinc-400"}`}>
             {selectedElement.selector}
           </div>
         )}
       </div>
 
-      {/* Preview iframe */}
-      <div className="flex flex-1 items-start justify-center overflow-hidden bg-zinc-950 p-2">
+      <div className={`flex flex-1 items-start justify-center overflow-hidden ${mobile ? "bg-[#f4f4f1] p-0" : "bg-zinc-950 p-2"}`}>
         <iframe
           ref={iframeRef}
           src={url}
-          className="h-full rounded bg-white shadow-lg"
-          style={{ width: device.width, maxWidth: "100%" }}
+          className={`h-full bg-white ${mobile ? "w-full" : "rounded shadow-lg"}`}
+          style={{ width: mobile ? "100%" : device.width, maxWidth: "100%" }}
           sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
         />
       </div>
