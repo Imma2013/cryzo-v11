@@ -59,38 +59,19 @@ export default function ConversationPage({
   if (isMobile) {
     if (!hasArtifacts) {
       return (
-        <div className="flex h-full flex-col bg-black">
-          <div className="flex h-14 shrink-0 items-center border-b border-zinc-800 px-4">
-            <CryzoLogo showWordmark className="text-white" />
-          </div>
-          <div className="min-h-0 flex-1">
-            <ChatArea
-              conversationId={id}
-              onArtifactCreated={() => setWorkspaceOpen(true)}
-              selectedElement={selectedElement}
-              onElementUsed={() => setSelectedElement(null)}
-            />
-          </div>
+        <div className="h-full bg-black">
+          <ChatArea
+            conversationId={id}
+            onArtifactCreated={() => setWorkspaceOpen(true)}
+            selectedElement={selectedElement}
+            onElementUsed={() => setSelectedElement(null)}
+          />
         </div>
       );
     }
 
     return (
       <div className="relative flex h-full flex-col overflow-hidden bg-[#f7f7f5] text-zinc-950">
-        <header className="flex h-14 shrink-0 items-center justify-between border-b border-zinc-200 bg-white px-3">
-          <CryzoLogo showWordmark className="text-zinc-950" />
-          <div className="rounded-xl bg-zinc-100 p-1 text-xs font-medium text-zinc-500">
-            <span className="inline-flex rounded-lg bg-white px-3 py-1.5 text-zinc-950 shadow-sm">Preview</span>
-            <button
-              type="button"
-              onClick={() => setMobileChatOpen(true)}
-              className="px-3 py-1.5"
-            >
-              Chat
-            </button>
-          </div>
-        </header>
-
         <div className="min-h-0 flex-1 p-2 pb-24">
           <WorkspacePanel
             conversationId={id}
