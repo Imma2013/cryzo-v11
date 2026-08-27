@@ -10,7 +10,6 @@ let activeDevProcess: { kill: () => void } | null = null;
 async function bootWebContainer(): Promise<WebContainer> {
   const wc = await WebContainer.boot({ coep: "credentialless" });
 
-  // Inject inspector script into all preview iframes once per browser session.
   try {
     const res = await fetch("/inspector-script.js");
     const script = await res.text();
@@ -26,8 +25,6 @@ async function bootWebContainer(): Promise<WebContainer> {
 export async function getWebContainer(): Promise<WebContainer> {
   if (instance) return instance;
 
-  // Bolt-style singleton promise: every caller awaits the same cold boot rather
-  // than polling and risking another boot after a UI remount.
   if (!bootPromise) {
     bootPromise = bootWebContainer();
   }
@@ -45,33 +42,84 @@ export function prewarmWebContainer() {
 }
 
 export async function prepareWorkspace(
-  wc: WebContainer,
+  _wc: WebContainer,
   workspaceId: string,
 ): Promise<void> {
   if (activeWorkspaceId === workspaceId) return;
 
-  // A new conversation can reuse the expensive WebContainer + npm cache, but
-  // should not inherit the previous app's source files or running dev server.
-  if (activeWorkspaceId !== null) {
-    try {
-      activeDevProcess?.kill();
-    } catch {}
-    activeDevProcess = null;
+  // Switching conversations should stop the previous dev server, but it must
+  // never erase the old source tree before the target conversation has been
+  // restored. Persisted Convex state is restored first; stale files are pruned
+  // only after the target files have been written.
+  try {
+    activeDevProcess?.kill();
+  } catch {}
+  activeDevProcess = null;
+  activeWorkspaceId = workspaceId;
+}
 
-    try {
-      const entries = await wc.fs.readdir(".");
-      for (const entry of entries) {
-        // Keep node_modules around. The action runner fingerprints package.json
-        // and will reconcile dependencies only when the manifest changes.
-        if (entry === "node_modules") continue;
-        try {
-          await wc.fs.rm(entry, { recursive: true, force: true });
-        } catch {}
-      }
-    } catch {}
+function normalizePath(path: string) {
+  return path.replace(/^\.\//, "").replace(/^\/+/, "").replace(/\/+$/, "");
+}
+
+export async function pruneWorkspaceFiles(
+  wc: WebContainer,
+  actions: ArtifactAction[],
+): Promise<void> {
+  const desiredFiles = new Set<string>();
+  const desiredDirs = new Set<string>();
+
+  for (const action of actions) {
+    if (action.type !== "file" || !action.filePath) continue;
+    const filePath = normalizePath(action.filePath);
+    desiredFiles.add(filePath);
+
+    const parts = filePath.split("/");
+    for (let i = 1; i < parts.length; i++) {
+      desiredDirs.add(parts.slice(0, i).join("/"));
+    }
   }
 
-  activeWorkspaceId = workspaceId;
+  const pruneDir = async (dir: string) => {
+    let entries: string[];
+    try {
+      entries = await wc.fs.readdir(dir || ".");
+    } catch {
+      return;
+    }
+
+    for (const entry of entries) {
+      if (!dir && entry === "node_modules") continue;
+
+      const path = normalizePath(dir ? `${dir}/${entry}` : entry);
+      let isDirectory = false;
+      try {
+        await wc.fs.readdir(path);
+        isDirectory = true;
+      } catch {
+        isDirectory = false;
+      }
+
+      if (isDirectory) {
+        if (!desiredDirs.has(path)) {
+          try {
+            await wc.fs.rm(path, { recursive: true, force: true });
+          } catch {}
+          continue;
+        }
+        await pruneDir(path);
+        continue;
+      }
+
+      if (!desiredFiles.has(path)) {
+        try {
+          await wc.fs.rm(path, { force: true });
+        } catch {}
+      }
+    }
+  };
+
+  await pruneDir("");
 }
 
 export function getInstalledPackageManifest() {
