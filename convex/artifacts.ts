@@ -32,6 +32,13 @@ const snapshotFilesValidator = v.array(
   }),
 );
 
+const snapshotRuntimeActionsValidator = v.array(
+  v.object({
+    type: v.union(v.literal("shell"), v.literal("start")),
+    content: v.string(),
+  }),
+);
+
 export const create = mutation({
   args: {
     conversationId: v.id("conversations"),
@@ -103,6 +110,7 @@ export const saveWorkspaceSnapshot = mutation({
   args: {
     conversationId: v.id("conversations"),
     files: snapshotFilesValidator,
+    runtimeActions: snapshotRuntimeActionsValidator,
   },
   handler: async (ctx, args) => {
     await requireOwnedConversation(ctx, args.conversationId);
@@ -117,6 +125,7 @@ export const saveWorkspaceSnapshot = mutation({
     const value = {
       conversationId: args.conversationId,
       files: args.files,
+      runtimeActions: args.runtimeActions,
       updatedAt: Date.now(),
     };
 
