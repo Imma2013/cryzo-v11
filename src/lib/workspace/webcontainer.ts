@@ -28,8 +28,10 @@ function normalizeRelativePath(path: string) {
 }
 
 async function bootWebContainer(): Promise<WebContainer> {
+  // Cryzo is served with COEP: require-corp in next.config.ts. WebContainer's
+  // boot mode must match the page's isolation mode, especially on Safari/iOS.
   const wc = await WebContainer.boot({
-    coep: "credentialless",
+    coep: "require-corp",
     forwardPreviewErrors: true,
   });
 
