@@ -15,6 +15,19 @@ type GitHubRepo = {
   private: boolean;
 };
 
+const CRYZO_WATERMARK = `
+<!-- cryzo-watermark -->
+<a data-cryzo-watermark href="https://cryzo.me" target="_blank" rel="noopener noreferrer" aria-label="Built with Cryzo" style="position:fixed;left:16px;bottom:16px;z-index:2147483647;display:inline-flex;align-items:center;gap:8px;height:40px;padding:0 12px;border-radius:12px;background:#050505;color:#fff;text-decoration:none;font:600 12px/1 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;box-shadow:0 12px 30px rgba(0,0,0,.22);border:1px solid rgba(255,255,255,.12);">
+  <svg width="22" height="22" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style="display:block;flex:none">
+    <defs><linearGradient id="cryzo-watermark-gradient" x1="6" y1="5" x2="26" y2="27" gradientUnits="userSpaceOnUse"><stop stop-color="#8B5CF6"/><stop offset=".52" stop-color="#60A5FA"/><stop offset="1" stop-color="#22D3EE"/></linearGradient></defs>
+    <rect width="32" height="32" rx="10" fill="#070A13"/>
+    <path d="M21.8 8.4A9.3 9.3 0 1 0 23.6 22l-4.4-3a4.2 4.2 0 1 1-1-6.7l3.6-3.9Z" fill="url(#cryzo-watermark-gradient)"/>
+    <path d="m20.3 13.1 4.5 2.9-4.5 2.9a5 5 0 0 0 0-5.8Z" fill="white" fill-opacity=".95"/>
+  </svg>
+  <span>Built with <strong>Cryzo</strong></span>
+</a>
+<!-- /cryzo-watermark -->`;
+
 export function sanitizeProjectName(name: string, fallback = "cryzo-project") {
   return (
     name
@@ -34,6 +47,28 @@ export function normalizePublishFiles(files: PublishFile[]) {
       content: file.content,
     }))
     .filter((file) => file.path && !file.path.includes(".."));
+}
+
+export function addCryzoWatermark(files: PublishFile[]): PublishFile[] {
+  const rootIndex = files.find(
+    (file) => file.path.replace(/^\/+/, "").toLowerCase() === "index.html",
+  );
+  const fallbackIndex = files.find((file) =>
+    file.path.replace(/^\/+/, "").toLowerCase().endsWith("/index.html"),
+  );
+  const indexFile = rootIndex || fallbackIndex;
+
+  if (!indexFile || indexFile.content.includes("data-cryzo-watermark")) {
+    return files;
+  }
+
+  const markedContent = /<\/body>/i.test(indexFile.content)
+    ? indexFile.content.replace(/<\/body>/i, `${CRYZO_WATERMARK}\n</body>`)
+    : `${indexFile.content}\n${CRYZO_WATERMARK}\n`;
+
+  return files.map((file) =>
+    file === indexFile ? { ...file, content: markedContent } : file,
+  );
 }
 
 export async function githubFetch<T>(
@@ -77,7 +112,7 @@ export async function createOrUpdateGitHubRepo({
 }) {
   const user = await getGitHubUser(token);
   const repo = sanitizeProjectName(repoName);
-  const normalizedFiles = normalizePublishFiles(files);
+  const normalizedFiles = normalizePublishFiles(addCryzoWatermark(files));
   if (normalizedFiles.length === 0) throw new Error("No files to publish");
 
   let repoInfo: GitHubRepo;
@@ -226,7 +261,7 @@ export async function createVercelDeployment({
   files: PublishFile[];
 }) {
   const name = sanitizeProjectName(projectName, "cryzo-app");
-  const filesWithConfig = ensureBuildConfig(files);
+  const filesWithConfig = ensureBuildConfig(addCryzoWatermark(files));
   const normalizedFiles = normalizePublishFiles(filesWithConfig);
   if (normalizedFiles.length === 0) throw new Error("No files to publish");
 
@@ -287,7 +322,9 @@ export async function createNetlifyDeploy({
   siteName: string;
   files: PublishFile[];
 }) {
-  const normalizedFiles = normalizePublishFiles(files);
+  const normalizedFiles = normalizePublishFiles(
+    ensureBuildConfig(addCryzoWatermark(files)),
+  );
   if (normalizedFiles.length === 0) throw new Error("No files to publish");
 
   let targetSiteId = siteId;
