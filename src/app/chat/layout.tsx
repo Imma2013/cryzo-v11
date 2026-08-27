@@ -27,10 +27,10 @@ export default function ChatLayout({ children }: { children: React.ReactNode }) 
 
   return (
     <div className="flex h-dvh overflow-hidden bg-black">
-      <div className="hidden h-full md:block">
+      <div className="h-full shrink-0">
         <Suspense
           fallback={
-            <div className="h-full w-64 border-r border-zinc-800 bg-zinc-950" />
+            <div className="h-full w-14 border-r border-zinc-800 bg-zinc-950 md:w-64" />
           }
         >
           <Sidebar />
