@@ -22,7 +22,7 @@ export default function ConversationPage({
   const [selectedElement, setSelectedElement] = useState<ElementInfo | null>(null);
   const [mobileChatOpen, setMobileChatOpen] = useState(false);
   const [mobileChatExpanded, setMobileChatExpanded] = useState(false);
-  const [isMobile, setIsMobile] = useState(false);
+  const [isMobile, setIsMobile] = useState<boolean | null>(null);
 
   const artifacts = useQuery(api.artifacts.listByConversation, {
     conversationId: id,
@@ -36,6 +36,17 @@ export default function ConversationPage({
     sync();
     media.addEventListener("change", sync);
     return () => media.removeEventListener("change", sync);
+  }, []);
+
+  // Bolt.diy starts one shared WebContainer promise early and keeps it warm.
+  // Do the same while the user is chatting / the model is generating so the
+  // cold boot happens before package installation becomes visible.
+  useEffect(() => {
+    void import("@/lib/workspace/webcontainer")
+      .then(({ prewarmWebContainer }) => prewarmWebContainer())
+      .catch(() => {
+        // useWorkspace surfaces a useful error if WebContainer really fails.
+      });
   }, []);
 
   useEffect(() => {
@@ -62,6 +73,14 @@ export default function ConversationPage({
       setMobileChatOpen(true);
     }
   }, []);
+
+  // Do not briefly mount the desktop WorkspacePanel on an iPhone before the
+  // media query effect runs. That old false-first render could start an npm
+  // install, immediately unmount it, tear down WebContainer, then cold boot a
+  // second mobile workspace.
+  if (isMobile === null) {
+    return <div className="h-full bg-black" />;
+  }
 
   if (isMobile) {
     if (!hasArtifacts) {
