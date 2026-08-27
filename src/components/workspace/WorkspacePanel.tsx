@@ -39,21 +39,23 @@ export function WorkspacePanel({
 
   return (
     <div
-      className={`flex h-full flex-col overflow-hidden ${
+      className={`flex h-full min-h-0 flex-col overflow-hidden ${
         mobile
-          ? "rounded-2xl border border-zinc-200 bg-white shadow-sm"
+          ? "bg-white"
           : "rounded-lg border border-zinc-800 bg-zinc-950"
       }`}
     >
       <div
-        className={`flex items-center gap-1 border-b px-3 py-2 ${
-          mobile ? "border-zinc-200 bg-white" : "border-zinc-800"
+        className={`flex shrink-0 items-center gap-1 border-b ${
+          mobile
+            ? "h-14 border-zinc-200 bg-[#faf9f7] px-3"
+            : "border-zinc-800 px-3 py-2"
         }`}
       >
-        <div className={`flex rounded-md p-0.5 ${mobile ? "bg-zinc-100" : "bg-zinc-900"}`}>
+        <div className={`flex rounded-lg p-0.5 ${mobile ? "border border-zinc-200 bg-[#f1efeb]" : "bg-zinc-900"}`}>
           <button
             onClick={() => setViewMode("preview")}
-            className={`flex items-center gap-1.5 rounded px-3 py-1 text-xs font-medium transition-colors ${
+            className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
               viewMode === "preview"
                 ? mobile
                   ? "bg-white text-zinc-950 shadow-sm"
@@ -63,12 +65,12 @@ export function WorkspacePanel({
                   : "text-zinc-400 hover:text-white"
             }`}
           >
-            <Eye size={12} />
+            <Eye size={13} />
             Preview
           </button>
           <button
             onClick={() => setViewMode("code")}
-            className={`flex items-center gap-1.5 rounded px-3 py-1 text-xs font-medium transition-colors ${
+            className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
               viewMode === "code"
                 ? mobile
                   ? "bg-white text-zinc-950 shadow-sm"
@@ -78,7 +80,7 @@ export function WorkspacePanel({
                   : "text-zinc-400 hover:text-white"
             }`}
           >
-            <Code2 size={12} />
+            <Code2 size={13} />
             Code
           </button>
         </div>
@@ -106,14 +108,14 @@ export function WorkspacePanel({
                 {progress === "starting" && "Starting..."}
               </span>
             ) : progress === "ready" ? (
-              <span className="text-emerald-500">Ready</span>
+              <span className="text-emerald-600">Ready</span>
             ) : null}
           </div>
         </div>
       </div>
 
       {viewMode === "preview" ? (
-        <div className="flex-1 overflow-hidden">
+        <div className="min-h-0 flex-1 overflow-hidden">
           {isBooting || !previewUrl ? (
             <div
               className={`flex h-full flex-col items-center justify-center gap-3 ${
