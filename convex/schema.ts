@@ -55,6 +55,12 @@ export default defineSchema({
         content: v.string(),
       }),
     ),
+    runtimeActions: v.array(
+      v.object({
+        type: v.union(v.literal("shell"), v.literal("start")),
+        content: v.string(),
+      }),
+    ),
     updatedAt: v.number(),
   }).index("by_conversation", ["conversationId"]),
 
