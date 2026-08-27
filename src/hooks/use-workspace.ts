@@ -35,7 +35,7 @@ export function useWorkspace(conversationId: Id<"conversations">) {
   const [files, setFiles] = useState<FileMap>({});
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [terminalOutput, setTerminalOutput] = useState("");
-  const [progress, setProgress] = useState<ProgressStage>("writing");
+  const [progress, setProgress] = useState<ProgressStage>("preparing");
   const [error, setError] = useState<string | null>(null);
   const [isBooting, setIsBooting] = useState(true);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
@@ -57,17 +57,16 @@ export function useWorkspace(conversationId: Id<"conversations">) {
     [artifacts],
   );
 
+  // Convex is the durable source of truth. The snapshot gives us the latest
+  // complete project, while persisted artifact writes are replayed on top so a
+  // just-finished edit wins even if snapshot persistence is still catching up.
   const restoredFileMap = useMemo<FileMap>(() => {
     const fileMap: FileMap = {};
 
-    // Bolt-style restore: the persisted snapshot is the baseline filesystem.
-    // Convex is the source of truth here, not the live WebContainer instance.
     for (const file of snapshot?.files ?? []) {
       addFileToMap(fileMap, file.path, file.content);
     }
 
-    // Replay persisted artifact writes over the snapshot so a just-created
-    // artifact always wins even if the snapshot mutation is still catching up.
     for (const action of allArtifactActions) {
       if (action.type === "file" && action.filePath) {
         addFileToMap(fileMap, action.filePath, action.content);
@@ -76,6 +75,15 @@ export function useWorkspace(conversationId: Id<"conversations">) {
 
     return fileMap;
   }, [snapshot?.files, allArtifactActions]);
+
+  const snapshotFiles = useMemo(
+    () => fileMapToSnapshotFiles(restoredFileMap),
+    [restoredFileMap],
+  );
+  const workspaceSignature = useMemo(
+    () => JSON.stringify(snapshotFiles),
+    [snapshotFiles],
+  );
 
   const runtimeActions = useMemo<ArtifactAction[]>(() => {
     const persistedRuntime = allArtifactActions.filter(
@@ -90,8 +98,11 @@ export function useWorkspace(conversationId: Id<"conversations">) {
     }));
   }, [allArtifactActions, snapshot?.runtimeActions]);
 
-  // Reset React state when conversation changes. The WebContainer stays warm,
-  // while every conversation's actual project state stays persisted in Convex.
+  const packageManifest =
+    restoredFileMap["package.json"]?.type === "file"
+      ? restoredFileMap["package.json"].content ?? null
+      : null;
+
   useEffect(() => {
     if (conversationId !== convIdRef.current) {
       convIdRef.current = conversationId;
@@ -101,7 +112,7 @@ export function useWorkspace(conversationId: Id<"conversations">) {
       setFiles({});
       setPreviewUrl(null);
       setTerminalOutput("");
-      setProgress("writing");
+      setProgress("preparing");
       setError(null);
       setIsBooting(true);
       setInitialBootFinished(false);
@@ -120,7 +131,7 @@ export function useWorkspace(conversationId: Id<"conversations">) {
   const handleProgress = useCallback((stage: ProgressStage) => {
     setProgress(stage);
     if (stage === "error") {
-      setError("Something went wrong. Check terminal for details.");
+      setError("Preview runtime failed. Check the terminal output for details.");
       setIsBooting(false);
     }
     if (stage === "ready") {
@@ -128,12 +139,10 @@ export function useWorkspace(conversationId: Id<"conversations">) {
     }
   }, []);
 
-  // Track which artifacts have been applied to the currently running project.
   const appliedArtifactsRef = useRef<Set<string>>(new Set());
 
-  // Populate the Code tab immediately from persisted Convex state. Do this
-  // before waiting on WebContainer cleanup/boot/install so old chats never look
-  // like their source files were deleted while the runtime is preparing.
+  // The Code tab is populated directly from Convex. This is independent of the
+  // WebContainer lifecycle, so saved files never disappear while preview boots.
   useEffect(() => {
     if (artifacts === undefined || snapshot === undefined) return;
 
@@ -148,14 +157,12 @@ export function useWorkspace(conversationId: Id<"conversations">) {
     });
   }, [artifacts, snapshot, restoredFileMap]);
 
-  // Backfill and continually refresh a complete filesystem snapshot in Convex.
-  // This is the server-backed equivalent of bolt.diy's local snapshot restore,
-  // and it means a past chat can recover independently of WebContainer memory.
+  // Backfill older chats and keep one complete authenticated workspace snapshot
+  // in Convex. Existing artifact history remains intact as the audit/history log.
   useEffect(() => {
     if (artifacts === undefined || snapshot === undefined) return;
-    if (Object.keys(restoredFileMap).length === 0) return;
+    if (snapshotFiles.length === 0) return;
 
-    const filesPayload = fileMapToSnapshotFiles(restoredFileMap);
     const runtimePayload = runtimeActions
       .filter(
         (action): action is ArtifactAction & { type: "shell" | "start" } =>
@@ -163,7 +170,7 @@ export function useWorkspace(conversationId: Id<"conversations">) {
       )
       .map((action) => ({ type: action.type, content: action.content }));
     const desiredSignature = JSON.stringify({
-      files: filesPayload,
+      files: snapshotFiles,
       runtimeActions: runtimePayload,
     });
     const storedSignature = JSON.stringify({
@@ -182,7 +189,7 @@ export function useWorkspace(conversationId: Id<"conversations">) {
     snapshotSignatureRef.current = desiredSignature;
     void saveWorkspaceSnapshot({
       conversationId,
-      files: filesPayload,
+      files: snapshotFiles,
       runtimeActions: runtimePayload,
     }).catch(() => {
       if (snapshotSignatureRef.current === desiredSignature) {
@@ -192,44 +199,41 @@ export function useWorkspace(conversationId: Id<"conversations">) {
   }, [
     artifacts,
     conversationId,
-    restoredFileMap,
     runtimeActions,
     saveWorkspaceSnapshot,
     snapshot,
+    snapshotFiles,
   ]);
 
-  // Initial restore/boot. Persisted files are already visible in React before
-  // this starts. The runtime is disposable; Convex is the durable workspace.
+  // Preview hydration is intentionally separate from persistence. Each chat is
+  // mounted into its own directory inside the one warm WebContainer, matching
+  // the old working behavior (projects cannot overwrite each other) while still
+  // retaining the boot/npm-cache speedups added today.
   useEffect(() => {
     if (artifacts === undefined || snapshot === undefined || bootedRef.current) {
       return;
     }
-    if (Object.keys(restoredFileMap).length === 0) return;
+    if (snapshotFiles.length === 0) return;
 
     bootedRef.current = true;
     const bootConversationId = conversationId;
 
-    // Mark the artifacts included in this restore before doing async work. This
-    // prevents the update effect from racing the initial restore and writing the
-    // same files while a conversation switch is being prepared.
     for (const artifact of artifacts) {
       appliedArtifactsRef.current.add(artifact._id);
     }
 
-    const actionsForRestore: ArtifactAction[] = [
-      ...fileMapToActions(restoredFileMap),
-      ...runtimeActions,
-    ];
+    const fileActions = fileMapToActions(restoredFileMap);
 
     const boot = async () => {
-      const { getWebContainer, prepareWorkspace } = await import(
+      const { getWebContainer, hydrateWorkspace } = await import(
         "@/lib/workspace/webcontainer"
       );
       const { runActions } = await import("@/lib/workspace/action-runner");
 
       setIsBooting(true);
       setError(null);
-      appendOutput("Restoring saved workspace...\r\n");
+      setProgress("preparing");
+      appendOutput("Preparing saved project...\r\n");
 
       try {
         const bootTimeout = new Promise<never>((_, reject) =>
@@ -247,15 +251,33 @@ export function useWorkspace(conversationId: Id<"conversations">) {
 
         if (convIdRef.current !== bootConversationId) return;
 
-        await prepareWorkspace(wc, String(bootConversationId));
-        appendOutput("Saved files restored. Starting runtime...\r\n\r\n");
+        const hydration = await hydrateWorkspace(
+          wc,
+          String(bootConversationId),
+          fileActions,
+          workspaceSignature,
+        );
+        appendOutput(
+          hydration.reused
+            ? "Saved project already hydrated.\r\n\r\n"
+            : "Saved project mounted.\r\n\r\n",
+        );
 
+        if (convIdRef.current !== bootConversationId) return;
+
+        // Files are already mounted. runActions only reconciles dependencies and
+        // starts the dev server, so reopening a saved chat never shows a fake
+        // "Writing files" phase.
         await runActions(
           wc,
-          actionsForRestore,
+          runtimeActions,
           appendOutput,
           handleServerReady,
           handleProgress,
+          {
+            filesAlreadyPrepared: true,
+            packageManifest,
+          },
         );
 
         if (convIdRef.current === bootConversationId) {
@@ -265,6 +287,7 @@ export function useWorkspace(conversationId: Id<"conversations">) {
         if (convIdRef.current !== bootConversationId) return;
         appendOutput(`\r\nFatal error: ${err.message}\r\n`);
         setError(err.message);
+        setProgress("error");
         setIsBooting(false);
       }
     };
@@ -276,14 +299,16 @@ export function useWorkspace(conversationId: Id<"conversations">) {
     conversationId,
     handleProgress,
     handleServerReady,
+    packageManifest,
     restoredFileMap,
     runtimeActions,
     snapshot,
+    snapshotFiles.length,
+    workspaceSignature,
   ]);
 
-  // Apply artifacts created after the restored snapshot/initial boot. Waiting
-  // for initialBootFinished avoids the old race where a second writer could run
-  // while the restore path was still clearing/preparing the WebContainer.
+  // Later AI edits are incremental writes inside only this conversation's
+  // isolated directory. Other chats and their dependencies are untouched.
   useEffect(() => {
     if (!artifacts || !initialBootFinished) return;
 
@@ -297,13 +322,14 @@ export function useWorkspace(conversationId: Id<"conversations">) {
     }
 
     const applyUpdates = async () => {
-      const { getWebContainer, writeFiles } = await import(
+      const { getWebContainer, prepareWorkspace, writeFiles } = await import(
         "@/lib/workspace/webcontainer"
       );
 
       try {
         const wc = await getWebContainer();
         if (convIdRef.current !== conversationId) return;
+        await prepareWorkspace(wc, String(conversationId));
 
         const fileActions = newArtifacts.flatMap((artifact) =>
           artifact.actions.filter(
@@ -313,7 +339,7 @@ export function useWorkspace(conversationId: Id<"conversations">) {
         );
 
         if (fileActions.length > 0) {
-          appendOutput(`\r\nWriting ${fileActions.length} file(s)...\r\n`);
+          appendOutput(`\r\nUpdating ${fileActions.length} file(s)...\r\n`);
           await writeFiles(wc, fileActions);
           appendOutput("Done. HMR should refresh.\r\n");
         }
