@@ -92,6 +92,7 @@ export function ChatInput({
   chatMode,
   onChatModeChange,
   variant = "dock",
+  appearance = "dark",
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -102,6 +103,7 @@ export function ChatInput({
   chatMode: ChatMode;
   onChatModeChange: (mode: ChatMode) => void;
   variant?: "dock" | "hero";
+  appearance?: "dark" | "light";
 }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -262,18 +264,26 @@ export function ChatInput({
 
   const canSend = value.trim().length > 0 || attachments.length > 0;
   const isHero = variant === "hero";
+  const isLight = appearance === "light";
 
   return (
     <div
       className={cn(
-        isHero ? "w-full px-0 py-0" : "border-t border-zinc-800 bg-black px-4 py-4",
+        isHero
+          ? "w-full px-0 py-0"
+          : isLight
+            ? "shrink-0 border-t border-zinc-200 bg-[#f8f7f4] px-4 pb-[max(16px,env(safe-area-inset-bottom))] pt-3"
+            : "shrink-0 border-t border-zinc-800 bg-black px-4 py-4",
       )}
     >
       <div
         className={cn(
-          "mx-auto max-w-3xl rounded-2xl border bg-zinc-950 shadow-2xl shadow-black/30 transition-colors",
-          isHero ? "border-zinc-700/80" : "border-zinc-800",
-          "focus-within:border-zinc-600",
+          "mx-auto max-w-3xl rounded-2xl border transition-colors",
+          isLight
+            ? "border-zinc-200 bg-white shadow-xl shadow-black/5"
+            : "bg-zinc-950 shadow-2xl shadow-black/30",
+          !isLight && (isHero ? "border-zinc-700/80" : "border-zinc-800"),
+          isLight ? "focus-within:border-zinc-300" : "focus-within:border-zinc-600",
           isDragging && "border-blue-500 ring-2 ring-blue-500/30",
         )}
         onDragOver={(e) => {
@@ -284,11 +294,21 @@ export function ChatInput({
         onDrop={handleDrop}
       >
         {attachments.length > 0 && (
-          <div className="flex flex-wrap gap-2 border-b border-zinc-900 px-3 pt-3">
+          <div
+            className={cn(
+              "flex flex-wrap gap-2 border-b px-3 pt-3",
+              isLight ? "border-zinc-200" : "border-zinc-900",
+            )}
+          >
             {attachments.map((attachment) => (
               <div
                 key={attachment.id}
-                className="group relative h-16 w-16 overflow-hidden rounded-lg border border-zinc-800 bg-zinc-900"
+                className={cn(
+                  "group relative h-16 w-16 overflow-hidden rounded-lg border",
+                  isLight
+                    ? "border-zinc-200 bg-zinc-100"
+                    : "border-zinc-800 bg-zinc-900",
+                )}
               >
                 <img
                   src={attachment.previewUrl}
@@ -309,7 +329,14 @@ export function ChatInput({
         )}
 
         {attachmentError && (
-          <div className="border-b border-zinc-900 px-3 py-2 text-xs text-amber-300">
+          <div
+            className={cn(
+              "border-b px-3 py-2 text-xs",
+              isLight
+                ? "border-zinc-200 text-amber-700"
+                : "border-zinc-900 text-amber-300",
+            )}
+          >
             {attachmentError}
           </div>
         )}
@@ -325,24 +352,38 @@ export function ChatInput({
               ? "Plan before building..."
               : isHero
                 ? "Describe what you want to build..."
-                : "Ask Cryzo to build, edit, or connect apps..."
+                : "What would you like to build?"
           }
           disabled={disabled}
           rows={1}
-          className="block max-h-44 min-h-24 w-full resize-none bg-transparent px-4 py-4 text-sm leading-6 text-white placeholder-zinc-500 outline-none disabled:opacity-50"
+          className={cn(
+            "block max-h-44 min-h-24 w-full resize-none bg-transparent px-4 py-4 text-sm leading-6 outline-none disabled:opacity-50",
+            isLight
+              ? "text-zinc-950 placeholder-zinc-400"
+              : "text-white placeholder-zinc-500",
+          )}
         />
 
         <div className="flex items-center justify-between gap-3 px-3 pb-3">
-          <div className="flex items-center gap-1.5">
-            <div className="flex rounded-lg border border-zinc-800 bg-zinc-900 p-0.5">
+          <div className="flex min-w-0 items-center gap-1.5">
+            <div
+              className={cn(
+                "flex rounded-lg border p-0.5",
+                isLight
+                  ? "border-zinc-200 bg-zinc-100"
+                  : "border-zinc-800 bg-zinc-900",
+              )}
+            >
               <button
                 type="button"
                 onClick={() => onChatModeChange("build")}
                 className={cn(
                   "inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium transition-colors",
                   chatMode === "build"
-                    ? "bg-white text-black"
-                    : "text-zinc-400 hover:text-white",
+                    ? "bg-white text-black shadow-sm"
+                    : isLight
+                      ? "text-zinc-600 hover:text-zinc-950"
+                      : "text-zinc-400 hover:text-white",
                 )}
                 title="Build mode"
               >
@@ -355,8 +396,12 @@ export function ChatInput({
                 className={cn(
                   "inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium transition-colors",
                   chatMode === "plan"
-                    ? "bg-blue-500 text-white"
-                    : "text-zinc-400 hover:text-white",
+                    ? isLight
+                      ? "bg-zinc-900 text-white"
+                      : "bg-blue-500 text-white"
+                    : isLight
+                      ? "text-zinc-600 hover:text-zinc-950"
+                      : "text-zinc-400 hover:text-white",
                 )}
                 title="Plan mode"
               >
@@ -377,7 +422,12 @@ export function ChatInput({
               type="button"
               onClick={() => fileInputRef.current?.click()}
               disabled={disabled || attachments.length >= MAX_ATTACHMENTS}
-              className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-zinc-400 transition-colors hover:bg-zinc-900 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+              className={cn(
+                "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg transition-colors disabled:cursor-not-allowed disabled:opacity-40",
+                isLight
+                  ? "text-zinc-600 hover:bg-zinc-100 hover:text-zinc-950"
+                  : "text-zinc-400 hover:bg-zinc-900 hover:text-white",
+              )}
               title="Upload image"
             >
               <ImagePlus size={18} />
@@ -388,8 +438,11 @@ export function ChatInput({
               onClick={toggleListening}
               disabled={!speechSupported || disabled || isLoading}
               className={cn(
-                "inline-flex h-9 w-9 items-center justify-center rounded-lg text-zinc-400 transition-colors hover:bg-zinc-900 hover:text-white disabled:cursor-not-allowed disabled:opacity-40",
-                isListening && "bg-red-500/10 text-red-400 hover:text-red-300",
+                "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg transition-colors disabled:cursor-not-allowed disabled:opacity-40",
+                isLight
+                  ? "text-zinc-600 hover:bg-zinc-100 hover:text-zinc-950"
+                  : "text-zinc-400 hover:bg-zinc-900 hover:text-white",
+                isListening && "bg-red-500/10 text-red-500",
               )}
               title={
                 speechSupported
@@ -408,10 +461,14 @@ export function ChatInput({
             onClick={() => void handleSubmit()}
             disabled={!isLoading && (disabled || !canSend)}
             className={cn(
-              "inline-flex h-9 items-center gap-2 rounded-lg px-3 text-xs font-medium transition-colors",
+              "inline-flex h-10 shrink-0 items-center gap-2 rounded-xl px-3 text-xs font-medium transition-colors",
               isLoading
-                ? "bg-zinc-800 text-white hover:bg-zinc-700"
-                : "bg-white text-black hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-40",
+                ? isLight
+                  ? "bg-zinc-900 text-white hover:bg-zinc-800"
+                  : "bg-zinc-800 text-white hover:bg-zinc-700"
+                : isLight
+                  ? "bg-zinc-900 text-white hover:bg-zinc-800 disabled:bg-zinc-100 disabled:text-zinc-400"
+                  : "bg-white text-black hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-40",
             )}
           >
             {isLoading ? (
@@ -429,7 +486,12 @@ export function ChatInput({
         </div>
 
         {isListening && (
-          <div className="flex items-center gap-2 border-t border-zinc-900 px-3 py-2 text-xs text-red-300">
+          <div
+            className={cn(
+              "flex items-center gap-2 border-t px-3 py-2 text-xs text-red-500",
+              isLight ? "border-zinc-200" : "border-zinc-900",
+            )}
+          >
             <Loader2 size={12} className="animate-spin" />
             Listening...
           </div>

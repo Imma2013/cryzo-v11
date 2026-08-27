@@ -9,7 +9,7 @@ import { WorkspacePanel } from "@/components/workspace/WorkspacePanel";
 import { CryzoLogo } from "@/components/CryzoLogo";
 import type { ElementInfo } from "@/components/workspace/LivePreview";
 import { Id } from "../../../../convex/_generated/dataModel";
-import { MessageSquareText, X } from "lucide-react";
+import { Maximize2, MessageSquareText, Minimize2, X } from "lucide-react";
 
 export default function ConversationPage({
   params,
@@ -21,6 +21,7 @@ export default function ConversationPage({
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
   const [selectedElement, setSelectedElement] = useState<ElementInfo | null>(null);
   const [mobileChatOpen, setMobileChatOpen] = useState(false);
+  const [mobileChatExpanded, setMobileChatExpanded] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
 
   const artifacts = useQuery(api.artifacts.listByConversation, {
@@ -41,6 +42,7 @@ export default function ConversationPage({
     setWorkspaceOpen(false);
     setSelectedElement(null);
     setMobileChatOpen(false);
+    setMobileChatExpanded(false);
   }, [id]);
 
   useEffect(() => {
@@ -48,6 +50,11 @@ export default function ConversationPage({
       setWorkspaceOpen(true);
     }
   }, [hasArtifacts]);
+
+  const closeMobileChat = useCallback(() => {
+    setMobileChatOpen(false);
+    setMobileChatExpanded(false);
+  }, []);
 
   const handleElementSelected = useCallback((info: ElementInfo) => {
     setSelectedElement(info);
@@ -71,8 +78,8 @@ export default function ConversationPage({
     }
 
     return (
-      <div className="relative flex h-full flex-col overflow-hidden bg-[#f7f7f5] text-zinc-950">
-        <div className="min-h-0 flex-1 p-2 pb-24">
+      <div className="relative flex h-full min-h-0 flex-col overflow-hidden bg-white text-zinc-950">
+        <div className="min-h-0 flex-1 overflow-hidden">
           <WorkspacePanel
             conversationId={id}
             onElementSelected={handleElementSelected}
@@ -80,53 +87,62 @@ export default function ConversationPage({
           />
         </div>
 
-        <div className="pointer-events-none absolute inset-x-0 bottom-5 z-30 flex justify-center px-3">
-          <div className="pointer-events-auto flex w-full max-w-[430px] overflow-hidden rounded-2xl bg-black text-white shadow-2xl shadow-black/25 ring-1 ring-black/10">
-            <a
-              href="/"
-              className="flex min-w-0 flex-1 items-center gap-2 border-r border-white/15 px-4 py-3 text-sm font-medium"
-            >
-              <CryzoLogo size={24} />
-              <span className="truncate">Built with <strong>Cryzo</strong></span>
-            </a>
-            <button
-              type="button"
-              onClick={() => setMobileChatOpen(true)}
-              className="flex items-center gap-2 px-4 py-3 text-sm font-medium"
-            >
-              <MessageSquareText size={17} />
-              Chat to Edit
-            </button>
-          </div>
-        </div>
+        {!mobileChatOpen && (
+          <button
+            type="button"
+            onClick={() => setMobileChatOpen(true)}
+            className="absolute bottom-4 right-4 z-30 inline-flex h-12 items-center gap-2 rounded-2xl bg-black px-5 text-sm font-medium text-white shadow-2xl shadow-black/25 ring-1 ring-white/10"
+          >
+            <MessageSquareText size={18} />
+            Chat to Edit
+          </button>
+        )}
 
         {mobileChatOpen && (
           <div className="absolute inset-0 z-50 bg-black/45 backdrop-blur-[2px]">
-            <div className="absolute inset-x-0 bottom-0 flex max-h-[88%] min-h-[62%] flex-col overflow-hidden rounded-t-[28px] bg-black shadow-2xl">
-              <div className="flex h-16 shrink-0 items-center gap-3 border-b border-zinc-800 px-4">
-                <CryzoLogo size={28} />
+            <section
+              className={`absolute inset-x-0 bottom-0 flex min-h-0 flex-col overflow-hidden bg-[#f8f7f4] text-zinc-950 shadow-2xl transition-[top,border-radius] duration-200 ${
+                mobileChatExpanded
+                  ? "top-0 rounded-none"
+                  : "top-3 rounded-t-[28px]"
+              }`}
+              role="dialog"
+              aria-modal="true"
+              aria-label="Chat to Edit"
+            >
+              <div className="flex h-16 shrink-0 items-center gap-3 border-b border-zinc-200 bg-[#f8f7f4] px-4">
+                <CryzoLogo size={30} />
                 <div className="min-w-0 flex-1">
-                  <div className="text-sm font-semibold text-white">Chat to Edit</div>
-                  <div className="text-xs text-zinc-500">Tell Cryzo what to change</div>
+                  <div className="truncate text-base font-semibold text-zinc-950">Chat to Edit</div>
+                  <div className="truncate text-xs text-zinc-500">Tell Cryzo what to change</div>
                 </div>
                 <button
                   type="button"
-                  onClick={() => setMobileChatOpen(false)}
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-zinc-900 text-zinc-400 hover:text-white"
+                  onClick={() => setMobileChatExpanded((value) => !value)}
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-full text-zinc-500 transition-colors hover:bg-zinc-200/70 hover:text-zinc-950"
+                  aria-label={mobileChatExpanded ? "Restore chat sheet" : "Expand chat sheet"}
+                >
+                  {mobileChatExpanded ? <Minimize2 size={20} /> : <Maximize2 size={20} />}
+                </button>
+                <button
+                  type="button"
+                  onClick={closeMobileChat}
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-full text-zinc-500 transition-colors hover:bg-zinc-200/70 hover:text-zinc-950"
                   aria-label="Close chat"
                 >
-                  <X size={18} />
+                  <X size={22} />
                 </button>
               </div>
-              <div className="min-h-0 flex-1">
+              <div className="min-h-0 flex-1 overflow-hidden">
                 <ChatArea
                   conversationId={id}
                   onArtifactCreated={() => setWorkspaceOpen(true)}
                   selectedElement={selectedElement}
                   onElementUsed={() => setSelectedElement(null)}
+                  appearance="light"
                 />
               </div>
-            </div>
+            </section>
           </div>
         )}
       </div>
