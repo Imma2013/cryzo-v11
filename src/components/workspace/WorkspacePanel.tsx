@@ -96,13 +96,14 @@ export function WorkspacePanel({
 
           <div className="flex items-center gap-2 text-xs">
             {error ? (
-              <span className="flex items-center gap-1 text-red-500">
+              <span className="flex items-center gap-1 text-red-500" title={error}>
                 <AlertCircle size={12} />
                 Error
               </span>
             ) : isBooting ? (
               <span className={mobile ? "text-zinc-500" : "text-zinc-400"}>
                 <Loader2 size={12} className="mr-1 inline animate-spin" />
+                {progress === "preparing" && "Preparing..."}
                 {progress === "writing" && "Writing..."}
                 {progress === "installing" && "Installing..."}
                 {progress === "starting" && "Starting..."}
@@ -118,17 +119,19 @@ export function WorkspacePanel({
         <div className="min-h-0 flex-1 overflow-hidden">
           {isBooting || !previewUrl ? (
             <div
-              className={`flex h-full flex-col items-center justify-center gap-3 ${
+              className={`flex h-full flex-col items-center justify-center gap-3 px-6 text-center ${
                 mobile ? "bg-[#f8f8f6]" : "bg-zinc-950"
               }`}
             >
-              <div className={`h-10 w-10 animate-spin rounded-full border-2 ${mobile ? "border-zinc-200 border-t-zinc-900" : "border-zinc-700 border-t-blue-400"}`} />
-              <p className={`text-sm ${mobile ? "text-zinc-500" : "text-zinc-400"}`}>
-                {progress === "writing" && "Writing files..."}
+              {progress !== "error" && (
+                <div className={`h-10 w-10 animate-spin rounded-full border-2 ${mobile ? "border-zinc-200 border-t-zinc-900" : "border-zinc-700 border-t-blue-400"}`} />
+              )}
+              <p className={`text-sm ${progress === "error" ? "text-red-500" : mobile ? "text-zinc-500" : "text-zinc-400"}`}>
+                {progress === "preparing" && "Preparing preview..."}
+                {progress === "writing" && "Updating files..."}
                 {progress === "installing" && "Installing dependencies..."}
                 {progress === "starting" && "Starting dev server..."}
-                {progress === "error" && "Something went wrong"}
-                {!progress && "Preparing workspace..."}
+                {progress === "error" && (error || "Preview runtime failed")}
               </p>
             </div>
           ) : (

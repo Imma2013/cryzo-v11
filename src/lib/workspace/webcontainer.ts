@@ -1,14 +1,37 @@
-import { WebContainer } from "@webcontainer/api";
+import { WebContainer, type FileSystemTree } from "@webcontainer/api";
 import type { ArtifactAction } from "./types";
+
+const WORKSPACES_ROOT = ".cryzo-workspaces";
 
 let instance: WebContainer | null = null;
 let bootPromise: Promise<WebContainer> | null = null;
 let activeWorkspaceId: string | null = null;
-let installedPackageManifest: string | null = null;
+let activeWorkspacePath: string | null = null;
 let activeDevProcess: { kill: () => void } | null = null;
 
+// Runtime caches are scoped per conversation. One chat can never poison or
+// overwrite another chat's files/node_modules just because they share a single
+// warm WebContainer process.
+const installedPackageManifests = new Map<string, string | null>();
+const hydratedWorkspaceSignatures = new Map<string, string>();
+
+function safeWorkspaceId(workspaceId: string) {
+  return workspaceId.replace(/[^a-zA-Z0-9_-]/g, "_");
+}
+
+function workspacePathFor(workspaceId: string) {
+  return `${WORKSPACES_ROOT}/${safeWorkspaceId(workspaceId)}`;
+}
+
+function normalizeRelativePath(path: string) {
+  return path.replace(/^\.\//, "").replace(/^\/+/, "").replace(/\/+$/, "");
+}
+
 async function bootWebContainer(): Promise<WebContainer> {
-  const wc = await WebContainer.boot({ coep: "credentialless" });
+  const wc = await WebContainer.boot({
+    coep: "credentialless",
+    forwardPreviewErrors: true,
+  });
 
   try {
     const res = await fetch("/inspector-script.js");
@@ -25,6 +48,8 @@ async function bootWebContainer(): Promise<WebContainer> {
 export async function getWebContainer(): Promise<WebContainer> {
   if (instance) return instance;
 
+  // Bolt-style singleton: boot once per browser session. WebContainer boot is
+  // expensive, so UI remounts should never create a second runtime.
   if (!bootPromise) {
     bootPromise = bootWebContainer();
   }
@@ -42,92 +67,153 @@ export function prewarmWebContainer() {
 }
 
 export async function prepareWorkspace(
-  _wc: WebContainer,
-  workspaceId: string,
-): Promise<void> {
-  if (activeWorkspaceId === workspaceId) return;
-
-  // Switching conversations should stop the previous dev server, but it must
-  // never erase the old source tree before the target conversation has been
-  // restored. Persisted Convex state is restored first; stale files are pruned
-  // only after the target files have been written.
-  try {
-    activeDevProcess?.kill();
-  } catch {}
-  activeDevProcess = null;
-  activeWorkspaceId = workspaceId;
-}
-
-function normalizePath(path: string) {
-  return path.replace(/^\.\//, "").replace(/^\/+/, "").replace(/\/+$/, "");
-}
-
-export async function pruneWorkspaceFiles(
   wc: WebContainer,
-  actions: ArtifactAction[],
-): Promise<void> {
-  const desiredFiles = new Set<string>();
-  const desiredDirs = new Set<string>();
+  workspaceId: string,
+): Promise<string> {
+  if (activeWorkspaceId !== workspaceId) {
+    try {
+      activeDevProcess?.kill();
+    } catch {}
+    activeDevProcess = null;
+  }
+
+  const workspacePath = workspacePathFor(workspaceId);
+  await wc.fs.mkdir(WORKSPACES_ROOT, { recursive: true });
+  await wc.fs.mkdir(workspacePath, { recursive: true });
+
+  activeWorkspaceId = workspaceId;
+  activeWorkspacePath = workspacePath;
+  return workspacePath;
+}
+
+export function getActiveWorkspacePath() {
+  if (!activeWorkspacePath) {
+    throw new Error("No active Cryzo workspace");
+  }
+  return activeWorkspacePath;
+}
+
+function actionsToFileSystemTree(actions: ArtifactAction[]): FileSystemTree {
+  const tree: Record<string, any> = {};
 
   for (const action of actions) {
     if (action.type !== "file" || !action.filePath) continue;
-    const filePath = normalizePath(action.filePath);
-    desiredFiles.add(filePath);
 
-    const parts = filePath.split("/");
-    for (let i = 1; i < parts.length; i++) {
-      desiredDirs.add(parts.slice(0, i).join("/"));
+    const path = normalizeRelativePath(action.filePath);
+    if (!path) continue;
+
+    const parts = path.split("/");
+    let cursor = tree;
+
+    for (let i = 0; i < parts.length - 1; i++) {
+      const part = parts[i];
+      const existing = cursor[part];
+      if (!existing || !existing.directory) {
+        cursor[part] = { directory: {} };
+      }
+      cursor = cursor[part].directory;
+    }
+
+    cursor[parts[parts.length - 1]] = {
+      file: { contents: action.content },
+    };
+  }
+
+  return tree as FileSystemTree;
+}
+
+async function clearWorkspaceSource(
+  wc: WebContainer,
+  workspacePath: string,
+): Promise<void> {
+  let entries: string[] = [];
+  try {
+    entries = await wc.fs.readdir(workspacePath);
+  } catch {
+    return;
+  }
+
+  for (const entry of entries) {
+    // Keep this chat's dependencies warm. Everything else is disposable source
+    // that can be replaced from the authenticated Convex snapshot/artifacts.
+    if (entry === "node_modules") continue;
+    try {
+      await wc.fs.rm(`${workspacePath}/${entry}`, {
+        recursive: true,
+        force: true,
+      });
+    } catch {}
+  }
+}
+
+export async function hydrateWorkspace(
+  wc: WebContainer,
+  workspaceId: string,
+  fileActions: ArtifactAction[],
+  signature: string,
+): Promise<{ reused: boolean; path: string }> {
+  const workspacePath = await prepareWorkspace(wc, workspaceId);
+
+  if (hydratedWorkspaceSignatures.get(workspaceId) === signature) {
+    try {
+      await wc.fs.readdir(workspacePath);
+      return { reused: true, path: workspacePath };
+    } catch {
+      hydratedWorkspaceSignatures.delete(workspaceId);
     }
   }
 
-  const pruneDir = async (dir: string) => {
-    let entries: string[];
+  await clearWorkspaceSource(wc, workspacePath);
+
+  const tree = actionsToFileSystemTree(fileActions);
+  if (Object.keys(tree).length > 0) {
+    // WebContainers recommends mount() for bulk page-load hydration. It avoids
+    // sequential writeFile churn and mounts only inside this chat's directory.
+    await wc.mount(tree, { mountPoint: workspacePath });
+  }
+
+  hydratedWorkspaceSignatures.set(workspaceId, signature);
+  return { reused: false, path: workspacePath };
+}
+
+async function ensureWorkspaceDirectory(
+  wc: WebContainer,
+  relativeDir: string,
+): Promise<void> {
+  if (!relativeDir) return;
+
+  const base = getActiveWorkspacePath();
+  const parts = normalizeRelativePath(relativeDir).split("/").filter(Boolean);
+  let current = base;
+
+  for (const part of parts) {
+    current = `${current}/${part}`;
     try {
-      entries = await wc.fs.readdir(dir || ".");
+      await wc.fs.mkdir(current);
     } catch {
-      return;
-    }
-
-    for (const entry of entries) {
-      if (!dir && entry === "node_modules") continue;
-
-      const path = normalizePath(dir ? `${dir}/${entry}` : entry);
-      let isDirectory = false;
+      // Existing directory is fine. If a stale file occupies the directory
+      // path, replace only that path inside the current chat workspace.
       try {
-        await wc.fs.readdir(path);
-        isDirectory = true;
-      } catch {
-        isDirectory = false;
-      }
-
-      if (isDirectory) {
-        if (!desiredDirs.has(path)) {
-          try {
-            await wc.fs.rm(path, { recursive: true, force: true });
-          } catch {}
-          continue;
-        }
-        await pruneDir(path);
+        await wc.fs.readdir(current);
         continue;
-      }
+      } catch {}
 
-      if (!desiredFiles.has(path)) {
-        try {
-          await wc.fs.rm(path, { force: true });
-        } catch {}
-      }
+      try {
+        await wc.fs.rm(current, { recursive: true, force: true });
+      } catch {}
+      await wc.fs.mkdir(current);
     }
-  };
-
-  await pruneDir("");
+  }
 }
 
 export function getInstalledPackageManifest() {
-  return installedPackageManifest;
+  if (!activeWorkspaceId) return null;
+  return installedPackageManifests.get(activeWorkspaceId) ?? null;
 }
 
 export function markInstalledPackageManifest(manifest: string | null) {
-  installedPackageManifest = manifest;
+  if (!activeWorkspaceId) return;
+  installedPackageManifests.set(activeWorkspaceId, manifest);
 }
 
 export function setActiveDevProcess(process: { kill: () => void } | null) {
@@ -137,6 +223,14 @@ export function setActiveDevProcess(process: { kill: () => void } | null) {
     } catch {}
   }
   activeDevProcess = process;
+}
+
+export async function spawnWorkspaceProcess(
+  wc: WebContainer,
+  command: string,
+  args: string[],
+) {
+  return await wc.spawn(command, args, { cwd: getActiveWorkspacePath() });
 }
 
 export async function teardownWebContainer() {
@@ -152,18 +246,33 @@ export async function teardownWebContainer() {
 
   bootPromise = null;
   activeWorkspaceId = null;
-  installedPackageManifest = null;
+  activeWorkspacePath = null;
+  installedPackageManifests.clear();
+  hydratedWorkspaceSignatures.clear();
 }
 
 export async function writeFiles(wc: WebContainer, actions: ArtifactAction[]) {
+  const base = getActiveWorkspacePath();
+
   for (const action of actions) {
-    if (action.type === "file" && action.filePath) {
-      const parts = action.filePath.split("/");
-      if (parts.length > 1) {
-        const dir = parts.slice(0, -1).join("/");
-        await wc.fs.mkdir(dir, { recursive: true });
-      }
-      await wc.fs.writeFile(action.filePath, action.content);
+    if (action.type !== "file" || !action.filePath) continue;
+
+    const relativePath = normalizeRelativePath(action.filePath);
+    const parts = relativePath.split("/");
+    if (parts.length > 1) {
+      await ensureWorkspaceDirectory(wc, parts.slice(0, -1).join("/"));
+    }
+
+    const targetPath = `${base}/${relativePath}`;
+    try {
+      await wc.fs.writeFile(targetPath, action.content);
+    } catch {
+      // Handle file<->directory shape changes from later AI edits without ever
+      // touching another conversation's workspace.
+      try {
+        await wc.fs.rm(targetPath, { recursive: true, force: true });
+      } catch {}
+      await wc.fs.writeFile(targetPath, action.content);
     }
   }
 }
@@ -171,18 +280,18 @@ export async function writeFiles(wc: WebContainer, actions: ArtifactAction[]) {
 export async function runCommand(
   wc: WebContainer,
   command: string,
-  onOutput: (data: string) => void
+  onOutput: (data: string) => void,
 ): Promise<number> {
   const parts = command.trim().split(/\s+/);
   const cmd = parts.shift()!;
-  const process = await wc.spawn(cmd, parts);
+  const process = await spawnWorkspaceProcess(wc, cmd, parts);
 
   const outputPromise = process.output.pipeTo(
     new WritableStream({
       write(data) {
         onOutput(data);
       },
-    })
+    }),
   );
 
   const exitCode = await process.exit;
