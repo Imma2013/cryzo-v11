@@ -1,11 +1,35 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
-import { useQuery } from "convex/react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { useMutation, useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { Id } from "../../convex/_generated/dataModel";
 import type { ArtifactAction, FileMap } from "@/lib/workspace/types";
 import type { ProgressStage } from "@/lib/workspace/action-runner";
+
+function addFileToMap(fileMap: FileMap, filePath: string, content: string) {
+  fileMap[filePath] = { type: "file", content };
+  const parts = filePath.split("/");
+  for (let i = 1; i < parts.length; i++) {
+    const dir = parts.slice(0, i).join("/");
+    if (!fileMap[dir]) fileMap[dir] = { type: "folder" };
+  }
+}
+
+function fileMapToSnapshotFiles(fileMap: FileMap) {
+  return Object.entries(fileMap)
+    .filter(([, entry]) => entry.type === "file")
+    .map(([path, entry]) => ({ path, content: entry.content ?? "" }))
+    .sort((a, b) => a.path.localeCompare(b.path));
+}
+
+function fileMapToActions(fileMap: FileMap): ArtifactAction[] {
+  return fileMapToSnapshotFiles(fileMap).map(({ path, content }) => ({
+    type: "file" as const,
+    filePath: path,
+    content,
+  }));
+}
 
 export function useWorkspace(conversationId: Id<"conversations">) {
   const [files, setFiles] = useState<FileMap>({});
@@ -15,26 +39,72 @@ export function useWorkspace(conversationId: Id<"conversations">) {
   const [error, setError] = useState<string | null>(null);
   const [isBooting, setIsBooting] = useState(true);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
+  const [initialBootFinished, setInitialBootFinished] = useState(false);
   const bootedRef = useRef(false);
   const convIdRef = useRef(conversationId);
+  const snapshotSignatureRef = useRef("");
 
   const artifacts = useQuery(api.artifacts.listByConversation, {
     conversationId,
   });
+  const snapshot = useQuery(api.artifacts.getWorkspaceSnapshot, {
+    conversationId,
+  });
+  const saveWorkspaceSnapshot = useMutation(api.artifacts.saveWorkspaceSnapshot);
 
-  // Reset React state when conversation changes. The WebContainer itself stays
-  // alive at module scope so its boot cost and npm cache can be reused.
+  const allArtifactActions = useMemo<ArtifactAction[]>(
+    () => artifacts?.flatMap((artifact) => artifact.actions) ?? [],
+    [artifacts],
+  );
+
+  const restoredFileMap = useMemo<FileMap>(() => {
+    const fileMap: FileMap = {};
+
+    // Bolt-style restore: the persisted snapshot is the baseline filesystem.
+    // Convex is the source of truth here, not the live WebContainer instance.
+    for (const file of snapshot?.files ?? []) {
+      addFileToMap(fileMap, file.path, file.content);
+    }
+
+    // Replay persisted artifact writes over the snapshot so a just-created
+    // artifact always wins even if the snapshot mutation is still catching up.
+    for (const action of allArtifactActions) {
+      if (action.type === "file" && action.filePath) {
+        addFileToMap(fileMap, action.filePath, action.content);
+      }
+    }
+
+    return fileMap;
+  }, [snapshot?.files, allArtifactActions]);
+
+  const runtimeActions = useMemo<ArtifactAction[]>(() => {
+    const persistedRuntime = allArtifactActions.filter(
+      (action) => action.type === "shell" || action.type === "start",
+    );
+
+    if (persistedRuntime.length > 0) return persistedRuntime;
+
+    return (snapshot?.runtimeActions ?? []).map((action) => ({
+      type: action.type,
+      content: action.content,
+    }));
+  }, [allArtifactActions, snapshot?.runtimeActions]);
+
+  // Reset React state when conversation changes. The WebContainer stays warm,
+  // while every conversation's actual project state stays persisted in Convex.
   useEffect(() => {
     if (conversationId !== convIdRef.current) {
       convIdRef.current = conversationId;
       bootedRef.current = false;
       appliedArtifactsRef.current = new Set();
+      snapshotSignatureRef.current = "";
       setFiles({});
       setPreviewUrl(null);
       setTerminalOutput("");
       setProgress("writing");
       setError(null);
       setIsBooting(true);
+      setInitialBootFinished(false);
       setSelectedFile(null);
     }
   }, [conversationId]);
@@ -58,13 +128,98 @@ export function useWorkspace(conversationId: Id<"conversations">) {
     }
   }, []);
 
-  // Track which artifacts have been applied
+  // Track which artifacts have been applied to the currently running project.
   const appliedArtifactsRef = useRef<Set<string>>(new Set());
 
-  // Initial boot — only runs once per mounted conversation workspace.
+  // Populate the Code tab immediately from persisted Convex state. Do this
+  // before waiting on WebContainer cleanup/boot/install so old chats never look
+  // like their source files were deleted while the runtime is preparing.
   useEffect(() => {
-    if (!artifacts || artifacts.length === 0 || bootedRef.current) return;
+    if (artifacts === undefined || snapshot === undefined) return;
+
+    setFiles(restoredFileMap);
+    setSelectedFile((current) => {
+      if (current && restoredFileMap[current]?.type === "file") return current;
+      return (
+        Object.keys(restoredFileMap).find(
+          (path) => restoredFileMap[path]?.type === "file",
+        ) ?? null
+      );
+    });
+  }, [artifacts, snapshot, restoredFileMap]);
+
+  // Backfill and continually refresh a complete filesystem snapshot in Convex.
+  // This is the server-backed equivalent of bolt.diy's local snapshot restore,
+  // and it means a past chat can recover independently of WebContainer memory.
+  useEffect(() => {
+    if (artifacts === undefined || snapshot === undefined) return;
+    if (Object.keys(restoredFileMap).length === 0) return;
+
+    const filesPayload = fileMapToSnapshotFiles(restoredFileMap);
+    const runtimePayload = runtimeActions
+      .filter(
+        (action): action is ArtifactAction & { type: "shell" | "start" } =>
+          action.type === "shell" || action.type === "start",
+      )
+      .map((action) => ({ type: action.type, content: action.content }));
+    const desiredSignature = JSON.stringify({
+      files: filesPayload,
+      runtimeActions: runtimePayload,
+    });
+    const storedSignature = JSON.stringify({
+      files: [...(snapshot?.files ?? [])].sort((a, b) =>
+        a.path.localeCompare(b.path),
+      ),
+      runtimeActions: snapshot?.runtimeActions ?? [],
+    });
+
+    if (desiredSignature === storedSignature) {
+      snapshotSignatureRef.current = desiredSignature;
+      return;
+    }
+    if (snapshotSignatureRef.current === desiredSignature) return;
+
+    snapshotSignatureRef.current = desiredSignature;
+    void saveWorkspaceSnapshot({
+      conversationId,
+      files: filesPayload,
+      runtimeActions: runtimePayload,
+    }).catch(() => {
+      if (snapshotSignatureRef.current === desiredSignature) {
+        snapshotSignatureRef.current = "";
+      }
+    });
+  }, [
+    artifacts,
+    conversationId,
+    restoredFileMap,
+    runtimeActions,
+    saveWorkspaceSnapshot,
+    snapshot,
+  ]);
+
+  // Initial restore/boot. Persisted files are already visible in React before
+  // this starts. The runtime is disposable; Convex is the durable workspace.
+  useEffect(() => {
+    if (artifacts === undefined || snapshot === undefined || bootedRef.current) {
+      return;
+    }
+    if (Object.keys(restoredFileMap).length === 0) return;
+
     bootedRef.current = true;
+    const bootConversationId = conversationId;
+
+    // Mark the artifacts included in this restore before doing async work. This
+    // prevents the update effect from racing the initial restore and writing the
+    // same files while a conversation switch is being prepared.
+    for (const artifact of artifacts) {
+      appliedArtifactsRef.current.add(artifact._id);
+    }
+
+    const actionsForRestore: ArtifactAction[] = [
+      ...fileMapToActions(restoredFileMap),
+      ...runtimeActions,
+    ];
 
     const boot = async () => {
       const { getWebContainer, prepareWorkspace } = await import(
@@ -74,7 +229,7 @@ export function useWorkspace(conversationId: Id<"conversations">) {
 
       setIsBooting(true);
       setError(null);
-      appendOutput("Preparing WebContainer...\r\n");
+      appendOutput("Restoring saved workspace...\r\n");
 
       try {
         const bootTimeout = new Promise<never>((_, reject) =>
@@ -89,45 +244,25 @@ export function useWorkspace(conversationId: Id<"conversations">) {
           ),
         );
         const wc = await Promise.race([getWebContainer(), bootTimeout]);
-        await prepareWorkspace(wc, String(conversationId));
-        appendOutput("WebContainer ready.\r\n\r\n");
 
-        const allActions: ArtifactAction[] = artifacts.flatMap((a) => a.actions);
+        if (convIdRef.current !== bootConversationId) return;
 
-        // Mark all current artifacts as applied
-        for (const a of artifacts) {
-          appliedArtifactsRef.current.add(a._id);
-        }
-
-        // Build file map
-        const fileMap: FileMap = {};
-        for (const action of allActions) {
-          if (action.type === "file" && action.filePath) {
-            fileMap[action.filePath] = { type: "file", content: action.content };
-            const parts = action.filePath.split("/");
-            for (let i = 1; i < parts.length; i++) {
-              const dir = parts.slice(0, i).join("/");
-              if (!fileMap[dir]) fileMap[dir] = { type: "folder" };
-            }
-          }
-        }
-        setFiles(fileMap);
-
-        if (!selectedFile) {
-          const firstFile = allActions.find(
-            (a) => a.type === "file" && a.filePath,
-          );
-          if (firstFile?.filePath) setSelectedFile(firstFile.filePath);
-        }
+        await prepareWorkspace(wc, String(bootConversationId));
+        appendOutput("Saved files restored. Starting runtime...\r\n\r\n");
 
         await runActions(
           wc,
-          allActions,
+          actionsForRestore,
           appendOutput,
           handleServerReady,
           handleProgress,
         );
+
+        if (convIdRef.current === bootConversationId) {
+          setInitialBootFinished(true);
+        }
       } catch (err: any) {
+        if (convIdRef.current !== bootConversationId) return;
         appendOutput(`\r\nFatal error: ${err.message}\r\n`);
         setError(err.message);
         setIsBooting(false);
@@ -136,26 +271,29 @@ export function useWorkspace(conversationId: Id<"conversations">) {
 
     void boot();
   }, [
-    artifacts,
     appendOutput,
+    artifacts,
     conversationId,
-    handleServerReady,
     handleProgress,
-    selectedFile,
+    handleServerReady,
+    restoredFileMap,
+    runtimeActions,
+    snapshot,
   ]);
 
-  // Apply NEW artifacts after initial boot (edits/updates) — files only, no shell re-run
+  // Apply artifacts created after the restored snapshot/initial boot. Waiting
+  // for initialBootFinished avoids the old race where a second writer could run
+  // while the restore path was still clearing/preparing the WebContainer.
   useEffect(() => {
-    if (!artifacts || !bootedRef.current) return;
+    if (!artifacts || !initialBootFinished) return;
 
     const newArtifacts = artifacts.filter(
-      (a) => !appliedArtifactsRef.current.has(a._id),
+      (artifact) => !appliedArtifactsRef.current.has(artifact._id),
     );
     if (newArtifacts.length === 0) return;
 
-    // Mark as applied immediately to prevent double-apply
-    for (const a of newArtifacts) {
-      appliedArtifactsRef.current.add(a._id);
+    for (const artifact of newArtifacts) {
+      appliedArtifactsRef.current.add(artifact._id);
     }
 
     const applyUpdates = async () => {
@@ -165,10 +303,12 @@ export function useWorkspace(conversationId: Id<"conversations">) {
 
       try {
         const wc = await getWebContainer();
-        const fileActions = newArtifacts.flatMap((a) =>
-          a.actions.filter(
-            (act): act is ArtifactAction & { filePath: string } =>
-              act.type === "file" && !!act.filePath,
+        if (convIdRef.current !== conversationId) return;
+
+        const fileActions = newArtifacts.flatMap((artifact) =>
+          artifact.actions.filter(
+            (action): action is ArtifactAction & { filePath: string } =>
+              action.type === "file" && !!action.filePath,
           ),
         );
 
@@ -176,32 +316,13 @@ export function useWorkspace(conversationId: Id<"conversations">) {
           appendOutput(`\r\nWriting ${fileActions.length} file(s)...\r\n`);
           await writeFiles(wc, fileActions);
           appendOutput("Done. HMR should refresh.\r\n");
-
-          // Update file map
-          setFiles((prev) => {
-            const next = { ...prev };
-            for (const action of fileActions) {
-              next[action.filePath] = {
-                type: "file",
-                content: action.content,
-              };
-              const parts = action.filePath.split("/");
-              for (let i = 1; i < parts.length; i++) {
-                const dir = parts.slice(0, i).join("/");
-                if (!next[dir]) next[dir] = { type: "folder" };
-              }
-            }
-            return next;
-          });
         }
 
-        // Only run shell commands if they add NEW dependencies (not npm install again)
-        const shellActions = newArtifacts.flatMap((a) =>
-          a.actions.filter(
-            (act) =>
-              act.type === "shell" &&
-              !act.content.includes("npm install") &&
-              !act.content.includes("npm i"),
+        const shellActions = newArtifacts.flatMap((artifact) =>
+          artifact.actions.filter(
+            (action) =>
+              action.type === "shell" &&
+              !/^\s*npm\s+(?:install|i)(?:\s|$)/.test(action.content),
           ),
         );
         if (shellActions.length > 0) {
@@ -217,7 +338,7 @@ export function useWorkspace(conversationId: Id<"conversations">) {
     };
 
     void applyUpdates();
-  }, [artifacts, appendOutput]);
+  }, [artifacts, initialBootFinished, appendOutput, conversationId]);
 
   return {
     files,

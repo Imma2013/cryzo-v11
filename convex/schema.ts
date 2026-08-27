@@ -47,6 +47,23 @@ export default defineSchema({
     createdAt: v.number(),
   }).index("by_conversation", ["conversationId", "createdAt"]),
 
+  workspaceSnapshots: defineTable({
+    conversationId: v.id("conversations"),
+    files: v.array(
+      v.object({
+        path: v.string(),
+        content: v.string(),
+      }),
+    ),
+    runtimeActions: v.array(
+      v.object({
+        type: v.union(v.literal("shell"), v.literal("start")),
+        content: v.string(),
+      }),
+    ),
+    updatedAt: v.number(),
+  }).index("by_conversation", ["conversationId"]),
+
   publishTargets: defineTable({
     userId: v.id("users"),
     conversationId: v.id("conversations"),
