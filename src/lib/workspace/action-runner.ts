@@ -3,6 +3,7 @@ import type { ArtifactAction } from "./types";
 import {
   getInstalledPackageManifest,
   markInstalledPackageManifest,
+  pruneWorkspaceFiles,
   runCommand,
   setActiveDevProcess,
   writeFiles,
@@ -39,8 +40,6 @@ function isBareNpmInstall(command: string) {
     return false;
   }
 
-  // `npm install` plus flags is a dependency sync. `npm install foo` is an
-  // explicit package addition and must never be skipped.
   return parts.slice(2).every((part) => part.startsWith("-"));
 }
 
@@ -72,15 +71,17 @@ export async function runActions(
   const startActions = actions.filter((a) => a.type === "start");
   const packageManifest = packageManifestFromActions(fileActions);
 
-  // 1. Write all files
+  // Restore target files first, then remove anything left over from the previous
+  // conversation. This ordering prevents the workspace from ever being blanked
+  // before a saved chat has been rehydrated.
   onProgress("writing");
   if (fileActions.length > 0) {
-    onOutput(`Writing ${fileActions.length} files...\r\n`);
+    onOutput(`Restoring ${fileActions.length} saved files...\r\n`);
     await writeFiles(wc, fileActions);
+    await pruneWorkspaceFiles(wc, fileActions);
     onOutput(`Done.\r\n\r\n`);
   }
 
-  // 2. Listen for server-ready
   let serverReadyFired = false;
   wc.on("server-ready", (_port, url) => {
     serverReadyFired = true;
@@ -88,8 +89,6 @@ export async function runActions(
     onServerReady(url);
   });
 
-  // 3. Run shell commands. A warm WebContainer keeps node_modules around,
-  // so a bare npm install can be skipped when package.json is unchanged.
   if (shellActions.some((action) => isNpmInstall(action.content))) {
     onProgress("installing");
   }
@@ -131,10 +130,9 @@ export async function runActions(
     }
   }
 
-  // 4. Start dev server (don't await — it runs indefinitely)
   if (startActions.length > 0) {
     onProgress("starting");
-    const startCmd = startActions[0].content;
+    const startCmd = startActions[startActions.length - 1].content;
     onOutput(`$ ${startCmd}\r\n`);
 
     const parts = startCmd.trim().split(/\s+/);
