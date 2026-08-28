@@ -19,7 +19,8 @@
       }
     ],
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@ai-sdk/google": ["./src/lib/nvidia-minimax-provider.ts"]
     }
   },
   "include": [
