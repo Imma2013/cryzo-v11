@@ -14,7 +14,6 @@ const nvidia = createOpenAI({
   apiKey: process.env.NVIDIA_API_KEY,
 });
 
-
 let composio: Composio<VercelProvider>;
 function getComposio() {
   if (!composio) composio = new Composio<VercelProvider>({ provider: new VercelProvider() });
@@ -71,9 +70,9 @@ const COMPLEX_PATTERN = /\b(build|create|generate|redesign|clone|website|web app
 
 function pickModel(userMessage: string) {
   if (COMPLEX_PATTERN.test(userMessage) || userMessage.length > 200) {
-    return nvidia("minimaxai/minimax-m3");
+    return nvidia.chat("minimaxai/minimax-m3");
   }
-  return nvidia("minimaxai/minimax-m3");
+  return nvidia.chat("minimaxai/minimax-m3");
 }
 
 export const dynamic = "force-dynamic";
