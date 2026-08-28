@@ -3,11 +3,11 @@
 import { useEffect, useRef, useState } from "react";
 import {
   Hammer,
-  ImagePlus,
   Lightbulb,
   Loader2,
   Mic,
   MicOff,
+  Plus,
   Send,
   Square,
   X,
@@ -266,7 +266,9 @@ export function ChatInput({
   return (
     <div
       className={cn(
-        isHero ? "w-full px-0 py-0" : "border-t border-zinc-800 bg-black px-4 py-4",
+        isHero
+          ? "w-full px-0 py-0"
+          : "border-t border-zinc-800 bg-black px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-3 md:px-4 md:py-4",
       )}
     >
       <div
@@ -325,21 +327,21 @@ export function ChatInput({
               ? "Plan before building..."
               : isHero
                 ? "Describe what you want to build..."
-                : "Ask Cryzo to build, edit, or connect apps..."
+                : "Ask Cryzo to build or edit..."
           }
           disabled={disabled}
           rows={1}
-          className="block max-h-44 min-h-24 w-full resize-none bg-transparent px-4 py-4 text-sm leading-6 text-white placeholder-zinc-500 outline-none disabled:opacity-50"
+          className="block max-h-44 min-h-16 w-full resize-none bg-transparent px-4 py-3.5 text-[15px] leading-6 text-white outline-none placeholder:text-zinc-500 disabled:opacity-50 md:min-h-24 md:py-4 md:text-sm"
         />
 
-        <div className="flex items-center justify-between gap-3 px-3 pb-3">
-          <div className="flex items-center gap-1.5">
-            <div className="flex rounded-lg border border-zinc-800 bg-zinc-900 p-0.5">
+        <div className="flex items-center justify-between gap-2 px-3 pb-3">
+          <div className="flex min-w-0 items-center gap-1">
+            <div className="flex shrink-0 rounded-lg border border-zinc-800 bg-zinc-900 p-0.5">
               <button
                 type="button"
                 onClick={() => onChatModeChange("build")}
                 className={cn(
-                  "inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium transition-colors",
+                  "inline-flex h-8 items-center gap-1 rounded-md px-2 text-xs font-medium transition-colors md:gap-1.5 md:px-2.5",
                   chatMode === "build"
                     ? "bg-white text-black"
                     : "text-zinc-400 hover:text-white",
@@ -353,7 +355,7 @@ export function ChatInput({
                 type="button"
                 onClick={() => onChatModeChange("plan")}
                 className={cn(
-                  "inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium transition-colors",
+                  "inline-flex h-8 items-center gap-1 rounded-md px-2 text-xs font-medium transition-colors md:gap-1.5 md:px-2.5",
                   chatMode === "plan"
                     ? "bg-blue-500 text-white"
                     : "text-zinc-400 hover:text-white",
@@ -377,10 +379,10 @@ export function ChatInput({
               type="button"
               onClick={() => fileInputRef.current?.click()}
               disabled={disabled || attachments.length >= MAX_ATTACHMENTS}
-              className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-zinc-400 transition-colors hover:bg-zinc-900 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-zinc-400 transition-colors hover:bg-zinc-900 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
               title="Upload image"
             >
-              <ImagePlus size={18} />
+              <Plus size={20} />
             </button>
 
             <button
@@ -388,7 +390,7 @@ export function ChatInput({
               onClick={toggleListening}
               disabled={!speechSupported || disabled || isLoading}
               className={cn(
-                "inline-flex h-9 w-9 items-center justify-center rounded-lg text-zinc-400 transition-colors hover:bg-zinc-900 hover:text-white disabled:cursor-not-allowed disabled:opacity-40",
+                "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-zinc-400 transition-colors hover:bg-zinc-900 hover:text-white disabled:cursor-not-allowed disabled:opacity-40",
                 isListening && "bg-red-500/10 text-red-400 hover:text-red-300",
               )}
               title={
@@ -408,23 +410,15 @@ export function ChatInput({
             onClick={() => void handleSubmit()}
             disabled={!isLoading && (disabled || !canSend)}
             className={cn(
-              "inline-flex h-9 items-center gap-2 rounded-lg px-3 text-xs font-medium transition-colors",
+              "inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-xs font-medium transition-colors md:h-9 md:w-auto md:gap-2 md:rounded-lg md:px-3",
               isLoading
-                ? "bg-zinc-800 text-white hover:bg-zinc-700"
+                ? "bg-blue-600 text-white hover:bg-blue-500"
                 : "bg-white text-black hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-40",
             )}
+            aria-label={isLoading ? "Stop generation" : "Send message"}
           >
-            {isLoading ? (
-              <>
-                <Square size={14} />
-                Stop
-              </>
-            ) : (
-              <>
-                <Send size={14} />
-                Send
-              </>
-            )}
+            {isLoading ? <Square size={15} fill="currentColor" /> : <Send size={15} />}
+            <span className="hidden md:inline">{isLoading ? "Stop" : "Send"}</span>
           </button>
         </div>
 

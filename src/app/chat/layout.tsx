@@ -2,6 +2,7 @@
 
 import { Suspense, useEffect } from "react";
 import { usePathname, useRouter } from "next/navigation";
+import { Menu } from "lucide-react";
 import { Sidebar } from "@/components/Sidebar";
 import { useAuth } from "@/providers/AuthProvider";
 
@@ -25,16 +26,41 @@ export default function ChatLayout({ children }: { children: React.ReactNode }) 
     );
   }
 
+  const section = pathname === "/chat/apps" ? "Apps" : pathname === "/chat/billing" ? "Billing" : "Cryzo";
+  const isConversationPage =
+    /^\/chat\/[^/]+$/.test(pathname) &&
+    pathname !== "/chat/apps" &&
+    pathname !== "/chat/billing";
+
+  const openSidebar = () => {
+    window.dispatchEvent(new Event("cryzo:open-sidebar"));
+  };
+
   return (
-    <div className="flex h-screen bg-black">
+    <div className="flex h-[100dvh] overflow-hidden bg-black">
       <Suspense
         fallback={
-          <div className="h-full w-64 border-r border-zinc-800 bg-zinc-950" />
+          <div className="hidden h-full w-64 border-r border-zinc-800 bg-zinc-950 md:block" />
         }
       >
         <Sidebar />
       </Suspense>
-      <main className="flex-1 overflow-hidden">{children}</main>
+      <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        {!isConversationPage && (
+          <header className="flex min-h-16 shrink-0 items-center gap-3 border-b border-zinc-800 bg-[#111113] px-4 md:hidden">
+            <button
+              type="button"
+              onClick={openSidebar}
+              className="inline-flex h-10 w-10 items-center justify-center rounded-xl text-zinc-200 transition-colors hover:bg-zinc-800"
+              aria-label="Open navigation"
+            >
+              <Menu size={22} />
+            </button>
+            <div className="truncate text-base font-semibold text-white">{section}</div>
+          </header>
+        )}
+        <div className="min-h-0 flex-1 overflow-hidden">{children}</div>
+      </main>
     </div>
   );
 }

@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Panel, Group, Separator } from "react-resizable-panels";
-import { Code2, Eye, Loader2, AlertCircle } from "lucide-react";
+import { AlertCircle, Code2, Eye, Loader2 } from "lucide-react";
 import { useWorkspace } from "@/hooks/use-workspace";
 import { FileTree } from "./FileTree";
 import { CodeEditor } from "./CodeEditor";
@@ -13,12 +13,22 @@ import { Id } from "../../../convex/_generated/dataModel";
 
 type ViewMode = "preview" | "code";
 
+export type WorkspaceStatus = {
+  isBooting: boolean;
+  progress: string | null | undefined;
+  previewUrl: string | null | undefined;
+};
+
 export function WorkspacePanel({
   conversationId,
   onElementSelected,
+  onStatusChange,
+  mobile = false,
 }: {
   conversationId: Id<"conversations">;
   onElementSelected?: (info: ElementInfo) => void;
+  onStatusChange?: (status: WorkspaceStatus) => void;
+  mobile?: boolean;
 }) {
   const [viewMode, setViewMode] = useState<ViewMode>("preview");
 
@@ -33,14 +43,53 @@ export function WorkspacePanel({
     setSelectedFile,
   } = useWorkspace(conversationId);
 
+  useEffect(() => {
+    onStatusChange?.({
+      isBooting,
+      progress,
+      previewUrl,
+    });
+  }, [isBooting, onStatusChange, previewUrl, progress]);
+
   const selectedContent = selectedFile ? files[selectedFile]?.content || "" : "";
 
+  const previewContent = isBooting || !previewUrl ? (
+    <div className="flex h-full flex-col items-center justify-center gap-3 bg-zinc-950 px-6 text-center">
+      <div className="h-10 w-10 animate-spin rounded-full border-2 border-zinc-700 border-t-blue-400" />
+      <div>
+        <p className="text-sm font-medium text-zinc-300">
+          {progress === "writing" && "Writing files..."}
+          {progress === "installing" && "Installing dependencies..."}
+          {progress === "starting" && "Starting preview..."}
+          {progress === "error" && "Something went wrong"}
+          {!progress && "Preparing preview..."}
+        </p>
+        {mobile && progress !== "error" && (
+          <p className="mt-1 text-xs text-zinc-600">
+            You can switch back to Chat while Cryzo finishes building.
+          </p>
+        )}
+      </div>
+    </div>
+  ) : (
+    <LivePreview
+      url={previewUrl}
+      isBooting={isBooting}
+      progress={progress}
+      onElementSelected={onElementSelected}
+    />
+  );
+
+  if (mobile) {
+    return <div className="h-full overflow-hidden bg-zinc-950">{previewContent}</div>;
+  }
+
   return (
-    <div className="flex h-full flex-col bg-zinc-950 rounded-lg border border-zinc-800 overflow-hidden">
-      {/* Toolbar */}
+    <div className="flex h-full flex-col overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950">
       <div className="flex items-center gap-1 border-b border-zinc-800 px-3 py-2">
         <div className="flex rounded-md bg-zinc-900 p-0.5">
           <button
+            type="button"
             onClick={() => setViewMode("preview")}
             className={`flex items-center gap-1.5 rounded px-3 py-1 text-xs font-medium transition-colors ${
               viewMode === "preview"
@@ -52,6 +101,7 @@ export function WorkspacePanel({
             Preview
           </button>
           <button
+            type="button"
             onClick={() => setViewMode("code")}
             className={`flex items-center gap-1.5 rounded px-3 py-1 text-xs font-medium transition-colors ${
               viewMode === "code"
@@ -71,7 +121,6 @@ export function WorkspacePanel({
             disabled={isBooting || !!error}
           />
 
-          {/* Status indicator */}
           <div className="flex items-center gap-2 text-xs">
             {error ? (
               <span className="flex items-center gap-1 text-red-400">
@@ -92,31 +141,13 @@ export function WorkspacePanel({
         </div>
       </div>
 
-      {/* Main content area */}
       {viewMode === "preview" ? (
-        <div className="flex-1 overflow-hidden">
-          {isBooting || !previewUrl ? (
-            <div className="flex h-full flex-col items-center justify-center gap-3 bg-zinc-950">
-              <div className="relative">
-                <div className="h-10 w-10 rounded-full border-2 border-zinc-700 border-t-blue-400 animate-spin" />
-              </div>
-              <p className="text-sm text-zinc-400">
-                {progress === "writing" && "Writing files..."}
-                {progress === "installing" && "Installing dependencies..."}
-                {progress === "starting" && "Starting dev server..."}
-                {progress === "error" && "Something went wrong"}
-                {!progress && "Preparing workspace..."}
-              </p>
-            </div>
-          ) : (
-            <LivePreview url={previewUrl} isBooting={isBooting} progress={progress} onElementSelected={onElementSelected} />
-          )}
-        </div>
+        <div className="flex-1 overflow-hidden">{previewContent}</div>
       ) : (
         <Group orientation="vertical" className="flex-1">
           <Panel defaultSize={65} minSize={30}>
             <div className="flex h-full">
-              <div className="w-48 border-r border-zinc-800 overflow-hidden">
+              <div className="w-48 overflow-hidden border-r border-zinc-800">
                 <FileTree
                   files={files}
                   selectedFile={selectedFile}
@@ -142,7 +173,7 @@ export function WorkspacePanel({
             </div>
           </Panel>
 
-          <Separator className="h-1 bg-zinc-800 hover:bg-zinc-700 cursor-row-resize" />
+          <Separator className="h-1 cursor-row-resize bg-zinc-800 hover:bg-zinc-700" />
 
           <Panel defaultSize={35} minSize={10} collapsible>
             <WorkspaceTerminal output={terminalOutput} />
