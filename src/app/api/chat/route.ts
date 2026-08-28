@@ -1,4 +1,4 @@
-import { google } from "@ai-sdk/google";
+import { createOpenAI } from "@ai-sdk/openai";
 import { Composio } from "@composio/core";
 import { VercelProvider } from "@composio/vercel";
 import { streamText, stepCountIs, convertToModelMessages, type UIMessage } from "ai";
@@ -8,6 +8,11 @@ import { readFileSync } from "fs";
 import { join } from "path";
 
 const convex = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
+
+const nvidia = createOpenAI({
+  baseURL: "https://integrate.api.nvidia.com/v1",
+  apiKey: process.env.NVIDIA_API_KEY,
+});
 
 
 let composio: Composio<VercelProvider>;
@@ -66,9 +71,9 @@ const COMPLEX_PATTERN = /\b(build|create|generate|redesign|clone|website|web app
 
 function pickModel(userMessage: string) {
   if (COMPLEX_PATTERN.test(userMessage) || userMessage.length > 200) {
-    return google("gemini-3.1-pro-preview");
+    return nvidia("minimaxai/minimax-m3");
   }
-  return google("gemini-3-flash-preview");
+  return nvidia("minimaxai/minimax-m3");
 }
 
 export const dynamic = "force-dynamic";
