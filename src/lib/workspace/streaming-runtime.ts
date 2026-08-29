@@ -26,6 +26,14 @@ export function setStreamingRuntimeAuthToken(token: string | null) {
   sandboxAuthToken = token;
 }
 
+async function waitForSandboxAuthToken() {
+  for (let attempt = 0; attempt < 100; attempt++) {
+    if (sandboxAuthToken) return sandboxAuthToken;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error("Authentication is still loading. Please retry.");
+}
+
 function createState(): RuntimeState {
   return {
     active: false,
@@ -134,15 +142,13 @@ type SandboxResponse = {
 };
 
 async function callSandbox(body: Record<string, unknown>): Promise<SandboxResponse> {
-  if (!sandboxAuthToken) {
-    throw new Error("Authentication is still loading. Please retry.");
-  }
+  const authToken = await waitForSandboxAuthToken();
 
   const response = await fetch("/api/sandbox/runtime", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${sandboxAuthToken}`,
+      Authorization: `Bearer ${authToken}`,
     },
     body: JSON.stringify(body),
   });
@@ -260,6 +266,7 @@ export async function restoreStreamingRuntime(
     });
     applyResponse(state, response);
   } catch (error) {
+    state.active = false;
     setError(state, error);
   }
 }
