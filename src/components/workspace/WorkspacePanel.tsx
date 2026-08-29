@@ -15,6 +15,10 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { useWorkspace } from "@/hooks/use-workspace";
+import {
+  refreshStreamingRuntimeLogs,
+  restartStreamingRuntime,
+} from "@/lib/workspace/streaming-runtime";
 import { FileTree } from "./FileTree";
 import { CodeEditor } from "./CodeEditor";
 import { LivePreview, type ElementInfo } from "./LivePreview";
@@ -47,6 +51,8 @@ export function WorkspacePanel({
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [refreshToken, setRefreshToken] = useState(0);
   const [inspectRequest, setInspectRequest] = useState(0);
+  const [showErrorLogs, setShowErrorLogs] = useState(false);
+  const [retrying, setRetrying] = useState(false);
 
   const {
     files,
@@ -67,9 +73,67 @@ export function WorkspacePanel({
     });
   }, [isBooting, onStatusChange, previewUrl, progress]);
 
-  const selectedContent = selectedFile ? files[selectedFile]?.content || "" : "";
+  useEffect(() => {
+    if (!error) setShowErrorLogs(false);
+  }, [error]);
 
-  const loadingContent = (
+  const selectedContent = selectedFile ? files[selectedFile]?.content || "" : "";
+  const errorSummary = error?.split("\n")[0] || "The preview server could not start.";
+
+  const retryPreview = async () => {
+    if (retrying) return;
+    setRetrying(true);
+    setShowErrorLogs(false);
+    try {
+      await restartStreamingRuntime(String(conversationId));
+    } catch {
+      // The runtime store exposes the actionable error and diagnostics.
+    } finally {
+      setRetrying(false);
+    }
+  };
+
+  const viewLogs = async () => {
+    try {
+      await refreshStreamingRuntimeLogs(String(conversationId));
+    } catch {
+      // Existing runtime output is still useful if diagnostics refresh fails.
+    }
+    setShowErrorLogs(true);
+  };
+
+  const loadingContent = error ? (
+    <div className="flex h-full flex-col items-center justify-center bg-zinc-950 px-6 py-8 text-center text-white">
+      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-red-500/10 text-red-400">
+        <AlertCircle size={24} />
+      </div>
+      <h3 className="mt-4 text-lg font-semibold">Preview couldn&apos;t start</h3>
+      <p className="mt-2 max-w-md text-sm leading-6 text-zinc-400">{errorSummary}</p>
+      <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
+        <button
+          type="button"
+          onClick={() => void retryPreview()}
+          disabled={retrying}
+          className="inline-flex h-10 items-center gap-2 rounded-full bg-white px-4 text-sm font-medium text-black disabled:opacity-50"
+        >
+          <RefreshCw size={16} className={retrying ? "animate-spin" : ""} />
+          {retrying ? "Restarting..." : "Retry preview"}
+        </button>
+        <button
+          type="button"
+          onClick={() => void viewLogs()}
+          className="inline-flex h-10 items-center rounded-full border border-zinc-700 px-4 text-sm font-medium text-zinc-200"
+        >
+          View logs
+        </button>
+      </div>
+      {showErrorLogs && (
+        <pre className="mt-5 max-h-[38vh] w-full max-w-2xl overflow-auto rounded-xl border border-zinc-800 bg-black p-4 text-left text-[11px] leading-5 text-zinc-400">
+          {terminalOutput || error}
+        </pre>
+      )}
+    </div>
+  ) : (
     <div className="flex h-full flex-col items-center justify-center gap-3 bg-zinc-950 px-6 text-center">
       <div className="h-10 w-10 animate-spin rounded-full border-2 border-zinc-700 border-t-blue-400" />
       <div>
@@ -77,10 +141,9 @@ export function WorkspacePanel({
           {progress === "writing" && "Writing files..."}
           {progress === "installing" && "Installing dependencies..."}
           {progress === "starting" && "Starting preview..."}
-          {progress === "error" && "Something went wrong"}
           {!progress && "Preparing preview..."}
         </p>
-        {mobile && progress !== "error" && (
+        {mobile && (
           <p className="mt-1 text-xs text-zinc-600">
             You can switch back to Chat while Cryzo finishes building.
           </p>
@@ -103,7 +166,7 @@ export function WorkspacePanel({
     return (
       <div className="flex h-full min-h-0 flex-col overflow-hidden bg-zinc-950">
         <div className="min-h-0 flex-1 overflow-hidden">
-          {isBooting || !previewUrl ? (
+          {isBooting || !previewUrl || error ? (
             loadingContent
           ) : (
             <LivePreview
@@ -159,6 +222,17 @@ export function WorkspacePanel({
                 <ExternalLink size={17} />
                 Open site
               </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setMobileMenuOpen(false);
+                  void retryPreview();
+                }}
+                className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm text-zinc-800 hover:bg-zinc-100"
+              >
+                <RefreshCw size={17} />
+                Restart server
+              </button>
             </div>
           )}
 
@@ -204,7 +278,7 @@ export function WorkspacePanel({
     );
   }
 
-  const previewContent = isBooting || !previewUrl ? (
+  const previewContent = isBooting || !previewUrl || error ? (
     loadingContent
   ) : (
     <LivePreview
@@ -254,10 +328,14 @@ export function WorkspacePanel({
 
           <div className="flex items-center gap-2 text-xs">
             {error ? (
-              <span className="flex items-center gap-1 text-red-400">
+              <button
+                type="button"
+                onClick={() => void retryPreview()}
+                className="flex items-center gap-1 text-red-400 hover:text-red-300"
+              >
                 <AlertCircle size={12} />
-                Error
-              </span>
+                Retry preview
+              </button>
             ) : isBooting ? (
               <span className="flex items-center gap-1 text-zinc-400">
                 <Loader2 size={12} className="animate-spin" />
@@ -292,10 +370,7 @@ export function WorkspacePanel({
                       {selectedFile}
                     </div>
                     <div className="flex-1 overflow-hidden">
-                      <CodeEditor
-                        filePath={selectedFile}
-                        content={selectedContent}
-                      />
+                      <CodeEditor filePath={selectedFile} content={selectedContent} />
                     </div>
                   </div>
                 ) : (
