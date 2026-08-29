@@ -37,7 +37,6 @@ export function LivePreview({
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [selectedElement, setSelectedElement] = useState<ElementInfo | null>(null);
 
-  // Listen for inspector messages from iframe
   useEffect(() => {
     function handleMessage(e: MessageEvent) {
       if (!e.data?.type) return;
@@ -46,7 +45,6 @@ export function LivePreview({
         setSelectedElement(info);
         onElementSelected?.(info);
         setInspectorActive(false);
-        // Deactivate inspector after selection
         iframeRef.current?.contentWindow?.postMessage(
           { type: "INSPECTOR_ACTIVATE", active: false },
           "*"
@@ -69,7 +67,10 @@ export function LivePreview({
 
   const handleRefresh = () => {
     if (iframeRef.current && url) {
-      iframeRef.current.src = url;
+      iframeRef.current.src = "about:blank";
+      requestAnimationFrame(() => {
+        if (iframeRef.current) iframeRef.current.src = url;
+      });
     }
   };
 
@@ -113,7 +114,6 @@ export function LivePreview({
 
   return (
     <div ref={containerRef} className="flex h-full flex-col bg-zinc-900">
-      {/* Toolbar */}
       <div className="flex items-center gap-1 border-b border-zinc-800 px-2 py-1">
         <button
           onClick={handleRefresh}
@@ -125,7 +125,6 @@ export function LivePreview({
 
         <div className="mx-1 h-4 w-px bg-zinc-800" />
 
-        {/* Inspector toggle */}
         <button
           onClick={toggleInspector}
           className={`rounded p-1.5 transition-colors ${
@@ -140,7 +139,6 @@ export function LivePreview({
 
         <div className="mx-1 h-4 w-px bg-zinc-800" />
 
-        {/* Device size buttons */}
         {DEVICES.map((d, i) => (
           <button
             key={d.name}
@@ -158,7 +156,6 @@ export function LivePreview({
 
         <div className="mx-1 h-4 w-px bg-zinc-800" />
 
-        {/* Fullscreen */}
         <button
           onClick={toggleFullscreen}
           className="rounded p-1.5 text-zinc-400 hover:bg-zinc-800 hover:text-white"
@@ -167,7 +164,6 @@ export function LivePreview({
           {isFullscreen ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
         </button>
 
-        {/* Selected element indicator */}
         {selectedElement && (
           <div className="ml-auto truncate rounded bg-zinc-800 px-2 py-0.5 text-[10px] text-zinc-400">
             {selectedElement.selector}
@@ -175,14 +171,16 @@ export function LivePreview({
         )}
       </div>
 
-      {/* Preview iframe */}
       <div className="flex flex-1 items-start justify-center overflow-hidden bg-zinc-950 p-2">
         <iframe
           ref={iframeRef}
           src={url}
+          title="Cryzo live preview"
           className="h-full rounded bg-white shadow-lg"
           style={{ width: device.width, maxWidth: "100%" }}
-          sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
+          sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-storage-access-by-user-activation"
+          allow="cross-origin-isolated"
+          loading="eager"
         />
       </div>
     </div>
