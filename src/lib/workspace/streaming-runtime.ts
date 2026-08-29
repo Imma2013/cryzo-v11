@@ -128,10 +128,18 @@ type SandboxResponse = {
   error?: string;
 };
 
-async function callSandbox(body: Record<string, unknown>): Promise<SandboxResponse> {
+async function callSandbox(
+  body: Record<string, unknown>,
+  authToken: string,
+): Promise<SandboxResponse> {
+  if (!authToken) throw new Error("Authentication is still loading. Please retry.");
+
   const response = await fetch("/api/sandbox/runtime", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${authToken}`,
+    },
     body: JSON.stringify(body),
   });
 
@@ -154,6 +162,7 @@ async function executeRemoteAction(
   conversationId: string,
   state: RuntimeState,
   action: ArtifactAction,
+  authToken: string,
 ) {
   if (action.type === "file") {
     updateFileMap(state, action);
@@ -167,11 +176,14 @@ async function executeRemoteAction(
     emit(state);
   }
 
-  const response = await callSandbox({
-    operation: "action",
-    conversationId,
-    action,
-  });
+  const response = await callSandbox(
+    {
+      operation: "action",
+      conversationId,
+      action,
+    },
+    authToken,
+  );
   applyResponse(state, response);
 }
 
@@ -179,6 +191,7 @@ export function processStreamingArtifactText(
   conversationId: string,
   messageId: string,
   text: string,
+  authToken: string,
 ) {
   if (!text.includes("<cryzoArtifact")) return false;
 
@@ -199,23 +212,29 @@ export function processStreamingArtifactText(
 
   for (const action of newActions) {
     state.queue = state.queue
-      .then(() => executeRemoteAction(conversationId, state, action))
+      .then(() => executeRemoteAction(conversationId, state, action, authToken))
       .catch((error) => setError(state, error));
   }
 
   return true;
 }
 
-export async function prebootStreamingRuntime(conversationId: string) {
+export async function prebootStreamingRuntime(
+  conversationId: string,
+  authToken: string,
+) {
   const state = getState(conversationId);
   if (state.initialized) return;
   state.initialized = true;
 
   try {
-    const response = await callSandbox({
-      operation: "init",
-      conversationId,
-    });
+    const response = await callSandbox(
+      {
+        operation: "init",
+        conversationId,
+      },
+      authToken,
+    );
     if (response.previewUrl) {
       state.active = true;
       applyResponse(state, response);
@@ -229,6 +248,7 @@ export async function prebootStreamingRuntime(conversationId: string) {
 export async function restoreStreamingRuntime(
   conversationId: string,
   actions: ArtifactAction[],
+  authToken: string,
 ) {
   const state = getState(conversationId);
   if (state.active || actions.length === 0) return;
@@ -241,11 +261,14 @@ export async function restoreStreamingRuntime(
   emit(state);
 
   try {
-    const response = await callSandbox({
-      operation: "restore",
-      conversationId,
-      actions,
-    });
+    const response = await callSandbox(
+      {
+        operation: "restore",
+        conversationId,
+        actions,
+      },
+      authToken,
+    );
     applyResponse(state, response);
   } catch (error) {
     setError(state, error);
