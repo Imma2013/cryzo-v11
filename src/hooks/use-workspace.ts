@@ -1,11 +1,16 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { Id } from "../../convex/_generated/dataModel";
 import type { ArtifactAction, FileMap } from "@/lib/workspace/types";
 import type { ProgressStage } from "@/lib/workspace/action-runner";
+import {
+  isStreamingRuntimeActive,
+  prebootStreamingRuntime,
+  subscribeStreamingRuntime,
+} from "@/lib/workspace/streaming-runtime";
 
 export function useWorkspace(conversationId: Id<"conversations">) {
   const [files, setFiles] = useState<FileMap>({});
@@ -22,7 +27,8 @@ export function useWorkspace(conversationId: Id<"conversations">) {
     conversationId,
   });
 
-  // Reset state when conversation changes (but keep WebContainer alive)
+  // Reset React state when the conversation changes. The WebContainer itself is
+  // intentionally kept warm across views/conversations, matching Bolt's model.
   useEffect(() => {
     if (conversationId !== convIdRef.current) {
       convIdRef.current = conversationId;
@@ -38,14 +44,36 @@ export function useWorkspace(conversationId: Id<"conversations">) {
     }
   }, [conversationId]);
 
-  // Cleanup on unmount
+  // Start WebContainer boot as soon as the workspace exists rather than after a
+  // completed artifact has made a Convex round-trip.
   useEffect(() => {
-    return () => {
-      import("@/lib/workspace/webcontainer").then(({ teardownWebContainer }) => {
-        teardownWebContainer();
-      });
-    };
+    void prebootStreamingRuntime().catch(() => {
+      // Historical artifact fallback below will surface an actionable error if
+      // boot actually fails. Preboot itself should not crash the page.
+    });
   }, []);
+
+  // Live streamed actions are the source of truth while a build is happening.
+  // Convex remains persistence; it is not in the preview's critical path.
+  useEffect(() => {
+    return subscribeStreamingRuntime(String(conversationId), (runtime) => {
+      if (!runtime.active) return;
+
+      setFiles(runtime.files);
+      setPreviewUrl(runtime.previewUrl);
+      setTerminalOutput(runtime.terminalOutput);
+      setProgress(runtime.progress);
+      setError(runtime.error);
+      setIsBooting(runtime.progress !== "ready" && runtime.progress !== "error");
+      setSelectedFile((current) => {
+        if (current && runtime.files[current]?.type === "file") return current;
+        return (
+          Object.entries(runtime.files).find(([, entry]) => entry.type === "file")?.[0] ??
+          null
+        );
+      });
+    });
+  }, [conversationId]);
 
   const appendOutput = useCallback((data: string) => {
     setTerminalOutput((prev) => prev + data);
@@ -66,12 +94,14 @@ export function useWorkspace(conversationId: Id<"conversations">) {
     }
   }, []);
 
-  // Track which artifacts have been applied
+  // Track which persisted artifacts have been applied by the fallback loader.
   const appliedArtifactsRef = useRef<Set<string>>(new Set());
 
-  // Initial boot — only runs once
+  // Restore an existing project after a hard refresh. New builds use the
+  // streaming path above, but old Convex artifacts still need to be runnable.
   useEffect(() => {
     if (!artifacts || artifacts.length === 0 || bootedRef.current) return;
+    if (isStreamingRuntimeActive(String(conversationId))) return;
     bootedRef.current = true;
 
     const boot = async () => {
@@ -80,23 +110,24 @@ export function useWorkspace(conversationId: Id<"conversations">) {
 
       setIsBooting(true);
       setError(null);
-      appendOutput("Booting WebContainer...\r\n");
+      appendOutput("Restoring project runtime...\r\n");
 
       try {
         const bootTimeout = new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error("WebContainer boot timed out after 30s. Try refreshing the page.")), 30000)
+          setTimeout(
+            () => reject(new Error("WebContainer boot timed out after 30s. Try refreshing the page.")),
+            30000,
+          ),
         );
         const wc = await Promise.race([getWebContainer(), bootTimeout]);
         appendOutput("WebContainer ready.\r\n\r\n");
 
         const allActions: ArtifactAction[] = artifacts.flatMap((a) => a.actions);
 
-        // Mark all current artifacts as applied
         for (const a of artifacts) {
           appliedArtifactsRef.current.add(a._id);
         }
 
-        // Build file map
         const fileMap: FileMap = {};
         for (const action of allActions) {
           if (action.type === "file" && action.filePath) {
@@ -110,37 +141,45 @@ export function useWorkspace(conversationId: Id<"conversations">) {
         }
         setFiles(fileMap);
 
-        if (!selectedFile) {
-          const firstFile = allActions.find(
-            (a) => a.type === "file" && a.filePath
-          );
-          if (firstFile?.filePath) setSelectedFile(firstFile.filePath);
-        }
+        setSelectedFile((current) => {
+          if (current && fileMap[current]?.type === "file") return current;
+          return Object.entries(fileMap).find(([, entry]) => entry.type === "file")?.[0] ?? null;
+        });
 
-        await runActions(wc, allActions, appendOutput, handleServerReady, handleProgress);
-      } catch (err: any) {
-        appendOutput(`\r\nFatal error: ${err.message}\r\n`);
-        setError(err.message);
+        await runActions(
+          wc,
+          allActions,
+          appendOutput,
+          handleServerReady,
+          handleProgress,
+        );
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        appendOutput(`\r\nFatal error: ${message}\r\n`);
+        setError(message);
         setIsBooting(false);
       }
     };
 
-    boot();
-  }, [artifacts, appendOutput, handleServerReady, handleProgress, selectedFile]);
+    void boot();
+  }, [artifacts, appendOutput, handleServerReady, handleProgress, conversationId]);
 
-  // Apply NEW artifacts after initial boot (edits/updates) — files only, no shell re-run
+  // Persisted artifacts created after the historical boot are applied only when
+  // there is no live streaming runtime. During a live build they are duplicates
+  // of actions that were already executed directly from the model stream.
   useEffect(() => {
     if (!artifacts || !bootedRef.current) return;
 
     const newArtifacts = artifacts.filter(
-      (a) => !appliedArtifactsRef.current.has(a._id)
+      (a) => !appliedArtifactsRef.current.has(a._id),
     );
     if (newArtifacts.length === 0) return;
 
-    // Mark as applied immediately to prevent double-apply
     for (const a of newArtifacts) {
       appliedArtifactsRef.current.add(a._id);
     }
+
+    if (isStreamingRuntimeActive(String(conversationId))) return;
 
     const applyUpdates = async () => {
       const { getWebContainer, writeFiles } = await import(
@@ -152,8 +191,8 @@ export function useWorkspace(conversationId: Id<"conversations">) {
         const fileActions = newArtifacts.flatMap((a) =>
           a.actions.filter(
             (act): act is ArtifactAction & { filePath: string } =>
-              act.type === "file" && !!act.filePath
-          )
+              act.type === "file" && !!act.filePath,
+          ),
         );
 
         if (fileActions.length > 0) {
@@ -161,7 +200,6 @@ export function useWorkspace(conversationId: Id<"conversations">) {
           await writeFiles(wc, fileActions);
           appendOutput("Done. HMR should refresh.\r\n");
 
-          // Update file map
           setFiles((prev) => {
             const next = { ...prev };
             for (const action of fileActions) {
@@ -176,9 +214,13 @@ export function useWorkspace(conversationId: Id<"conversations">) {
           });
         }
 
-        // Only run shell commands if they add NEW dependencies (not npm install again)
         const shellActions = newArtifacts.flatMap((a) =>
-          a.actions.filter((act) => act.type === "shell" && !act.content.includes("npm install") && !act.content.includes("npm i"))
+          a.actions.filter(
+            (act) =>
+              act.type === "shell" &&
+              !act.content.includes("npm install") &&
+              !act.content.includes("npm i"),
+          ),
         );
         if (shellActions.length > 0) {
           const { runCommand } = await import("@/lib/workspace/webcontainer");
@@ -187,13 +229,14 @@ export function useWorkspace(conversationId: Id<"conversations">) {
             await runCommand(wc, action.content, appendOutput);
           }
         }
-      } catch (err: any) {
-        appendOutput(`\r\nError applying update: ${err.message}\r\n`);
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        appendOutput(`\r\nError applying update: ${message}\r\n`);
       }
     };
 
-    applyUpdates();
-  }, [artifacts, appendOutput]);
+    void applyUpdates();
+  }, [artifacts, appendOutput, conversationId]);
 
   return {
     files,
