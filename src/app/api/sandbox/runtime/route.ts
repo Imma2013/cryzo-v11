@@ -13,6 +13,8 @@ const PROJECT_DIR = "/vercel/sandbox/project";
 const PREVIEW_PORT = 5173;
 const SANDBOX_TIMEOUT_MS = 45 * 60 * 1000;
 const MAX_FILE_BYTES = 1_500_000;
+const MAX_BUILD_FILES = 500;
+const MAX_BUILD_BYTES = 15_000_000;
 
 function sandboxNameFor(conversationId: string) {
   const safe = conversationId.toLowerCase().replace(/[^a-z0-9-]/g, "-").slice(0, 48);
@@ -39,9 +41,7 @@ async function requireConversationOwner(req: Request, conversationId: string) {
     ? authorization.slice("Bearer ".length).trim()
     : "";
 
-  if (!token) {
-    return false;
-  }
+  if (!token) return false;
 
   try {
     const conversation = await fetchQuery(
@@ -68,6 +68,14 @@ async function getSandbox(conversationId: string) {
       await sandbox.runCommand("mkdir", ["-p", PROJECT_DIR]);
     },
   });
+}
+
+function previewUrlFor(sandbox: Sandbox) {
+  return sandbox.domain(PREVIEW_PORT);
+}
+
+function previewHostFor(sandbox: Sandbox) {
+  return new URL(previewUrlFor(sandbox)).hostname;
 }
 
 async function writeFile(sandbox: Sandbox, action: ArtifactAction) {
@@ -118,11 +126,66 @@ async function isPreviewListening(sandbox: Sandbox) {
   return result.exitCode === 0;
 }
 
+async function isPreviewPubliclyReady(sandbox: Sandbox) {
+  const host = previewHostFor(sandbox);
+  const script = `
+const http = require('http');
+const port = Number(process.argv[1]);
+const host = process.argv[2];
+const req = http.request({
+  hostname: '127.0.0.1',
+  port,
+  path: '/',
+  method: 'GET',
+  headers: { Host: host }
+}, (res) => {
+  let body = '';
+  res.setEncoding('utf8');
+  res.on('data', (chunk) => { body += chunk; if (body.length > 4096) body = body.slice(0, 4096); });
+  res.on('end', () => {
+    const blocked = body.includes('Blocked request. This host');
+    const ok = !!res.statusCode && res.statusCode < 400 && !blocked;
+    process.exit(ok ? 0 : 1);
+  });
+});
+req.on('error', () => process.exit(1));
+req.end();
+`;
+
+  const result = await sandbox.runCommand({
+    cmd: "node",
+    args: ["-e", script, String(PREVIEW_PORT), host],
+    cwd: PROJECT_DIR,
+  });
+  return result.exitCode === 0;
+}
+
+async function stopPreview(sandbox: Sandbox) {
+  await sandbox.runCommand({
+    cmd: "sh",
+    args: [
+      "-lc",
+      `pkill -f '[v]ite.*--port ${PREVIEW_PORT}' || true; pkill -f '[n]pm run dev' || true`,
+    ],
+    cwd: PROJECT_DIR,
+  });
+  await new Promise((resolve) => setTimeout(resolve, 250));
+}
+
 async function startPreview(sandbox: Sandbox) {
-  if (!(await isPreviewListening(sandbox))) {
+  const previewUrl = previewUrlFor(sandbox);
+  const publicHost = previewHostFor(sandbox);
+
+  if (!(await isPreviewPubliclyReady(sandbox).catch(() => false))) {
+    if (await isPreviewListening(sandbox).catch(() => false)) {
+      await stopPreview(sandbox);
+    }
+
     await sandbox.runCommand({
-      cmd: "npm",
+      cmd: "env",
       args: [
+        `__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS=${publicHost}`,
+        "npm",
         "run",
         "dev",
         "--",
@@ -135,17 +198,17 @@ async function startPreview(sandbox: Sandbox) {
       detached: true,
     });
 
-    for (let attempt = 0; attempt < 30; attempt++) {
+    for (let attempt = 0; attempt < 60; attempt++) {
       await new Promise((resolve) => setTimeout(resolve, 250));
-      if (await isPreviewListening(sandbox)) break;
+      if (await isPreviewPubliclyReady(sandbox).catch(() => false)) break;
     }
   }
 
-  if (!(await isPreviewListening(sandbox))) {
-    throw new Error("Vite did not start listening on the preview port");
+  if (!(await isPreviewPubliclyReady(sandbox).catch(() => false))) {
+    throw new Error(`Vite did not become reachable through ${publicHost}`);
   }
 
-  return sandbox.domain(PREVIEW_PORT);
+  return previewUrl;
 }
 
 async function runShell(sandbox: Sandbox, command: string) {
@@ -160,6 +223,86 @@ async function runShell(sandbox: Sandbox, command: string) {
     throw new Error(stderr || stdout || `Command exited with ${result.exitCode}`);
   }
   return [stdout, stderr].filter(Boolean).join("\n").slice(-12000);
+}
+
+async function ensureDependencies(sandbox: Sandbox) {
+  const check = await sandbox.runCommand({
+    cmd: "sh",
+    args: ["-lc", "test -d node_modules"],
+    cwd: PROJECT_DIR,
+  });
+  if (check.exitCode !== 0) return await runInstall(sandbox);
+  return "";
+}
+
+async function buildStaticProject(sandbox: Sandbox) {
+  let output = await ensureDependencies(sandbox);
+  const build = await sandbox.runCommand({
+    cmd: "npm",
+    args: ["run", "build"],
+    cwd: PROJECT_DIR,
+  });
+  const stdout = await build.stdout();
+  const stderr = await build.stderr();
+  output += [stdout, stderr].filter(Boolean).join("\n");
+  if (build.exitCode !== 0) {
+    throw new Error(stderr || stdout || `npm run build exited with ${build.exitCode}`);
+  }
+
+  let outputDir: string | null = null;
+  for (const candidate of ["dist", "build", "out"]) {
+    const check = await sandbox.runCommand({
+      cmd: "sh",
+      args: ["-lc", `test -d ${candidate}`],
+      cwd: PROJECT_DIR,
+    });
+    if (check.exitCode === 0) {
+      outputDir = candidate;
+      break;
+    }
+  }
+
+  if (!outputDir) {
+    throw new Error("Build completed but no dist, build, or out directory was found");
+  }
+
+  const listing = await sandbox.runCommand({
+    cmd: "find",
+    args: [outputDir, "-type", "f"],
+    cwd: PROJECT_DIR,
+  });
+  const listingStdout = await listing.stdout();
+  if (listing.exitCode !== 0) throw new Error("Failed to enumerate build output");
+
+  const paths = listingStdout
+    .split("\n")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  if (paths.length > MAX_BUILD_FILES) {
+    throw new Error(`Build produced too many files (${paths.length})`);
+  }
+
+  const files: Array<{ path: string; content: string }> = [];
+  let totalBytes = 0;
+  for (const relativePath of paths) {
+    const buffer = await sandbox.readFileToBuffer({
+      path: `${PROJECT_DIR}/${relativePath}`,
+    });
+    if (!buffer) continue;
+    totalBytes += buffer.byteLength;
+    if (totalBytes > MAX_BUILD_BYTES) {
+      throw new Error("Build output is too large to publish from Cryzo");
+    }
+    files.push({
+      path: relativePath.slice(outputDir.length + 1),
+      content: buffer.toString("utf8"),
+    });
+  }
+
+  return {
+    files,
+    output: output.slice(-12000),
+  };
 }
 
 async function applyAction(sandbox: Sandbox, action: ArtifactAction) {
@@ -202,9 +345,7 @@ async function restoreProject(sandbox: Sandbox, actions: ArtifactAction[]) {
   }
 
   let previewUrl: string | undefined;
-  if (startActions.length > 0) {
-    previewUrl = await startPreview(sandbox);
-  }
+  if (startActions.length > 0) previewUrl = await startPreview(sandbox);
 
   return {
     progress: previewUrl ? ("ready" as const) : ("writing" as const),
@@ -216,7 +357,7 @@ async function restoreProject(sandbox: Sandbox, actions: ArtifactAction[]) {
 export async function POST(req: Request) {
   try {
     const body = (await req.json()) as {
-      operation?: "init" | "action" | "restore" | "status";
+      operation?: "init" | "action" | "restore" | "status" | "build";
       conversationId?: string;
       action?: ArtifactAction;
       actions?: ArtifactAction[];
@@ -231,23 +372,23 @@ export async function POST(req: Request) {
     }
 
     const sandbox = await getSandbox(body.conversationId);
-    const previewBase = sandbox.domain(PREVIEW_PORT);
+    const previewBase = previewUrlFor(sandbox);
 
     if (body.operation === "init") {
-      const listening = await isPreviewListening(sandbox).catch(() => false);
+      const ready = await isPreviewPubliclyReady(sandbox).catch(() => false);
       return Response.json({
         sandboxName: sandbox.name,
-        previewUrl: listening ? previewBase : null,
-        progress: listening ? "ready" : "writing",
+        previewUrl: ready ? previewBase : null,
+        progress: ready ? "ready" : "writing",
       });
     }
 
     if (body.operation === "status") {
-      const listening = await isPreviewListening(sandbox).catch(() => false);
+      const ready = await isPreviewPubliclyReady(sandbox).catch(() => false);
       return Response.json({
         sandboxName: sandbox.name,
-        previewUrl: listening ? previewBase : null,
-        progress: listening ? "ready" : "starting",
+        previewUrl: ready ? previewBase : null,
+        progress: ready ? "ready" : "starting",
       });
     }
 
@@ -261,6 +402,11 @@ export async function POST(req: Request) {
 
     if (body.operation === "action" && body.action) {
       const result = await applyAction(sandbox, body.action);
+      return Response.json({ sandboxName: sandbox.name, ...result });
+    }
+
+    if (body.operation === "build") {
+      const result = await buildStaticProject(sandbox);
       return Response.json({ sandboxName: sandbox.name, ...result });
     }
 
