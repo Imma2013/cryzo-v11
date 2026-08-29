@@ -2,31 +2,47 @@ import { WebContainer } from "@webcontainer/api";
 import type { ArtifactAction } from "./types";
 
 let instance: WebContainer | null = null;
-let booting = false;
+let bootPromise: Promise<WebContainer> | null = null;
 
 export async function getWebContainer(): Promise<WebContainer> {
   if (instance) return instance;
-  if (booting) {
-    // Wait for existing boot to finish
-    while (booting) await new Promise((r) => setTimeout(r, 100));
-    if (instance) return instance;
-  }
-  booting = true;
-  try {
-    instance = await WebContainer.boot();
-    // Inject inspector script into all preview iframes
-    try {
-      const res = await fetch("/inspector-script.js");
-      const script = await res.text();
-      await instance.setPreviewScript(script);
-    } catch {}
-    return instance;
-  } finally {
-    booting = false;
-  }
+  if (bootPromise) return bootPromise;
+
+  bootPromise = WebContainer.boot({
+    coep: "credentialless",
+    forwardPreviewErrors: true,
+  })
+    .then(async (webcontainer) => {
+      instance = webcontainer;
+
+      // Inject inspector script into every preview iframe once for the lifetime
+      // of the browser WebContainer. Failing to load the inspector must never
+      // block the actual preview.
+      try {
+        const res = await fetch("/inspector-script.js");
+        const script = await res.text();
+        await webcontainer.setPreviewScript(script);
+      } catch {}
+
+      return webcontainer;
+    })
+    .finally(() => {
+      bootPromise = null;
+    });
+
+  return bootPromise;
+}
+
+export function prebootWebContainer() {
+  return getWebContainer();
 }
 
 export async function teardownWebContainer() {
+  if (bootPromise) {
+    try {
+      await bootPromise;
+    } catch {}
+  }
   if (instance) {
     instance.teardown();
     instance = null;
