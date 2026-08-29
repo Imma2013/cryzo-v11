@@ -1,4 +1,4 @@
 {
   "framework": "nextjs",
-  "buildCommand": "NEXT_PUBLIC_CONVEX_URL=https://preview-placeholder.convex.cloud NEXT_PUBLIC_CONVEX_SITE_URL=https://preview-placeholder.convex.site npm run build"
+  "buildCommand": "npx convex deploy --cmd 'npm run build'"
 }
