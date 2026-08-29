@@ -12,6 +12,7 @@ import type * as artifacts from "../artifacts.js";
 import type * as auth from "../auth.js";
 import type * as billing from "../billing.js";
 import type * as conversations from "../conversations.js";
+import type * as hosting from "../hosting.js";
 import type * as http from "../http.js";
 import type * as messages from "../messages.js";
 import type * as users from "../users.js";
@@ -27,6 +28,7 @@ declare const fullApi: ApiFromModules<{
   auth: typeof auth;
   billing: typeof billing;
   conversations: typeof conversations;
+  hosting: typeof hosting;
   http: typeof http;
   messages: typeof messages;
   users: typeof users;
