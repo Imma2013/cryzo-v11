@@ -17,6 +17,7 @@ import { ToolCallDisplay } from "./ToolCallDisplay";
 import { ArtifactBadge } from "./ArtifactBadge";
 import AgentPlan from "@/components/ui/agent-plan";
 import { parseArtifacts } from "@/lib/workspace/artifact-parser";
+import { processStreamingArtifactText } from "@/lib/workspace/streaming-runtime";
 import {
   filesToUIParts,
   takeInitialChatMessage,
@@ -60,6 +61,8 @@ export function ChatArea({
   const createArtifact = useMutation(api.artifacts.create);
   const updateChatMode = useMutation(api.conversations.updateChatMode);
   const savedArtifactsRef = useRef<Set<string>>(new Set());
+  const liveMessageIdsRef = useRef<Set<string>>(new Set());
+  const openedStreamingMessagesRef = useRef<Set<string>>(new Set());
 
   const { messages, setMessages, sendMessage, stop, status, error } = useChat({
     id: conversationId,
@@ -84,6 +87,9 @@ export function ChatArea({
     if (conversationId !== prevConvIdRef.current) {
       prevConvIdRef.current = conversationId;
       loadedRef.current = false;
+      savedArtifactsRef.current = new Set();
+      liveMessageIdsRef.current = new Set();
+      openedStreamingMessagesRef.current = new Set();
     }
     if (!loadedRef.current && loadedMessages !== undefined) {
       loadedRef.current = true;
@@ -148,6 +154,46 @@ export function ChatArea({
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  // Feed the currently-generated assistant message directly into the browser
+  // runtime. This intentionally bypasses the Convex persistence round-trip for
+  // live preview; Convex still stores the completed artifact below.
+  useEffect(() => {
+    const latestAssistant = [...messages]
+      .reverse()
+      .find((message) => message.role === "assistant");
+    if (!latestAssistant) return;
+
+    if (status === "streaming" || status === "submitted") {
+      liveMessageIdsRef.current.add(latestAssistant.id);
+    }
+
+    if (!liveMessageIdsRef.current.has(latestAssistant.id)) return;
+
+    let hasStreamingArtifact = false;
+    for (const part of latestAssistant.parts ?? []) {
+      if (part.type !== "text") continue;
+      if (
+        processStreamingArtifactText(
+          String(conversationId),
+          latestAssistant.id,
+          part.text,
+        )
+      ) {
+        hasStreamingArtifact = true;
+      }
+    }
+
+    if (
+      hasStreamingArtifact &&
+      !openedStreamingMessagesRef.current.has(latestAssistant.id)
+    ) {
+      openedStreamingMessagesRef.current.add(latestAssistant.id);
+      onArtifactCreated?.();
+    }
+  }, [messages, status, conversationId, onArtifactCreated]);
+
+  // Persist only completed artifacts. Persistence is deliberately decoupled
+  // from live execution so database latency cannot hold up the preview.
   useEffect(() => {
     for (const message of messages) {
       if (message.role !== "assistant") continue;
