@@ -74,7 +74,12 @@ function sourceFilesFromFileMap(files: FileMap): PublishFile[] {
       path: path.replace(/^\/+/, ""),
       content: entry.content || "",
     }))
-    .filter((file) => !SOURCE_EXCLUDES.some((exclude) => file.path.startsWith(exclude) || file.path === exclude));
+    .filter(
+      (file) =>
+        !SOURCE_EXCLUDES.some(
+          (exclude) => file.path.startsWith(exclude) || file.path === exclude,
+        ),
+    );
 }
 
 function projectNameFromFiles(files: FileMap, conversationId: string) {
@@ -86,7 +91,9 @@ function projectNameFromFiles(files: FileMap, conversationId: string) {
     } catch {}
   }
 
-  const indexTitle = files["src/App.tsx"]?.content?.match(/<h1[^>]*>(.*?)<\/h1>/)?.[1];
+  const indexTitle = files["src/App.tsx"]?.content?.match(
+    /<h1[^>]*>(.*?)<\/h1>/,
+  )?.[1];
   if (indexTitle) return sanitizeName(indexTitle);
 
   return sanitizeName(`cryzo-${conversationId.slice(-8)}`);
@@ -100,34 +107,6 @@ function readStoredToken(key: string) {
 function storeToken(key: string, token: string) {
   if (typeof window === "undefined") return;
   if (token.trim()) localStorage.setItem(key, token.trim());
-}
-
-async function readWebContainerFiles(dir: string): Promise<PublishFile[]> {
-  const { getWebContainer } = await import("@/lib/workspace/webcontainer");
-  const wc = await getWebContainer();
-  const entries = await wc.fs.readdir(dir, { withFileTypes: true });
-  const files: PublishFile[] = [];
-
-  for (const entry of entries) {
-    const fullPath = `${dir.replace(/\/$/, "")}/${entry.name}`;
-    if (entry.isFile()) {
-      const content = await wc.fs.readFile(fullPath, "utf-8");
-      files.push({
-        path: fullPath.replace(dir.replace(/\/$/, ""), "").replace(/^\/+/, ""),
-        content,
-      });
-    } else if (entry.isDirectory()) {
-      const nested = await readWebContainerFiles(fullPath);
-      for (const file of nested) {
-        files.push({
-          path: `${entry.name}/${file.path}`,
-          content: file.content,
-        });
-      }
-    }
-  }
-
-  return files;
 }
 
 const DEFAULT_TSCONFIG = {
@@ -152,8 +131,12 @@ const DEFAULT_TSCONFIG = {
 };
 
 function ensureBuildConfig(files: PublishFile[]): PublishFile[] {
-  const packageJsonFile = files.find((f) => f.path.replace(/^\/+/, "") === "package.json");
-  const tsconfigFile = files.find((f) => f.path.replace(/^\/+/, "") === "tsconfig.json");
+  const packageJsonFile = files.find(
+    (f) => f.path.replace(/^\/+/, "") === "package.json",
+  );
+  const tsconfigFile = files.find(
+    (f) => f.path.replace(/^\/+/, "") === "tsconfig.json",
+  );
 
   if (packageJsonFile && !tsconfigFile) {
     try {
@@ -173,38 +156,17 @@ function ensureBuildConfig(files: PublishFile[]): PublishFile[] {
   return files;
 }
 
-async function buildAndCollectStaticFiles(files: PublishFile[], onOutput: (line: string) => void) {
-  const { getWebContainer, runCommand } = await import("@/lib/workspace/webcontainer");
-  const wc = await getWebContainer();
-
-  const packageJsonFile = files.find((f) => f.path.replace(/^\/+/, "") === "package.json");
-  const tsconfigFile = files.find((f) => f.path.replace(/^\/+/, "") === "tsconfig.json");
-
-  if (packageJsonFile && !tsconfigFile) {
-    try {
-      const pkg = JSON.parse(packageJsonFile.content);
-      const buildScript = pkg.scripts?.build || "";
-      if (buildScript.includes("tsc")) {
-        onOutput("Injecting missing tsconfig.json to allow TypeScript build to succeed...\n");
-        await wc.fs.writeFile("tsconfig.json", JSON.stringify(DEFAULT_TSCONFIG, null, 2));
-      }
-    } catch (e) {
-      console.error("Failed to inject tsconfig.json to WebContainer", e);
-    }
-  }
-
-  onOutput("$ npm run build\n");
-  const exitCode = await runCommand(wc, "npm run build", onOutput);
-  if (exitCode !== 0) throw new Error("Build failed. Check the publish log.");
-
-  for (const dir of ["dist", "build", "out"]) {
-    try {
-      await wc.fs.readdir(dir);
-      return await readWebContainerFiles(dir);
-    } catch {}
-  }
-
-  throw new Error("Could not find a static output directory. Expected dist, build, or out.");
+async function buildAndCollectStaticFiles(
+  conversationId: string,
+  onOutput: (line: string) => void,
+) {
+  onOutput("$ npm run build (Vercel Sandbox)\n");
+  const { buildStreamingRuntime } = await import(
+    "@/lib/workspace/streaming-runtime"
+  );
+  const result = await buildStreamingRuntime(conversationId);
+  if (result.output) onOutput(`${result.output}\n`);
+  return result.files;
 }
 
 function Modal({
@@ -217,7 +179,7 @@ function Modal({
   onClose: () => void;
 }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
       <div className="max-h-[88vh] w-full max-w-xl overflow-hidden rounded-xl border border-zinc-800 bg-zinc-950 shadow-2xl shadow-black">
         <div className="flex items-center justify-between border-b border-zinc-800 px-5 py-4">
           <h2 className="text-base font-semibold text-white">{title}</h2>
@@ -230,7 +192,9 @@ function Modal({
             <X size={18} />
           </button>
         </div>
-        <div className="max-h-[calc(88vh-64px)] overflow-y-auto p-5">{children}</div>
+        <div className="max-h-[calc(88vh-64px)] overflow-y-auto p-5">
+          {children}
+        </div>
       </div>
     </div>
   );
@@ -251,7 +215,9 @@ function StatusBlock({ status }: { status: PublishStatus }) {
       )}
     >
       <div className="flex items-center gap-2">
-        {status.type === "loading" && <Loader2 size={14} className="animate-spin" />}
+        {status.type === "loading" && (
+          <Loader2 size={14} className="animate-spin" />
+        )}
         {status.type === "success" && <CheckCircle2 size={14} />}
         <span>{status.message}</span>
       </div>
@@ -274,10 +240,12 @@ export function PublishControls({
   files,
   conversationId,
   disabled,
+  variant = "desktop",
 }: {
   files: FileMap;
   conversationId: string;
   disabled: boolean;
+  variant?: "desktop" | "mobile";
 }) {
   const [githubOpen, setGithubOpen] = useState(false);
   const [publishOpen, setPublishOpen] = useState(false);
@@ -286,29 +254,41 @@ export function PublishControls({
     () => projectNameFromFiles(files, conversationId),
     [files, conversationId],
   );
+  const unavailable = disabled || sourceFiles.length === 0;
 
   return (
     <>
-      <div className="flex items-center gap-2">
-        <button
-          type="button"
-          onClick={() => setGithubOpen(true)}
-          disabled={disabled || sourceFiles.length === 0}
-          className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-zinc-800 bg-zinc-900 text-zinc-300 transition-colors hover:border-zinc-700 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
-          title="Sync to GitHub"
-        >
-          <GitHubMark size={15} />
-        </button>
+      {variant === "mobile" ? (
         <button
           type="button"
           onClick={() => setPublishOpen(true)}
-          disabled={disabled || sourceFiles.length === 0}
-          className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-blue-600 px-3 text-xs font-medium text-white transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-40"
+          disabled={unavailable}
+          className="inline-flex h-12 shrink-0 items-center justify-center rounded-full bg-blue-600 px-5 text-base font-medium text-white transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-40"
         >
-          <Rocket size={14} />
           Publish
         </button>
-      </div>
+      ) : (
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setGithubOpen(true)}
+            disabled={unavailable}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-zinc-800 bg-zinc-900 text-zinc-300 transition-colors hover:border-zinc-700 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+            title="Sync to GitHub"
+          >
+            <GitHubMark size={15} />
+          </button>
+          <button
+            type="button"
+            onClick={() => setPublishOpen(true)}
+            disabled={unavailable}
+            className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-blue-600 px-3 text-xs font-medium text-white transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <Rocket size={14} />
+            Publish
+          </button>
+        </div>
+      )}
 
       {githubOpen && (
         <GitHubPublishModal
@@ -351,17 +331,15 @@ function GitHubPublishModal({
     const response = await fetch("/api/publish/github", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        token,
-        repoName,
-        isPrivate,
-        files,
-      }),
+      body: JSON.stringify({ token, repoName, isPrivate, files }),
     });
     const data = await response.json();
 
     if (!response.ok) {
-      setStatus({ type: "error", message: data.error || "GitHub publish failed" });
+      setStatus({
+        type: "error",
+        message: data.error || "GitHub publish failed",
+      });
       return;
     }
 
@@ -391,7 +369,11 @@ function GitHubPublishModal({
             />
           }
         />
-        <TextField label="Repository name" value={repoName} onChange={setRepoName} />
+        <TextField
+          label="Repository name"
+          value={repoName}
+          onChange={setRepoName}
+        />
         <label className="flex items-center gap-2 text-sm text-zinc-300">
           <input
             type="checkbox"
@@ -404,10 +386,16 @@ function GitHubPublishModal({
         <button
           type="button"
           onClick={() => void publish()}
-          disabled={!token.trim() || !repoName.trim() || status.type === "loading"}
+          disabled={
+            !token.trim() || !repoName.trim() || status.type === "loading"
+          }
           className="inline-flex h-9 items-center gap-2 rounded-lg bg-white px-4 text-sm font-medium text-black transition-colors hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-40"
         >
-          {status.type === "loading" ? <Loader2 size={15} className="animate-spin" /> : <GitHubMark size={15} />}
+          {status.type === "loading" ? (
+            <Loader2 size={15} className="animate-spin" />
+          ) : (
+            <GitHubMark size={15} />
+          )}
           Sync repository
         </button>
         <StatusBlock status={status} />
@@ -427,9 +415,15 @@ function DeployPublishModal({
   conversationId: string;
   onClose: () => void;
 }) {
-  const [activeProvider, setActiveProvider] = useState<"vercel" | "netlify">("vercel");
-  const [vercelToken, setVercelToken] = useState(() => readStoredToken(VERCEL_TOKEN_KEY));
-  const [netlifyToken, setNetlifyToken] = useState(() => readStoredToken(NETLIFY_TOKEN_KEY));
+  const [activeProvider, setActiveProvider] = useState<"vercel" | "netlify">(
+    "vercel",
+  );
+  const [vercelToken, setVercelToken] = useState(() =>
+    readStoredToken(VERCEL_TOKEN_KEY),
+  );
+  const [netlifyToken, setNetlifyToken] = useState(() =>
+    readStoredToken(NETLIFY_TOKEN_KEY),
+  );
   const [projectName, setProjectName] = useState(defaultName);
   const [status, setStatus] = useState<PublishStatus>({ type: "idle" });
   const [buildLog, setBuildLog] = useState("");
@@ -450,12 +444,18 @@ function DeployPublishModal({
     const data = await response.json();
 
     if (!response.ok) {
-      setStatus({ type: "error", message: data.error || "Vercel publish failed" });
+      setStatus({
+        type: "error",
+        message: data.error || "Vercel publish failed",
+      });
       return;
     }
 
     if (data.projectId) {
-      localStorage.setItem(`cryzo:vercel-project:${conversationId}`, data.projectId);
+      localStorage.setItem(
+        `cryzo:vercel-project:${conversationId}`,
+        data.projectId,
+      );
     }
 
     setStatus({
@@ -466,17 +466,26 @@ function DeployPublishModal({
   };
 
   const deployNetlify = async () => {
-    setStatus({ type: "loading", message: "Building project for Netlify..." });
+    setStatus({
+      type: "loading",
+      message: "Building project in Vercel Sandbox...",
+    });
     setBuildLog("");
     storeToken(NETLIFY_TOKEN_KEY, netlifyToken);
 
     try {
-      const builtFiles = await buildAndCollectStaticFiles(files, (line) =>
-        setBuildLog((current) => current + line),
+      const builtFiles = await buildAndCollectStaticFiles(
+        conversationId,
+        (line) => setBuildLog((current) => current + line),
       );
 
-      setStatus({ type: "loading", message: `Uploading ${builtFiles.length} built files to Netlify...` });
-      const siteId = localStorage.getItem(`cryzo:netlify-site:${conversationId}`) || undefined;
+      setStatus({
+        type: "loading",
+        message: `Uploading ${builtFiles.length} built files to Netlify...`,
+      });
+      const siteId =
+        localStorage.getItem(`cryzo:netlify-site:${conversationId}`) ||
+        undefined;
       const response = await fetch("/api/publish/netlify", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -490,12 +499,18 @@ function DeployPublishModal({
       const data = await response.json();
 
       if (!response.ok) {
-        setStatus({ type: "error", message: data.error || "Netlify publish failed" });
+        setStatus({
+          type: "error",
+          message: data.error || "Netlify publish failed",
+        });
         return;
       }
 
       if (data.siteId) {
-        localStorage.setItem(`cryzo:netlify-site:${conversationId}`, data.siteId);
+        localStorage.setItem(
+          `cryzo:netlify-site:${conversationId}`,
+          data.siteId,
+        );
       }
 
       setStatus({
@@ -506,7 +521,8 @@ function DeployPublishModal({
     } catch (error) {
       setStatus({
         type: "error",
-        message: error instanceof Error ? error.message : "Netlify publish failed",
+        message:
+          error instanceof Error ? error.message : "Netlify publish failed",
       });
     }
   };
@@ -517,7 +533,8 @@ function DeployPublishModal({
     <Modal title="Publish" onClose={onClose}>
       <div className="space-y-4">
         <p className="text-sm text-zinc-400">
-          Deploy this project with a provider access token. OAuth can replace this later.
+          Deploy this project with a provider access token. Builds run in the
+          project&apos;s Vercel Sandbox rather than in your browser.
         </p>
 
         <div className="grid grid-cols-2 gap-2">
@@ -535,7 +552,11 @@ function DeployPublishModal({
           />
         </div>
 
-        <TextField label="Project name" value={projectName} onChange={setProjectName} />
+        <TextField
+          label="Project name"
+          value={projectName}
+          onChange={setProjectName}
+        />
 
         {activeProvider === "vercel" ? (
           <>
@@ -550,10 +571,16 @@ function DeployPublishModal({
             <button
               type="button"
               onClick={() => void deployVercel()}
-              disabled={!vercelToken.trim() || !projectName.trim() || isLoading}
+              disabled={
+                !vercelToken.trim() || !projectName.trim() || isLoading
+              }
               className="inline-flex h-9 items-center gap-2 rounded-lg bg-white px-4 text-sm font-medium text-black transition-colors hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-40"
             >
-              {isLoading ? <Loader2 size={15} className="animate-spin" /> : <Triangle size={15} />}
+              {isLoading ? (
+                <Loader2 size={15} className="animate-spin" />
+              ) : (
+                <Triangle size={15} />
+              )}
               Deploy to Vercel
             </button>
           </>
@@ -572,10 +599,16 @@ function DeployPublishModal({
             <button
               type="button"
               onClick={() => void deployNetlify()}
-              disabled={!netlifyToken.trim() || !projectName.trim() || isLoading}
+              disabled={
+                !netlifyToken.trim() || !projectName.trim() || isLoading
+              }
               className="inline-flex h-9 items-center gap-2 rounded-lg bg-white px-4 text-sm font-medium text-black transition-colors hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-40"
             >
-              {isLoading ? <Loader2 size={15} className="animate-spin" /> : <Rocket size={15} />}
+              {isLoading ? (
+                <Loader2 size={15} className="animate-spin" />
+              ) : (
+                <Rocket size={15} />
+              )}
               Build and deploy to Netlify
             </button>
           </>
@@ -638,7 +671,9 @@ function TextField({
 }) {
   return (
     <label className="block">
-      <span className="mb-1.5 block text-xs font-medium text-zinc-400">{label}</span>
+      <span className="mb-1.5 block text-xs font-medium text-zinc-400">
+        {label}
+      </span>
       <input
         type={type}
         value={value}
