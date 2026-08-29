@@ -78,12 +78,20 @@ function loadRecipeContent(slug: string): string {
 }
 
 const COMPLEX_PATTERN = /\b(build|create|generate|redesign|clone|website|web app|app|dashboard|store|marketplace|auth|login|payment|billing|stripe|database|convex|firebase|api|webhook|oauth|integration|deploy|github|vercel|schema|storage|subscription|composio|fix error|debug|full|complete|production|professional)\b/i;
+const CODING_REQUEST_PATTERN = /\b(build|generate|redesign|clone|website|web app|component|landing page|dashboard|storefront|frontend|ui|ux|react|vite|tailwind|css|html|typescript|javascript|code|source|fix (?:this |the )?(?:site|website|app|code|error)|debug (?:this |the )?(?:site|website|app|code|error)|responsive|mobile layout)\b/i;
+const EXTERNAL_ACTION_PATTERN = /\b(send|email|reply|forward|post|publish|schedule|calendar|invite|slack|tweet|x post|github issue|pull request|create issue|open issue|comment on|upload to|connect|disconnect|create event|create meeting|send message)\b/i;
 
 function pickModel(userMessage: string) {
   if (COMPLEX_PATTERN.test(userMessage) || userMessage.length > 200) {
     return openrouter.chat("minimax/minimax-m3:free");
   }
   return openrouter.chat("minimax/minimax-m3:free");
+}
+
+function shouldUseComposioTools(userMessage: string) {
+  if (userMessage.includes("[User selected element:")) return false;
+  if (CODING_REQUEST_PATTERN.test(userMessage)) return false;
+  return EXTERNAL_ACTION_PATTERN.test(userMessage);
 }
 
 export const dynamic = "force-dynamic";
@@ -146,16 +154,20 @@ Rules:
     });
   }
 
-  const client = getComposio();
-  const session = await client.create(userId || "anonymous");
-  const tools = await session.tools();
+  const useComposioTools = shouldUseComposioTools(lastUserText);
+  const toolUsageBlock = useComposioTools
+    ? `## Tool Usage\nWhen the user explicitly asks you to perform an external action (send email, create a GitHub issue, post a Slack message, schedule something, etc.), use the available Composio tools. If a tool requires authentication, provide the authorization link.`
+    : `## Tool Usage\nThis is a coding/build request. No external tools are available or needed. Do NOT emit native provider tool-call markup, tool XML, thinking tags, or transport tokens. Only use Cryzo artifact markup for code.`;
 
-  const result = streamText({
-    model,
-    system: `You are Cryzo, an AI assistant that can perform actions via Composio tools AND build web applications.
+  const systemPrompt = `You are Cryzo, an AI assistant that can build web applications and, when explicitly enabled, perform external actions.
 
-## Tool Usage
-When a user asks you to perform actions (send emails, create GitHub issues, post Slack messages, etc.), use the available Composio tools. If a tool requires authentication, provide the user with the authorization link.
+${toolUsageBlock}
+
+## Model Output Integrity — CRITICAL
+- NEVER output MiniMax/provider transport tokens or internal protocol markup inside code or prose.
+- Forbidden examples include ]<]minimax[>[, <minimax:tool_call>, <mm:think>, [e~[, and ]~b].
+- Treat <cryzoArtifact> and <cryzoAction> as the ONLY structured markup allowed for website generation.
+- Every generated file must contain only the intended raw file contents between its cryzoAction tags.
 
 ## Runtime Architecture
 Generated applications execute inside an isolated remote Vercel Sandbox running Linux and Node.js. The user's browser only displays the resulting preview.
@@ -295,6 +307,7 @@ Create visually stunning, production-ready websites. NEVER create generic, ugly,
 
 ### Layout & Structure:
 - Mobile-first responsive design with proper breakpoints (sm, md, lg, xl)
+- On mobile, every input, textarea, and select must use a computed font size of at least 16px so iOS Safari does not auto-zoom on focus.
 - Use CSS Grid and Flexbox for layouts
 - Create distinct sections with visual separation
 - Include a proper navigation header and footer when appropriate to the product
@@ -352,18 +365,39 @@ Example edit response:
 </cryzoArtifact>
 
 ## ELEMENT SELECTION
-The user has an element picker tool. When they select an element on the preview, you will receive context like:
+The desktop preview has an element picker tool. When the user selects an element there, you will receive context like:
 [User selected element: <h1> with selector "h1.text-4xl" containing text "Welcome to..."]
 
 When you receive this context:
 - You know EXACTLY which element the user is referring to
 - Find that element in the source code by matching the selector/tag/text
 - Make the requested change and output an updated artifact
-- You can confidently edit the specific element without asking "which one?"${recipeBlock}`,
-    messages: await convertToModelMessages(messages),
-    tools,
-    stopWhen: stepCountIs(10),
-  });
+- You can confidently edit the specific element without asking "which one?"${recipeBlock}`;
+
+  const modelMessages = await convertToModelMessages(messages);
+  let responseSessionId = composioSessionId;
+  let result;
+
+  if (useComposioTools) {
+    const client = getComposio();
+    const session = await client.create(userId || "anonymous");
+    const tools = await session.tools();
+    responseSessionId = session.sessionId;
+    result = streamText({
+      model,
+      system: systemPrompt,
+      messages: modelMessages,
+      tools,
+      stopWhen: stepCountIs(10),
+    });
+  } else {
+    result = streamText({
+      model,
+      system: systemPrompt,
+      messages: modelMessages,
+      stopWhen: stepCountIs(10),
+    });
+  }
 
   if (userId) {
     convex.mutation(api.billing.deductCredits, {
@@ -374,8 +408,8 @@ When you receive this context:
   }
 
   return result.toUIMessageStreamResponse({
-    headers: {
-      "x-composio-session-id": session.sessionId,
-    },
+    headers: responseSessionId
+      ? { "x-composio-session-id": responseSessionId }
+      : undefined,
   });
 }
