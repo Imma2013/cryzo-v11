@@ -331,7 +331,7 @@ export function ChatInput({
           }
           disabled={disabled}
           rows={1}
-          className="block max-h-44 min-h-16 w-full resize-none bg-transparent px-4 py-3.5 text-[15px] leading-6 text-white outline-none placeholder:text-zinc-500 disabled:opacity-50 md:min-h-24 md:py-4 md:text-sm"
+          className="block max-h-44 min-h-16 w-full resize-none bg-transparent px-4 py-3.5 text-[16px] leading-6 text-white outline-none placeholder:text-zinc-500 disabled:opacity-50 md:min-h-24 md:py-4 md:text-sm"
         />
 
         <div className="flex items-center justify-between gap-2 px-3 pb-3">
