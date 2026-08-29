@@ -1,10 +1,15 @@
 "use client";
 
-import { createContext, useContext, ReactNode } from "react";
-import { useConvexAuth, useAuthActions } from "@convex-dev/auth/react";
+import { createContext, useContext, useEffect, ReactNode } from "react";
+import {
+  useConvexAuth,
+  useAuthActions,
+  useAuthToken,
+} from "@convex-dev/auth/react";
 import { useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { Id } from "../../convex/_generated/dataModel";
+import { setStreamingRuntimeAuthToken } from "@/lib/workspace/streaming-runtime";
 
 interface AuthContextType {
   user: { _id: Id<"users">; name?: string; email?: string } | null | undefined;
@@ -20,7 +25,13 @@ const AuthContext = createContext<AuthContextType | null>(null);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const { isAuthenticated, isLoading } = useConvexAuth();
   const { signIn, signOut } = useAuthActions();
+  const authToken = useAuthToken();
   const user = useQuery(api.users.currentUser);
+
+  useEffect(() => {
+    setStreamingRuntimeAuthToken(authToken ?? null);
+    return () => setStreamingRuntimeAuthToken(null);
+  }, [authToken]);
 
   const value: AuthContextType = {
     user: user ?? null,
