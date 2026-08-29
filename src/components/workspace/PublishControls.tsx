@@ -1,9 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
+import { useAuthToken } from "@convex-dev/auth/react";
 import {
   CheckCircle2,
+  Cloud,
   ExternalLink,
   Loader2,
   Rocket,
@@ -12,6 +14,10 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { FileMap } from "@/lib/workspace/types";
+import {
+  readDeveloperToken,
+  storeDeveloperToken,
+} from "@/lib/developer-connections";
 
 type PublishFile = {
   path: string;
@@ -24,6 +30,14 @@ type PublishStatus = {
   url?: string;
 };
 
+type CryzoHostingTarget = {
+  targetId?: string;
+  slug?: string;
+  url?: string;
+  deploymentId?: string;
+  customDomain?: string;
+};
+
 const SOURCE_EXCLUDES = [
   "node_modules/",
   ".git/",
@@ -31,15 +45,12 @@ const SOURCE_EXCLUDES = [
   "dist/",
   "build/",
   ".cache/",
+  ".cryzo/",
   ".env",
   "package-lock.json",
   "pnpm-lock.yaml",
   "yarn.lock",
 ];
-
-const GITHUB_TOKEN_KEY = "cryzo:github-token";
-const VERCEL_TOKEN_KEY = "cryzo:vercel-token";
-const NETLIFY_TOKEN_KEY = "cryzo:netlify-token";
 
 function GitHubMark({ size = 16 }: { size?: number }) {
   return (
@@ -99,16 +110,6 @@ function projectNameFromFiles(files: FileMap, conversationId: string) {
   return sanitizeName(`cryzo-${conversationId.slice(-8)}`);
 }
 
-function readStoredToken(key: string) {
-  if (typeof window === "undefined") return "";
-  return localStorage.getItem(key) || "";
-}
-
-function storeToken(key: string, token: string) {
-  if (typeof window === "undefined") return;
-  if (token.trim()) localStorage.setItem(key, token.trim());
-}
-
 const DEFAULT_TSCONFIG = {
   compilerOptions: {
     target: "ES2020",
@@ -131,12 +132,8 @@ const DEFAULT_TSCONFIG = {
 };
 
 function ensureBuildConfig(files: PublishFile[]): PublishFile[] {
-  const packageJsonFile = files.find(
-    (f) => f.path.replace(/^\/+/, "") === "package.json",
-  );
-  const tsconfigFile = files.find(
-    (f) => f.path.replace(/^\/+/, "") === "tsconfig.json",
-  );
+  const packageJsonFile = files.find((file) => file.path === "package.json");
+  const tsconfigFile = files.find((file) => file.path === "tsconfig.json");
 
   if (packageJsonFile && !tsconfigFile) {
     try {
@@ -215,9 +212,7 @@ function StatusBlock({ status }: { status: PublishStatus }) {
       )}
     >
       <div className="flex items-center gap-2">
-        {status.type === "loading" && (
-          <Loader2 size={14} className="animate-spin" />
-        )}
+        {status.type === "loading" && <Loader2 size={14} className="animate-spin" />}
         {status.type === "success" && <CheckCircle2 size={14} />}
         <span>{status.message}</span>
       </div>
@@ -247,6 +242,7 @@ export function PublishControls({
   disabled: boolean;
   variant?: "desktop" | "mobile";
 }) {
+  const authToken = useAuthToken();
   const [githubOpen, setGithubOpen] = useState(false);
   const [publishOpen, setPublishOpen] = useState(false);
   const sourceFiles = useMemo(() => sourceFilesFromFileMap(files), [files]);
@@ -303,6 +299,7 @@ export function PublishControls({
           files={sourceFiles}
           defaultName={defaultName}
           conversationId={conversationId}
+          authToken={authToken ?? null}
           onClose={() => setPublishOpen(false)}
         />
       )}
@@ -319,14 +316,14 @@ function GitHubPublishModal({
   defaultName: string;
   onClose: () => void;
 }) {
-  const [token, setToken] = useState(() => readStoredToken(GITHUB_TOKEN_KEY));
+  const [token, setToken] = useState(() => readDeveloperToken("github"));
   const [repoName, setRepoName] = useState(defaultName);
   const [isPrivate, setIsPrivate] = useState(false);
   const [status, setStatus] = useState<PublishStatus>({ type: "idle" });
 
   const publish = async () => {
     setStatus({ type: "loading", message: "Pushing files to GitHub..." });
-    storeToken(GITHUB_TOKEN_KEY, token);
+    storeDeveloperToken("github", token);
 
     const response = await fetch("/api/publish/github", {
       method: "POST",
@@ -336,10 +333,7 @@ function GitHubPublishModal({
     const data = await response.json();
 
     if (!response.ok) {
-      setStatus({
-        type: "error",
-        message: data.error || "GitHub publish failed",
-      });
+      setStatus({ type: "error", message: data.error || "GitHub publish failed" });
       return;
     }
 
@@ -361,19 +355,10 @@ function GitHubPublishModal({
           value={token}
           onChange={setToken}
           type="password"
-          placeholder="ghp_..."
-          helper={
-            <TokenHelp
-              href="https://github.com/settings/tokens/new"
-              note="Required scopes: repo, read:user"
-            />
-          }
+          placeholder="github_pat_... or ghp_..."
+          helper={<TokenHelp href="https://github.com/settings/tokens/new" note="You can also save this under Developer Connections." />}
         />
-        <TextField
-          label="Repository name"
-          value={repoName}
-          onChange={setRepoName}
-        />
+        <TextField label="Repository name" value={repoName} onChange={setRepoName} />
         <label className="flex items-center gap-2 text-sm text-zinc-300">
           <input
             type="checkbox"
@@ -386,16 +371,10 @@ function GitHubPublishModal({
         <button
           type="button"
           onClick={() => void publish()}
-          disabled={
-            !token.trim() || !repoName.trim() || status.type === "loading"
-          }
+          disabled={!token.trim() || !repoName.trim() || status.type === "loading"}
           className="inline-flex h-9 items-center gap-2 rounded-lg bg-white px-4 text-sm font-medium text-black transition-colors hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-40"
         >
-          {status.type === "loading" ? (
-            <Loader2 size={15} className="animate-spin" />
-          ) : (
-            <GitHubMark size={15} />
-          )}
+          {status.type === "loading" ? <Loader2 size={15} className="animate-spin" /> : <GitHubMark size={15} />}
           Sync repository
         </button>
         <StatusBlock status={status} />
@@ -408,210 +387,273 @@ function DeployPublishModal({
   files,
   defaultName,
   conversationId,
+  authToken,
   onClose,
 }: {
   files: PublishFile[];
   defaultName: string;
   conversationId: string;
+  authToken: string | null;
   onClose: () => void;
 }) {
-  const [activeProvider, setActiveProvider] = useState<"vercel" | "netlify">(
-    "vercel",
-  );
-  const [vercelToken, setVercelToken] = useState(() =>
-    readStoredToken(VERCEL_TOKEN_KEY),
-  );
-  const [netlifyToken, setNetlifyToken] = useState(() =>
-    readStoredToken(NETLIFY_TOKEN_KEY),
-  );
+  const [activeProvider, setActiveProvider] = useState<"cryzo" | "vercel" | "netlify">("cryzo");
+  const [vercelToken, setVercelToken] = useState(() => readDeveloperToken("vercel"));
+  const [netlifyToken, setNetlifyToken] = useState(() => readDeveloperToken("netlify"));
   const [projectName, setProjectName] = useState(defaultName);
+  const [cryzoSlug, setCryzoSlug] = useState(defaultName);
+  const [hostingDomain, setHostingDomain] = useState("cryzo.me");
+  const [hostingConfigured, setHostingConfigured] = useState<boolean | null>(null);
+  const [existingTarget, setExistingTarget] = useState<CryzoHostingTarget | null>(null);
   const [status, setStatus] = useState<PublishStatus>({ type: "idle" });
   const [buildLog, setBuildLog] = useState("");
 
+  useEffect(() => {
+    if (!authToken) return;
+    let cancelled = false;
+    async function loadHosting() {
+      const response = await fetch(
+        `/api/publish/cryzo?conversationId=${encodeURIComponent(conversationId)}`,
+        { headers: { Authorization: `Bearer ${authToken}` } },
+      );
+      const data = await response.json();
+      if (cancelled || !response.ok) return;
+      setHostingConfigured(Boolean(data.configured));
+      if (data.hostingDomain) setHostingDomain(data.hostingDomain);
+      if (data.target) {
+        setExistingTarget(data.target);
+        if (data.target.slug) setCryzoSlug(data.target.slug);
+      }
+    }
+    void loadHosting();
+    return () => {
+      cancelled = true;
+    };
+  }, [authToken, conversationId]);
+
+  const deployCryzo = async () => {
+    if (!authToken) {
+      setStatus({ type: "error", message: "Your Cryzo session is still loading. Try again." });
+      return;
+    }
+    setStatus({ type: "loading", message: existingTarget ? "Publishing a new version..." : "Creating your Cryzo-hosted app..." });
+    const response = await fetch("/api/publish/cryzo", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({
+        conversationId,
+        projectName,
+        requestedSlug: cryzoSlug,
+        files: ensureBuildConfig(files),
+      }),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      setStatus({ type: "error", message: data.error || "Cryzo Hosting publish failed" });
+      if (data.code === "CRYZO_HOSTING_NOT_CONFIGURED") setHostingConfigured(false);
+      return;
+    }
+
+    setHostingConfigured(true);
+    setCryzoSlug(data.slug);
+    setExistingTarget({
+      targetId: data.projectId,
+      slug: data.slug,
+      url: data.url,
+      deploymentId: data.deploymentId,
+      customDomain: data.subdomainAssigned ? `${data.slug}.${hostingDomain}` : undefined,
+    });
+    setStatus({
+      type: "success",
+      message: data.subdomainAssigned
+        ? "Published to your Cryzo URL."
+        : "Published. Your stable Vercel URL is live; the Cryzo subdomain will be used once wildcard hosting is enabled.",
+      url: data.url,
+    });
+  };
+
   const deployVercel = async () => {
-    setStatus({ type: "loading", message: "Creating Vercel deployment..." });
-    storeToken(VERCEL_TOKEN_KEY, vercelToken);
-    const filesWithConfig = ensureBuildConfig(files);
+    setStatus({ type: "loading", message: "Creating deployment in your Vercel account..." });
+    storeDeveloperToken("vercel", vercelToken);
     const response = await fetch("/api/publish/vercel", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         token: vercelToken,
         projectName,
-        files: filesWithConfig,
+        files: ensureBuildConfig(files),
       }),
     });
     const data = await response.json();
-
     if (!response.ok) {
-      setStatus({
-        type: "error",
-        message: data.error || "Vercel publish failed",
-      });
+      setStatus({ type: "error", message: data.error || "Vercel publish failed" });
       return;
     }
-
-    if (data.projectId) {
-      localStorage.setItem(
-        `cryzo:vercel-project:${conversationId}`,
-        data.projectId,
-      );
-    }
-
-    setStatus({
-      type: "success",
-      message: "Vercel deployment started.",
-      url: data.url,
-    });
+    if (data.projectId) localStorage.setItem(`cryzo:vercel-project:${conversationId}`, data.projectId);
+    setStatus({ type: "success", message: "Deployment started in your Vercel account.", url: data.url });
   };
 
   const deployNetlify = async () => {
-    setStatus({
-      type: "loading",
-      message: "Building project in Vercel Sandbox...",
-    });
+    setStatus({ type: "loading", message: "Building project in Vercel Sandbox..." });
     setBuildLog("");
-    storeToken(NETLIFY_TOKEN_KEY, netlifyToken);
+    storeDeveloperToken("netlify", netlifyToken);
 
     try {
-      const builtFiles = await buildAndCollectStaticFiles(
-        conversationId,
-        (line) => setBuildLog((current) => current + line),
+      const builtFiles = await buildAndCollectStaticFiles(conversationId, (line) =>
+        setBuildLog((current) => current + line),
       );
-
-      setStatus({
-        type: "loading",
-        message: `Uploading ${builtFiles.length} built files to Netlify...`,
-      });
-      const siteId =
-        localStorage.getItem(`cryzo:netlify-site:${conversationId}`) ||
-        undefined;
+      setStatus({ type: "loading", message: `Uploading ${builtFiles.length} built files to Netlify...` });
+      const siteId = localStorage.getItem(`cryzo:netlify-site:${conversationId}`) || undefined;
       const response = await fetch("/api/publish/netlify", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          token: netlifyToken,
-          siteId,
-          siteName: projectName,
-          files: builtFiles,
-        }),
+        body: JSON.stringify({ token: netlifyToken, siteId, siteName: projectName, files: builtFiles }),
       });
       const data = await response.json();
-
       if (!response.ok) {
-        setStatus({
-          type: "error",
-          message: data.error || "Netlify publish failed",
-        });
+        setStatus({ type: "error", message: data.error || "Netlify publish failed" });
         return;
       }
-
-      if (data.siteId) {
-        localStorage.setItem(
-          `cryzo:netlify-site:${conversationId}`,
-          data.siteId,
-        );
-      }
-
-      setStatus({
-        type: "success",
-        message: `Netlify deployment ${data.state || "created"}.`,
-        url: data.url,
-      });
+      if (data.siteId) localStorage.setItem(`cryzo:netlify-site:${conversationId}`, data.siteId);
+      setStatus({ type: "success", message: `Netlify deployment ${data.state || "created"}.`, url: data.url });
     } catch (error) {
-      setStatus({
-        type: "error",
-        message:
-          error instanceof Error ? error.message : "Netlify publish failed",
-      });
+      setStatus({ type: "error", message: error instanceof Error ? error.message : "Netlify publish failed" });
     }
   };
 
   const isLoading = status.type === "loading";
 
   return (
-    <Modal title="Publish" onClose={onClose}>
-      <div className="space-y-4">
-        <p className="text-sm text-zinc-400">
-          Deploy this project with a provider access token. Builds run in the
-          project&apos;s Vercel Sandbox rather than in your browser.
-        </p>
-
-        <div className="grid grid-cols-2 gap-2">
+    <Modal title="Publish Your App" onClose={onClose}>
+      <div className="space-y-5">
+        <div className="grid grid-cols-3 gap-2">
+          <ProviderButton
+            active={activeProvider === "cryzo"}
+            label="Cryzo Hosting"
+            icon={<Cloud size={15} />}
+            onClick={() => {
+              setActiveProvider("cryzo");
+              setStatus({ type: "idle" });
+            }}
+          />
           <ProviderButton
             active={activeProvider === "vercel"}
-            label="Vercel"
+            label="Your Vercel"
             icon={<Triangle size={15} />}
-            onClick={() => setActiveProvider("vercel")}
+            onClick={() => {
+              setActiveProvider("vercel");
+              setStatus({ type: "idle" });
+            }}
           />
           <ProviderButton
             active={activeProvider === "netlify"}
             label="Netlify"
             icon={<Rocket size={15} />}
-            onClick={() => setActiveProvider("netlify")}
+            onClick={() => {
+              setActiveProvider("netlify");
+              setStatus({ type: "idle" });
+            }}
           />
         </div>
 
-        <TextField
-          label="Project name"
-          value={projectName}
-          onChange={setProjectName}
-        />
+        <TextField label="Project name" value={projectName} onChange={setProjectName} />
 
-        {activeProvider === "vercel" ? (
-          <>
+        {activeProvider === "cryzo" && (
+          <div className="space-y-4">
+            <div>
+              <label className="mb-1.5 block text-xs font-medium text-zinc-400">Cryzo URL</label>
+              <div className="flex h-10 items-center overflow-hidden rounded-lg border border-zinc-800 bg-zinc-900">
+                <span className="shrink-0 border-r border-zinc-800 px-3 text-xs text-zinc-500">https://</span>
+                <input
+                  value={cryzoSlug}
+                  onChange={(event) => setCryzoSlug(sanitizeName(event.target.value, "app").slice(0, 48))}
+                  className="min-w-0 flex-1 bg-transparent px-2 text-sm text-white outline-none"
+                  aria-label="Cryzo URL slug"
+                />
+                <span className="shrink-0 px-3 text-xs text-zinc-500">.{hostingDomain}</span>
+              </div>
+            </div>
+
+            {existingTarget?.url && (
+              <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-3">
+                <div className="text-xs text-zinc-500">Currently published</div>
+                <a
+                  href={existingTarget.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mt-1 inline-flex items-center gap-1 text-sm text-blue-300"
+                >
+                  {existingTarget.url}
+                  <ExternalLink size={13} />
+                </a>
+              </div>
+            )}
+
+            {hostingConfigured === false && (
+              <p className="rounded-lg border border-amber-900/70 bg-amber-950/30 px-3 py-2 text-xs leading-5 text-amber-300">
+                Managed hosting is installed in Cryzo, but its server-side Vercel platform credential has not been configured yet. Your own Vercel token option remains available in the next tab.
+              </p>
+            )}
+
+            <button
+              type="button"
+              onClick={() => void deployCryzo()}
+              disabled={!projectName.trim() || !cryzoSlug.trim() || isLoading || !authToken}
+              className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 text-sm font-medium text-white transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {isLoading ? <Loader2 size={15} className="animate-spin" /> : <Cloud size={15} />}
+              {existingTarget ? "Publish new version" : "Publish with Cryzo"}
+            </button>
+          </div>
+        )}
+
+        {activeProvider === "vercel" && (
+          <div className="space-y-4">
+            <p className="text-sm text-zinc-400">
+              Deploy directly into your own Vercel account. This preserves the access-token workflow you already had.
+            </p>
             <TextField
               label="Vercel access token"
               value={vercelToken}
               onChange={setVercelToken}
               type="password"
-              placeholder="vercel token"
-              helper={<TokenHelp href="https://vercel.com/account/tokens" />}
+              placeholder="Vercel access token"
+              helper={<TokenHelp href="https://vercel.com/account/tokens" note="You can also save this under Developer Connections." />}
             />
             <button
               type="button"
               onClick={() => void deployVercel()}
-              disabled={
-                !vercelToken.trim() || !projectName.trim() || isLoading
-              }
-              className="inline-flex h-9 items-center gap-2 rounded-lg bg-white px-4 text-sm font-medium text-black transition-colors hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-40"
+              disabled={!vercelToken.trim() || !projectName.trim() || isLoading}
+              className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-white px-4 text-sm font-medium text-black transition-colors hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-40"
             >
-              {isLoading ? (
-                <Loader2 size={15} className="animate-spin" />
-              ) : (
-                <Triangle size={15} />
-              )}
-              Deploy to Vercel
+              {isLoading ? <Loader2 size={15} className="animate-spin" /> : <Triangle size={15} />}
+              Deploy to my Vercel
             </button>
-          </>
-        ) : (
-          <>
+          </div>
+        )}
+
+        {activeProvider === "netlify" && (
+          <div className="space-y-4">
             <TextField
               label="Netlify access token"
               value={netlifyToken}
               onChange={setNetlifyToken}
               type="password"
-              placeholder="netlify token"
-              helper={
-                <TokenHelp href="https://app.netlify.com/user/applications#personal-access-tokens" />
-              }
+              placeholder="Netlify access token"
+              helper={<TokenHelp href="https://app.netlify.com/user/applications#personal-access-tokens" />}
             />
             <button
               type="button"
               onClick={() => void deployNetlify()}
-              disabled={
-                !netlifyToken.trim() || !projectName.trim() || isLoading
-              }
-              className="inline-flex h-9 items-center gap-2 rounded-lg bg-white px-4 text-sm font-medium text-black transition-colors hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-40"
+              disabled={!netlifyToken.trim() || !projectName.trim() || isLoading}
+              className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-white px-4 text-sm font-medium text-black transition-colors hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-40"
             >
-              {isLoading ? (
-                <Loader2 size={15} className="animate-spin" />
-              ) : (
-                <Rocket size={15} />
-              )}
+              {isLoading ? <Loader2 size={15} className="animate-spin" /> : <Rocket size={15} />}
               Build and deploy to Netlify
             </button>
-          </>
+          </div>
         )}
 
         <StatusBlock status={status} />
@@ -642,14 +684,14 @@ function ProviderButton({
       type="button"
       onClick={onClick}
       className={cn(
-        "flex items-center justify-center gap-2 rounded-lg border px-3 py-3 text-sm transition-colors",
+        "flex min-w-0 flex-col items-center justify-center gap-1 rounded-lg border px-2 py-2.5 text-center text-xs transition-colors",
         active
           ? "border-blue-500 bg-blue-500/10 text-white"
           : "border-zinc-800 bg-zinc-900 text-zinc-400 hover:text-white",
       )}
     >
       {icon}
-      {label}
+      <span className="truncate">{label}</span>
     </button>
   );
 }
@@ -671,9 +713,7 @@ function TextField({
 }) {
   return (
     <label className="block">
-      <span className="mb-1.5 block text-xs font-medium text-zinc-400">
-        {label}
-      </span>
+      <span className="mb-1.5 block text-xs font-medium text-zinc-400">{label}</span>
       <input
         type={type}
         value={value}
