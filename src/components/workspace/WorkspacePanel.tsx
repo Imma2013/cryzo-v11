@@ -93,8 +93,11 @@ export function WorkspacePanel({
     const handleVoice = () => {
       onBackToChat?.();
       window.setTimeout(() => {
-        window.dispatchEvent(new Event("cryzo:start-voice"));
-      }, 80);
+        const voiceButton = document.querySelector<HTMLButtonElement>(
+          'button[title="Start voice input"]',
+        );
+        voiceButton?.click();
+      }, 120);
     };
 
     return (
@@ -145,7 +148,9 @@ export function WorkspacePanel({
               <button
                 type="button"
                 onClick={() => {
-                  if (previewUrl) window.open(previewUrl, "_blank", "noopener,noreferrer");
+                  if (previewUrl) {
+                    window.open(previewUrl, "_blank", "noopener,noreferrer");
+                  }
                   setMobileMenuOpen(false);
                 }}
                 disabled={!previewUrl}
