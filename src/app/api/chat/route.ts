@@ -14,6 +14,15 @@ const nvidia = createOpenAI({
   apiKey: process.env.NVIDIA_API_KEY,
 });
 
+const openrouter = createOpenAI({
+  baseURL: "https://openrouter.ai/api/v1",
+  apiKey: process.env.OPENROUTER_API_KEY,
+  headers: {
+    "HTTP-Referer": "https://www.cryzo.me",
+    "X-Title": "Cryzo",
+  },
+});
+
 let composio: Composio<VercelProvider>;
 function getComposio() {
   if (!composio) composio = new Composio<VercelProvider>({ provider: new VercelProvider() });
@@ -70,9 +79,9 @@ const COMPLEX_PATTERN = /\b(build|create|generate|redesign|clone|website|web app
 
 function pickModel(userMessage: string) {
   if (COMPLEX_PATTERN.test(userMessage) || userMessage.length > 200) {
-    return nvidia.chat("minimaxai/minimax-m3");
+    return openrouter.chat("minimax/minimax-m3:free");
   }
-  return nvidia.chat("minimaxai/minimax-m3");
+  return openrouter.chat("minimax/minimax-m3:free");
 }
 
 export const dynamic = "force-dynamic";
