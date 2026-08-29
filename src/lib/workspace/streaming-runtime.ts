@@ -102,6 +102,18 @@ function updateFileMap(state: RuntimeState, action: ArtifactAction) {
   }
 }
 
+function applyRepairedFiles(state: RuntimeState, files?: SandboxBuildFile[]) {
+  if (!files?.length) return false;
+  for (const file of files) {
+    updateFileMap(state, {
+      type: "file",
+      filePath: file.path,
+      content: file.content,
+    });
+  }
+  return true;
+}
+
 function fileMapFromActions(actions: ArtifactAction[]) {
   const files: FileMap = {};
   for (const action of actions) {
@@ -147,10 +159,18 @@ type SandboxResponse = {
   error?: string;
 };
 
-async function callSandbox(body: Record<string, unknown>): Promise<SandboxResponse> {
-  const authToken = await waitForSandboxAuthToken();
+type GuardResponse = {
+  action?: ArtifactAction;
+  actions?: ArtifactAction[];
+  repairedFiles?: SandboxBuildFile[];
+  output?: string;
+  repaired?: boolean;
+  error?: string;
+};
 
-  const response = await fetch("/api/sandbox/runtime", {
+async function authenticatedPost<T>(url: string, body: Record<string, unknown>): Promise<T> {
+  const authToken = await waitForSandboxAuthToken();
+  const response = await fetch(url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -159,11 +179,19 @@ async function callSandbox(body: Record<string, unknown>): Promise<SandboxRespon
     body: JSON.stringify(body),
   });
 
-  const data = (await response.json()) as SandboxResponse;
+  const data = (await response.json()) as T & { error?: string };
   if (!response.ok) {
-    throw new Error(data.error || `Sandbox request failed with ${response.status}`);
+    throw new Error(data.error || `Request failed with ${response.status}`);
   }
   return data;
+}
+
+async function callSandbox(body: Record<string, unknown>): Promise<SandboxResponse> {
+  return await authenticatedPost<SandboxResponse>("/api/sandbox/runtime", body);
+}
+
+async function callGuard(body: Record<string, unknown>): Promise<GuardResponse> {
+  return await authenticatedPost<GuardResponse>("/api/sandbox/validate", body);
 }
 
 function applyResponse(state: RuntimeState, response: SandboxResponse) {
@@ -177,13 +205,30 @@ function applyResponse(state: RuntimeState, response: SandboxResponse) {
   emit(state);
 }
 
+function isInstallAction(action: ArtifactAction) {
+  return action.type === "shell" && /(^|\s)npm\s+(install|i)(\s|$)/.test(action.content.trim());
+}
+
 async function executeRemoteAction(
   conversationId: string,
   state: RuntimeState,
   action: ArtifactAction,
 ) {
+  let safeAction = action;
+
   if (action.type === "file") {
-    updateFileMap(state, action);
+    const validation = await callGuard({
+      operation: "file",
+      conversationId,
+      action,
+    });
+    if (!validation.action) {
+      throw new Error(`Generated file validation returned no action for ${action.filePath || "unknown file"}`);
+    }
+    safeAction = validation.action;
+    if (validation.output) appendOutput(state, validation.output);
+
+    updateFileMap(state, safeAction);
     state.progress = state.previewUrl ? "ready" : "writing";
     emit(state);
   } else if (action.type === "shell") {
@@ -197,9 +242,18 @@ async function executeRemoteAction(
   const response = await callSandbox({
     operation: "action",
     conversationId,
-    action,
+    action: safeAction,
   });
   applyResponse(state, response);
+
+  if (isInstallAction(safeAction)) {
+    const validation = await callGuard({
+      operation: "project",
+      conversationId,
+    });
+    if (validation.output) appendOutput(state, validation.output);
+    if (applyRepairedFiles(state, validation.repairedFiles)) emit(state);
+  }
 }
 
 export function processStreamingArtifactText(
@@ -261,19 +315,35 @@ export async function restoreStreamingRuntime(
   if (state.active || actions.length === 0) return;
 
   state.active = true;
-  state.files = fileMapFromActions(actions);
   state.progress = "writing";
   state.error = null;
   appendOutput(state, "Restoring project in Vercel Sandbox...\n");
   emit(state);
 
   try {
-    const response = await callSandbox({
-      operation: "restore",
+    const guarded = await callGuard({
+      operation: "actions",
       conversationId,
       actions,
     });
+    const safeActions = guarded.actions || actions;
+    if (guarded.output) appendOutput(state, guarded.output);
+    state.files = fileMapFromActions(safeActions);
+    emit(state);
+
+    const response = await callSandbox({
+      operation: "restore",
+      conversationId,
+      actions: safeActions,
+    });
     applyResponse(state, response);
+
+    const validation = await callGuard({
+      operation: "project",
+      conversationId,
+    });
+    if (validation.output) appendOutput(state, validation.output);
+    if (applyRepairedFiles(state, validation.repairedFiles)) emit(state);
   } catch (error) {
     state.active = false;
     setError(state, error);
@@ -289,6 +359,13 @@ export async function restartStreamingRuntime(conversationId: string) {
   emit(state);
 
   try {
+    const validation = await callGuard({
+      operation: "project",
+      conversationId,
+    });
+    if (validation.output) appendOutput(state, validation.output);
+    if (applyRepairedFiles(state, validation.repairedFiles)) emit(state);
+
     const response = await callSandbox({
       operation: "restart",
       conversationId,
@@ -315,6 +392,13 @@ export async function refreshStreamingRuntimeLogs(conversationId: string) {
 
 export async function buildStreamingRuntime(conversationId: string) {
   const state = getState(conversationId);
+  const validation = await callGuard({
+    operation: "project",
+    conversationId,
+  });
+  if (validation.output) appendOutput(state, validation.output);
+  if (applyRepairedFiles(state, validation.repairedFiles)) emit(state);
+
   const response = await callSandbox({
     operation: "build",
     conversationId,
