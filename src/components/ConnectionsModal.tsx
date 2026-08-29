@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState } from "react";
 import {
   CheckCircle2,
   Database,
-  Github,
   Loader2,
   Save,
   Server,
@@ -157,7 +156,7 @@ export function ConnectionsModal({
         name: "GitHub",
         description: "Sync generated source code to repositories.",
         placeholder: "github_pat_... or ghp_...",
-        icon: Github,
+        icon: Server,
       },
       {
         id: "vercel" as const,
