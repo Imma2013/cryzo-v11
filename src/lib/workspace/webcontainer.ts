@@ -9,15 +9,14 @@ export async function getWebContainer(): Promise<WebContainer> {
   if (bootPromise) return bootPromise;
 
   bootPromise = WebContainer.boot({
-    coep: "credentialless",
+    // next.config.ts serves Cryzo with COEP: require-corp. Keep the runtime
+    // mode matched to the page, which is especially important on Safari/iOS.
+    coep: "require-corp",
     forwardPreviewErrors: true,
   })
     .then(async (webcontainer) => {
       instance = webcontainer;
 
-      // Inject inspector script into every preview iframe once for the lifetime
-      // of the browser WebContainer. Failing to load the inspector must never
-      // block the actual preview.
       try {
         const res = await fetch("/inspector-script.js");
         const script = await res.text();
