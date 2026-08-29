@@ -39,11 +39,9 @@ export default function ConversationPage({
   const hasArtifacts = !!artifacts?.length;
   const workspaceStarted = workspaceOpen || hasArtifacts;
 
-  // Prewarm the remote Vercel Sandbox while the user is still chatting. The
-  // phone never boots Node/npm anymore; it only renders the resulting preview.
   useEffect(() => {
     void prebootStreamingRuntime(String(id)).catch(() => {
-      // The workspace will surface an actionable runtime error if creation fails.
+      // Workspace state will surface an actionable error if startup fails.
     });
   }, [id]);
 
@@ -67,9 +65,7 @@ export default function ConversationPage({
   }, [id]);
 
   useEffect(() => {
-    if (hasArtifacts && isMobile === false) {
-      setWorkspaceOpen(true);
-    }
+    if (hasArtifacts && isMobile === false) setWorkspaceOpen(true);
   }, [hasArtifacts, isMobile]);
 
   const handleElementSelected = useCallback(
@@ -103,14 +99,16 @@ export default function ConversationPage({
   if (isMobile) {
     return (
       <div className="flex h-full min-h-0 flex-col bg-black">
-        <MobileBuilderHeader
-          title={conversation?.title || "Cryzo"}
-          view={mobileView}
-          canPreview={workspaceStarted}
-          isBuilding={isBuilding}
-          onPreview={() => setMobileView("preview")}
-          onBackToChat={() => setMobileView("chat")}
-        />
+        {mobileView === "chat" && (
+          <MobileBuilderHeader
+            title={conversation?.title || "Cryzo"}
+            view="chat"
+            canPreview={workspaceStarted}
+            isBuilding={isBuilding}
+            onPreview={() => setMobileView("preview")}
+            onBackToChat={() => setMobileView("chat")}
+          />
+        )}
 
         <div className="relative min-h-0 flex-1 overflow-hidden">
           <div
@@ -140,6 +138,7 @@ export default function ConversationPage({
                 conversationId={id}
                 onElementSelected={handleElementSelected}
                 onStatusChange={handleWorkspaceStatus}
+                onBackToChat={() => setMobileView("chat")}
                 mobile
               />
             </div>
