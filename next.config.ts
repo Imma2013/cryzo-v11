@@ -1,17 +1,8 @@
 import type { NextConfig } from "next";
 
-const nextConfig: NextConfig = {
-  async headers() {
-    return [
-      {
-        source: "/:path*",
-        headers: [
-          { key: "Cross-Origin-Embedder-Policy", value: "require-corp" },
-          { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
-        ],
-      },
-    ];
-  },
-};
+// Cryzo previews now execute in remote Vercel Sandboxes. The app no longer
+// needs cross-origin isolation headers required by in-browser WebContainers,
+// which also makes embedding the sandbox preview straightforward on Safari/iOS.
+const nextConfig: NextConfig = {};
 
 export default nextConfig;
