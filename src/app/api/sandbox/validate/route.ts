@@ -1,8 +1,8 @@
 import path from "node:path";
 import { Sandbox } from "@vercel/sandbox";
 import { fetchQuery } from "convex/nextjs";
-import { api } from "../../../../../../convex/_generated/api";
-import type { Id } from "../../../../../../convex/_generated/dataModel";
+import { api } from "../../../../../convex/_generated/api";
+import type { Id } from "../../../../../convex/_generated/dataModel";
 import type { ArtifactAction } from "@/lib/workspace/types";
 
 export const runtime = "nodejs";
