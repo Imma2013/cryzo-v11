@@ -1,5 +1,8 @@
 import path from "node:path";
 import { Sandbox } from "@vercel/sandbox";
+import { fetchQuery } from "convex/nextjs";
+import { api } from "../../../../../convex/_generated/api";
+import type { Id } from "../../../../../convex/_generated/dataModel";
 import type { ArtifactAction } from "@/lib/workspace/types";
 
 export const runtime = "nodejs";
@@ -28,6 +31,28 @@ function safeRelativePath(input: string) {
     throw new Error(`Unsafe file path: ${input}`);
   }
   return normalized;
+}
+
+async function requireConversationOwner(req: Request, conversationId: string) {
+  const authorization = req.headers.get("authorization");
+  const token = authorization?.startsWith("Bearer ")
+    ? authorization.slice("Bearer ".length).trim()
+    : "";
+
+  if (!token) {
+    return false;
+  }
+
+  try {
+    const conversation = await fetchQuery(
+      api.conversations.get,
+      { id: conversationId as Id<"conversations"> },
+      { token },
+    );
+    return !!conversation;
+  } catch {
+    return false;
+  }
 }
 
 async function getSandbox(conversationId: string) {
@@ -199,6 +224,10 @@ export async function POST(req: Request) {
 
     if (!body.conversationId || body.conversationId.length > 96) {
       return Response.json({ error: "Invalid conversationId" }, { status: 400 });
+    }
+
+    if (!(await requireConversationOwner(req, body.conversationId))) {
+      return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     const sandbox = await getSandbox(body.conversationId);
