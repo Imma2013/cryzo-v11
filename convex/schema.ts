@@ -50,15 +50,21 @@ export default defineSchema({
   publishTargets: defineTable({
     userId: v.id("users"),
     conversationId: v.id("conversations"),
-    provider: v.union(v.literal("netlify")),
+    provider: v.union(v.literal("netlify"), v.literal("cryzo")),
     targetId: v.string(),
+    slug: v.optional(v.string()),
+    url: v.optional(v.string()),
+    deploymentId: v.optional(v.string()),
+    customDomain: v.optional(v.string()),
     createdAt: v.number(),
     updatedAt: v.number(),
-  }).index("by_user_conversation_provider", [
-    "userId",
-    "conversationId",
-    "provider",
-  ]),
+  })
+    .index("by_user_conversation_provider", [
+      "userId",
+      "conversationId",
+      "provider",
+    ])
+    .index("by_provider_slug", ["provider", "slug"]),
 
   subscriptions: defineTable({
     userId: v.id("users"),
