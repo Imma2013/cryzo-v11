@@ -1,6 +1,15 @@
 "use client";
 
-import { RefreshCw, Loader2, Crosshair, Monitor, Tablet, Smartphone, Maximize2, Minimize2 } from "lucide-react";
+import {
+  Crosshair,
+  Loader2,
+  Maximize2,
+  Minimize2,
+  Monitor,
+  RefreshCw,
+  Smartphone,
+  Tablet,
+} from "lucide-react";
 import { useRef, useState, useEffect, useCallback } from "react";
 import type { ProgressStage } from "@/lib/workspace/action-runner";
 
@@ -24,11 +33,17 @@ export function LivePreview({
   isBooting,
   progress,
   onElementSelected,
+  mobile = false,
+  refreshToken = 0,
+  inspectRequest = 0,
 }: {
   url: string | null;
   isBooting: boolean;
   progress: ProgressStage;
   onElementSelected?: (info: ElementInfo) => void;
+  mobile?: boolean;
+  refreshToken?: number;
+  inspectRequest?: number;
 }) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -47,7 +62,7 @@ export function LivePreview({
         setInspectorActive(false);
         iframeRef.current?.contentWindow?.postMessage(
           { type: "INSPECTOR_ACTIVATE", active: false },
-          "*"
+          "*",
         );
       }
     }
@@ -61,18 +76,32 @@ export function LivePreview({
     if (next) setSelectedElement(null);
     iframeRef.current?.contentWindow?.postMessage(
       { type: "INSPECTOR_ACTIVATE", active: next },
-      "*"
+      "*",
     );
   }, [inspectorActive]);
 
-  const handleRefresh = () => {
+  const handleRefresh = useCallback(() => {
     if (iframeRef.current && url) {
       iframeRef.current.src = "about:blank";
       requestAnimationFrame(() => {
         if (iframeRef.current) iframeRef.current.src = url;
       });
     }
-  };
+  }, [url]);
+
+  useEffect(() => {
+    if (refreshToken > 0) handleRefresh();
+  }, [refreshToken, handleRefresh]);
+
+  useEffect(() => {
+    if (inspectRequest <= 0 || !url) return;
+    setSelectedElement(null);
+    setInspectorActive(true);
+    iframeRef.current?.contentWindow?.postMessage(
+      { type: "INSPECTOR_ACTIVATE", active: true },
+      "*",
+    );
+  }, [inspectRequest, url]);
 
   const toggleFullscreen = async () => {
     if (!isFullscreen && containerRef.current) {
@@ -90,7 +119,7 @@ export function LivePreview({
 
   if (!url) {
     return (
-      <div className="flex h-full flex-col items-center justify-center bg-zinc-900 text-sm text-zinc-500">
+      <div className="flex h-full flex-col items-center justify-center bg-zinc-950 text-sm text-zinc-500">
         {isBooting ? (
           <div className="flex flex-col items-center gap-3">
             <Loader2 size={24} className="animate-spin text-zinc-400" />
@@ -106,6 +135,21 @@ export function LivePreview({
         ) : (
           <span>Waiting for dev server...</span>
         )}
+      </div>
+    );
+  }
+
+  if (mobile) {
+    return (
+      <div ref={containerRef} className="h-full w-full overflow-hidden bg-white">
+        <iframe
+          ref={iframeRef}
+          src={url}
+          title="Cryzo live preview"
+          className="block h-full w-full border-0 bg-white"
+          sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-storage-access-by-user-activation"
+          loading="eager"
+        />
       </div>
     );
   }
@@ -179,7 +223,6 @@ export function LivePreview({
           className="h-full rounded bg-white shadow-lg"
           style={{ width: device.width, maxWidth: "100%" }}
           sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-storage-access-by-user-activation"
-          allow="cross-origin-isolated"
           loading="eager"
         />
       </div>
