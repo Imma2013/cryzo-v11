@@ -15,6 +15,9 @@ const SANDBOX_TIMEOUT_MS = 45 * 60 * 1000;
 const MAX_FILE_BYTES = 1_500_000;
 const MAX_BUILD_FILES = 500;
 const MAX_BUILD_BYTES = 15_000_000;
+const PREVIEW_PID_FILE = ".cryzo-preview.pid";
+const PREVIEW_LOG_FILE = ".cryzo-preview.log";
+const SAFE_VITE_5 = "5.4.21";
 
 function sandboxNameFor(conversationId: string) {
   const safe = conversationId.toLowerCase().replace(/[^a-z0-9-]/g, "-").slice(0, 48);
@@ -78,6 +81,25 @@ function previewHostFor(sandbox: Sandbox) {
   return new URL(previewUrlFor(sandbox)).hostname;
 }
 
+async function runTextCommand(
+  sandbox: Sandbox,
+  command: string,
+  options?: { allowFailure?: boolean },
+) {
+  const result = await sandbox.runCommand({
+    cmd: "sh",
+    args: ["-lc", command],
+    cwd: PROJECT_DIR,
+  });
+  const stdout = await result.stdout();
+  const stderr = await result.stderr();
+  const output = [stdout, stderr].filter(Boolean).join("\n").trim();
+  if (result.exitCode !== 0 && !options?.allowFailure) {
+    throw new Error(output || `Command exited with ${result.exitCode}`);
+  }
+  return { exitCode: result.exitCode, output };
+}
+
 async function writeFile(sandbox: Sandbox, action: ArtifactAction) {
   if (!action.filePath) throw new Error("File action is missing filePath");
   if (Buffer.byteLength(action.content, "utf8") > MAX_FILE_BYTES) {
@@ -114,6 +136,55 @@ async function runInstall(sandbox: Sandbox) {
   return [stdout, stderr].filter(Boolean).join("\n").slice(-12000);
 }
 
+async function ensureDependencies(sandbox: Sandbox) {
+  const check = await runTextCommand(sandbox, "test -d node_modules", {
+    allowFailure: true,
+  });
+  if (check.exitCode !== 0) return await runInstall(sandbox);
+  return "";
+}
+
+function parseVersion(version: string) {
+  const match = version.trim().match(/^(\d+)\.(\d+)\.(\d+)/);
+  if (!match) return null;
+  return [Number(match[1]), Number(match[2]), Number(match[3])] as const;
+}
+
+async function getViteVersion(sandbox: Sandbox) {
+  const result = await runTextCommand(
+    sandbox,
+    "node -p \"require('./node_modules/vite/package.json').version\"",
+    { allowFailure: true },
+  );
+  return result.exitCode === 0 ? result.output.trim() : null;
+}
+
+async function ensureCompatibleVite(sandbox: Sandbox) {
+  const version = await getViteVersion(sandbox);
+  if (!version) {
+    throw new Error("Vite is not installed in the project");
+  }
+
+  const parsed = parseVersion(version);
+  if (!parsed) return `Vite ${version}\n`;
+
+  const [major, minor, patch] = parsed;
+  const unsafeVite5 = major === 5 && (minor < 4 || (minor === 4 && patch < 21));
+  if (!unsafeVite5) return `Vite ${version}\n`;
+
+  const result = await sandbox.runCommand({
+    cmd: "npm",
+    args: ["install", "--save-dev", `vite@${SAFE_VITE_5}`, "--no-audit", "--no-fund"],
+    cwd: PROJECT_DIR,
+  });
+  const stdout = await result.stdout();
+  const stderr = await result.stderr();
+  if (result.exitCode !== 0) {
+    throw new Error(stderr || stdout || `Failed to upgrade Vite from ${version}`);
+  }
+  return `Upgraded Vite ${version} → ${SAFE_VITE_5}\n`;
+}
+
 async function isPreviewListening(sandbox: Sandbox) {
   const result = await sandbox.runCommand({
     cmd: "node",
@@ -126,89 +197,156 @@ async function isPreviewListening(sandbox: Sandbox) {
   return result.exitCode === 0;
 }
 
-async function isPreviewPubliclyReady(sandbox: Sandbox) {
-  const host = previewHostFor(sandbox);
-  const script = `
-const http = require('http');
-const port = Number(process.argv[1]);
-const host = process.argv[2];
-const req = http.request({
-  hostname: '127.0.0.1',
-  port,
-  path: '/',
-  method: 'GET',
-  headers: { Host: host }
-}, (res) => {
-  let body = '';
-  res.setEncoding('utf8');
-  res.on('data', (chunk) => { body += chunk; if (body.length > 4096) body = body.slice(0, 4096); });
-  res.on('end', () => {
-    const blocked = body.includes('Blocked request. This host');
-    const ok = !!res.statusCode && res.statusCode < 400 && !blocked;
-    process.exit(ok ? 0 : 1);
-  });
-});
-req.on('error', () => process.exit(1));
-req.end();
-`;
+async function checkPublicPreview(sandbox: Sandbox) {
+  const url = previewUrlFor(sandbox);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 3500);
 
-  const result = await sandbox.runCommand({
-    cmd: "node",
-    args: ["-e", script, String(PREVIEW_PORT), host],
-    cwd: PROJECT_DIR,
-  });
-  return result.exitCode === 0;
+  try {
+    const response = await fetch(url, {
+      cache: "no-store",
+      redirect: "follow",
+      signal: controller.signal,
+      headers: {
+        "User-Agent": "CryzoPreviewHealth/1.0",
+      },
+    });
+    const body = (await response.text()).slice(0, 6000);
+    const blockedHost = body.includes("Blocked request. This host");
+    return {
+      ready: response.ok && !blockedHost,
+      status: response.status,
+      blockedHost,
+      body,
+      error: null as string | null,
+    };
+  } catch (error) {
+    return {
+      ready: false,
+      status: 0,
+      blockedHost: false,
+      body: "",
+      error: error instanceof Error ? error.message : String(error),
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function tailPreviewLog(sandbox: Sandbox) {
+  const result = await runTextCommand(
+    sandbox,
+    `test -f ${PREVIEW_LOG_FILE} && tail -n 80 ${PREVIEW_LOG_FILE} || true`,
+    { allowFailure: true },
+  );
+  return result.output.slice(-12000);
+}
+
+async function previewDiagnostics(sandbox: Sandbox) {
+  const viteVersion = (await getViteVersion(sandbox)) || "missing";
+  const packageInfo = await runTextCommand(
+    sandbox,
+    "node -e \"try{const p=require('./package.json'); console.log(JSON.stringify({name:p.name,scripts:p.scripts,devDependencies:p.devDependencies},null,2))}catch(e){console.error(String(e));process.exit(1)}\"",
+    { allowFailure: true },
+  );
+  const processInfo = await runTextCommand(
+    sandbox,
+    `ps -ef | grep -E '[v]ite|[n]pm run dev' || true`,
+    { allowFailure: true },
+  );
+  const portInfo = await runTextCommand(
+    sandbox,
+    `if command -v ss >/dev/null 2>&1; then ss -ltnp | grep ':${PREVIEW_PORT} ' || true; elif command -v lsof >/dev/null 2>&1; then lsof -iTCP:${PREVIEW_PORT} -sTCP:LISTEN || true; fi`,
+    { allowFailure: true },
+  );
+  const log = await tailPreviewLog(sandbox);
+
+  return [
+    `Preview URL: ${previewUrlFor(sandbox)}`,
+    `Vite: ${viteVersion}`,
+    packageInfo.output ? `package.json:\n${packageInfo.output}` : "",
+    processInfo.output ? `Processes:\n${processInfo.output}` : "",
+    portInfo.output ? `Port ${PREVIEW_PORT}:\n${portInfo.output}` : "",
+    log ? `Vite log:\n${log}` : "Vite log: empty",
+  ]
+    .filter(Boolean)
+    .join("\n\n")
+    .slice(-16000);
 }
 
 async function stopPreview(sandbox: Sandbox) {
-  await sandbox.runCommand({
-    cmd: "sh",
-    args: [
-      "-lc",
-      `pkill -f '[v]ite.*--port ${PREVIEW_PORT}' || true; pkill -f '[n]pm run dev' || true`,
-    ],
-    cwd: PROJECT_DIR,
-  });
-  await new Promise((resolve) => setTimeout(resolve, 250));
+  await runTextCommand(
+    sandbox,
+    `
+if [ -f ${PREVIEW_PID_FILE} ]; then
+  pid=$(cat ${PREVIEW_PID_FILE} 2>/dev/null || true)
+  if [ -n "$pid" ]; then
+    kill "$pid" 2>/dev/null || true
+    sleep 0.2
+    kill -9 "$pid" 2>/dev/null || true
+  fi
+fi
+rm -f ${PREVIEW_PID_FILE}
+pkill -f '[v]ite.*--port ${PREVIEW_PORT}' 2>/dev/null || true
+pkill -f '[v]ite.*${PREVIEW_PORT}' 2>/dev/null || true
+`,
+    { allowFailure: true },
+  );
+
+  for (let attempt = 0; attempt < 12; attempt++) {
+    if (!(await isPreviewListening(sandbox).catch(() => false))) return;
+    await new Promise((resolve) => setTimeout(resolve, 150));
+  }
 }
 
-async function startPreview(sandbox: Sandbox) {
-  const previewUrl = previewUrlFor(sandbox);
+async function launchPreview(sandbox: Sandbox) {
   const publicHost = previewHostFor(sandbox);
+  const command = `
+rm -f ${PREVIEW_LOG_FILE} ${PREVIEW_PID_FILE}
+nohup env __VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS=${publicHost} ./node_modules/.bin/vite --host 0.0.0.0 --port ${PREVIEW_PORT} --strictPort > ${PREVIEW_LOG_FILE} 2>&1 &
+echo $! > ${PREVIEW_PID_FILE}
+`;
+  await runTextCommand(sandbox, command);
+}
 
-  if (!(await isPreviewPubliclyReady(sandbox).catch(() => false))) {
-    if (await isPreviewListening(sandbox).catch(() => false)) {
-      await stopPreview(sandbox);
-    }
+async function startPreview(sandbox: Sandbox, forceRestart = false) {
+  const previewUrl = previewUrlFor(sandbox);
+  let output = await ensureDependencies(sandbox);
+  output += await ensureCompatibleVite(sandbox);
 
-    await sandbox.runCommand({
-      cmd: "env",
-      args: [
-        `__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS=${publicHost}`,
-        "npm",
-        "run",
-        "dev",
-        "--",
-        "--host",
-        "0.0.0.0",
-        "--port",
-        String(PREVIEW_PORT),
-      ],
-      cwd: PROJECT_DIR,
-      detached: true,
-    });
-
-    for (let attempt = 0; attempt < 60; attempt++) {
-      await new Promise((resolve) => setTimeout(resolve, 250));
-      if (await isPreviewPubliclyReady(sandbox).catch(() => false)) break;
+  if (!forceRestart) {
+    const existing = await checkPublicPreview(sandbox);
+    if (existing.ready) {
+      return {
+        previewUrl,
+        output: `${output}Preview already healthy at ${previewUrl}.\n`,
+      };
     }
   }
 
-  if (!(await isPreviewPubliclyReady(sandbox).catch(() => false))) {
-    throw new Error(`Vite did not become reachable through ${publicHost}`);
+  await stopPreview(sandbox);
+  await launchPreview(sandbox);
+
+  let lastCheck = await checkPublicPreview(sandbox);
+  for (let attempt = 0; attempt < 90 && !lastCheck.ready; attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    lastCheck = await checkPublicPreview(sandbox);
   }
 
-  return previewUrl;
+  if (!lastCheck.ready) {
+    const diagnostics = await previewDiagnostics(sandbox);
+    const reason = lastCheck.blockedHost
+      ? `Vite rejected the sandbox host ${previewHostFor(sandbox)}`
+      : lastCheck.status
+        ? `Public preview returned HTTP ${lastCheck.status}`
+        : `Public preview could not be reached${lastCheck.error ? `: ${lastCheck.error}` : ""}`;
+    throw new Error(`${reason}.\n\n${diagnostics}`);
+  }
+
+  return {
+    previewUrl,
+    output: `${output}Preview server ready at ${previewUrl}.\n`,
+  };
 }
 
 async function runShell(sandbox: Sandbox, command: string) {
@@ -223,16 +361,6 @@ async function runShell(sandbox: Sandbox, command: string) {
     throw new Error(stderr || stdout || `Command exited with ${result.exitCode}`);
   }
   return [stdout, stderr].filter(Boolean).join("\n").slice(-12000);
-}
-
-async function ensureDependencies(sandbox: Sandbox) {
-  const check = await sandbox.runCommand({
-    cmd: "sh",
-    args: ["-lc", "test -d node_modules"],
-    cwd: PROJECT_DIR,
-  });
-  if (check.exitCode !== 0) return await runInstall(sandbox);
-  return "";
 }
 
 async function buildStaticProject(sandbox: Sandbox) {
@@ -319,11 +447,11 @@ async function applyAction(sandbox: Sandbox, action: ArtifactAction) {
     return { progress: "installing" as const, output };
   }
 
-  const previewUrl = await startPreview(sandbox);
+  const result = await startPreview(sandbox);
   return {
     progress: "ready" as const,
-    output: "Preview server ready.\n",
-    previewUrl,
+    output: result.output,
+    previewUrl: result.previewUrl,
   };
 }
 
@@ -336,16 +464,17 @@ async function restoreProject(sandbox: Sandbox, actions: ArtifactAction[]) {
 
   let output = `Restored ${fileActions.length} project files.\n`;
   if (shellActions.some((action) => /(^|\s)npm\s+(install|i)(\s|$)/.test(action.content))) {
-    output += await runInstall(sandbox);
+    output += await ensureDependencies(sandbox);
   }
 
-  for (const action of shellActions) {
-    if (/(^|\s)npm\s+(install|i)(\s|$)/.test(action.content)) continue;
-    output += `\n${await runShell(sandbox, action.content.trim())}`;
-  }
-
+  // Historical shell commands are not replayed on restore. Files in Convex are
+  // durable state; lifecycle commands are recreated deterministically here.
   let previewUrl: string | undefined;
-  if (startActions.length > 0) previewUrl = await startPreview(sandbox);
+  if (startActions.length > 0) {
+    const result = await startPreview(sandbox, true);
+    previewUrl = result.previewUrl;
+    output += result.output;
+  }
 
   return {
     progress: previewUrl ? ("ready" as const) : ("writing" as const),
@@ -357,7 +486,7 @@ async function restoreProject(sandbox: Sandbox, actions: ArtifactAction[]) {
 export async function POST(req: Request) {
   try {
     const body = (await req.json()) as {
-      operation?: "init" | "action" | "restore" | "status" | "build";
+      operation?: "init" | "action" | "restore" | "status" | "build" | "restart" | "logs";
       conversationId?: string;
       action?: ArtifactAction;
       actions?: ArtifactAction[];
@@ -375,7 +504,7 @@ export async function POST(req: Request) {
     const previewBase = previewUrlFor(sandbox);
 
     if (body.operation === "init") {
-      const ready = await isPreviewPubliclyReady(sandbox).catch(() => false);
+      const ready = (await checkPublicPreview(sandbox)).ready;
       return Response.json({
         sandboxName: sandbox.name,
         previewUrl: ready ? previewBase : null,
@@ -384,11 +513,28 @@ export async function POST(req: Request) {
     }
 
     if (body.operation === "status") {
-      const ready = await isPreviewPubliclyReady(sandbox).catch(() => false);
+      const ready = (await checkPublicPreview(sandbox)).ready;
       return Response.json({
         sandboxName: sandbox.name,
         previewUrl: ready ? previewBase : null,
         progress: ready ? "ready" : "starting",
+      });
+    }
+
+    if (body.operation === "restart") {
+      const result = await startPreview(sandbox, true);
+      return Response.json({
+        sandboxName: sandbox.name,
+        previewUrl: result.previewUrl,
+        progress: "ready",
+        output: result.output,
+      });
+    }
+
+    if (body.operation === "logs") {
+      return Response.json({
+        sandboxName: sandbox.name,
+        output: await previewDiagnostics(sandbox),
       });
     }
 
