@@ -11,6 +11,7 @@ import {
 } from "@/components/workspace/WorkspacePanel";
 import { MobileBuilderHeader } from "@/components/MobileBuilderHeader";
 import type { ElementInfo } from "@/components/workspace/LivePreview";
+import { prebootStreamingRuntime } from "@/lib/workspace/streaming-runtime";
 import { Id } from "../../../../convex/_generated/dataModel";
 
 export default function ConversationPage({
@@ -38,16 +39,13 @@ export default function ConversationPage({
   const hasArtifacts = !!artifacts?.length;
   const workspaceStarted = workspaceOpen || hasArtifacts;
 
-  // Boot the browser runtime while the user is still in Chat. By the time the
-  // first package.json arrives from the model, WebContainer should already be
-  // available instead of beginning its cold start then.
+  // Prewarm the remote Vercel Sandbox while the user is still chatting. The
+  // phone never boots Node/npm anymore; it only renders the resulting preview.
   useEffect(() => {
-    void import("@/lib/workspace/webcontainer")
-      .then(({ prebootWebContainer }) => prebootWebContainer())
-      .catch(() => {
-        // The workspace will surface a useful error if the runtime cannot boot.
-      });
-  }, []);
+    void prebootStreamingRuntime(String(id)).catch(() => {
+      // The workspace will surface an actionable runtime error if creation fails.
+    });
+  }, [id]);
 
   useEffect(() => {
     const media = window.matchMedia("(max-width: 767px)");
