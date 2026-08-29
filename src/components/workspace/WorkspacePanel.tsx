@@ -6,7 +6,6 @@ import {
   AlertCircle,
   ArrowLeft,
   Code2,
-  Crosshair,
   ExternalLink,
   Eye,
   Loader2,
@@ -50,7 +49,6 @@ export function WorkspacePanel({
   const [viewMode, setViewMode] = useState<ViewMode>("preview");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [refreshToken, setRefreshToken] = useState(0);
-  const [inspectRequest, setInspectRequest] = useState(0);
   const [showErrorLogs, setShowErrorLogs] = useState(false);
   const [retrying, setRetrying] = useState(false);
 
@@ -173,10 +171,8 @@ export function WorkspacePanel({
               url={previewUrl}
               isBooting={isBooting}
               progress={progress}
-              onElementSelected={onElementSelected}
               mobile
               refreshToken={refreshToken}
-              inspectRequest={inspectRequest}
             />
           )}
         </div>
@@ -195,18 +191,6 @@ export function WorkspacePanel({
               >
                 <RefreshCw size={17} />
                 Refresh preview
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setInspectRequest((value) => value + 1);
-                  setMobileMenuOpen(false);
-                }}
-                disabled={!previewUrl}
-                className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm text-zinc-800 hover:bg-zinc-100 disabled:opacity-40"
-              >
-                <Crosshair size={17} />
-                Select element
               </button>
               <button
                 type="button"
