@@ -17,7 +17,17 @@ const MAX_BUILD_FILES = 500;
 const MAX_BUILD_BYTES = 15_000_000;
 const PREVIEW_PID_FILE = ".cryzo-preview.pid";
 const PREVIEW_LOG_FILE = ".cryzo-preview.log";
+const RUNTIME_DIR = ".cryzo";
+const RUNTIME_CONFIG_FILE = `${RUNTIME_DIR}/vite.runtime.config.ts`;
 const SAFE_VITE_5 = "5.4.21";
+const VITE_CONFIG_CANDIDATES = [
+  "vite.config.ts",
+  "vite.config.mts",
+  "vite.config.js",
+  "vite.config.mjs",
+  "vite.config.cts",
+  "vite.config.cjs",
+] as const;
 
 function sandboxNameFor(conversationId: string) {
   const safe = conversationId.toLowerCase().replace(/[^a-z0-9-]/g, "-").slice(0, 48);
@@ -34,6 +44,9 @@ function safeRelativePath(input: string) {
     normalized.includes("/../")
   ) {
     throw new Error(`Unsafe file path: ${input}`);
+  }
+  if (normalized === RUNTIME_DIR || normalized.startsWith(`${RUNTIME_DIR}/`)) {
+    throw new Error(`Reserved Cryzo runtime path: ${input}`);
   }
   return normalized;
 }
@@ -185,6 +198,40 @@ async function ensureCompatibleVite(sandbox: Sandbox) {
   return `Upgraded Vite ${version} → ${SAFE_VITE_5}\n`;
 }
 
+async function findUserViteConfig(sandbox: Sandbox) {
+  for (const candidate of VITE_CONFIG_CANDIDATES) {
+    const result = await runTextCommand(sandbox, `test -f ${candidate}`, {
+      allowFailure: true,
+    });
+    if (result.exitCode === 0) return candidate;
+  }
+  return null;
+}
+
+async function writeRuntimeViteConfig(sandbox: Sandbox) {
+  const publicHost = previewHostFor(sandbox);
+  const userConfigPath = await findUserViteConfig(sandbox);
+  const importLine = userConfigPath
+    ? `import userConfigExport from ${JSON.stringify(`../${userConfigPath}`)};`
+    : "const userConfigExport = {};";
+
+  const source = `import { defineConfig, mergeConfig } from "vite";\n${importLine}\n\nconst cryzoRuntimeConfig = {\n  server: {\n    host: "0.0.0.0",\n    port: ${PREVIEW_PORT},\n    strictPort: true,\n    allowedHosts: [${JSON.stringify(publicHost)}],\n  },\n};\n\nexport default defineConfig(async (env) => {\n  const candidate = typeof userConfigExport === "function"\n    ? await userConfigExport(env)\n    : await userConfigExport;\n  return mergeConfig(candidate || {}, cryzoRuntimeConfig);\n});\n`;
+
+  await sandbox.runCommand("mkdir", ["-p", `${PROJECT_DIR}/${RUNTIME_DIR}`]);
+  await sandbox.writeFiles([
+    {
+      path: `${PROJECT_DIR}/${RUNTIME_CONFIG_FILE}`,
+      content: Buffer.from(source, "utf8"),
+    },
+  ]);
+
+  return {
+    publicHost,
+    userConfigPath,
+    source,
+  };
+}
+
 async function isPreviewListening(sandbox: Sandbox) {
   const result = await sandbox.runCommand({
     cmd: "node",
@@ -242,6 +289,15 @@ async function tailPreviewLog(sandbox: Sandbox) {
   return result.output.slice(-12000);
 }
 
+async function runtimeConfigDiagnostics(sandbox: Sandbox) {
+  const result = await runTextCommand(
+    sandbox,
+    `test -f ${RUNTIME_CONFIG_FILE} && cat ${RUNTIME_CONFIG_FILE} || true`,
+    { allowFailure: true },
+  );
+  return result.output.slice(-6000);
+}
+
 async function previewDiagnostics(sandbox: Sandbox) {
   const viteVersion = (await getViteVersion(sandbox)) || "missing";
   const packageInfo = await runTextCommand(
@@ -259,19 +315,21 @@ async function previewDiagnostics(sandbox: Sandbox) {
     `if command -v ss >/dev/null 2>&1; then ss -ltnp | grep ':${PREVIEW_PORT} ' || true; elif command -v lsof >/dev/null 2>&1; then lsof -iTCP:${PREVIEW_PORT} -sTCP:LISTEN || true; fi`,
     { allowFailure: true },
   );
+  const runtimeConfig = await runtimeConfigDiagnostics(sandbox);
   const log = await tailPreviewLog(sandbox);
 
   return [
     `Preview URL: ${previewUrlFor(sandbox)}`,
     `Vite: ${viteVersion}`,
     packageInfo.output ? `package.json:\n${packageInfo.output}` : "",
+    runtimeConfig ? `Cryzo runtime Vite config:\n${runtimeConfig}` : "Cryzo runtime Vite config: missing",
     processInfo.output ? `Processes:\n${processInfo.output}` : "",
     portInfo.output ? `Port ${PREVIEW_PORT}:\n${portInfo.output}` : "",
     log ? `Vite log:\n${log}` : "Vite log: empty",
   ]
     .filter(Boolean)
     .join("\n\n")
-    .slice(-16000);
+    .slice(-18000);
 }
 
 async function stopPreview(sandbox: Sandbox) {
@@ -300,13 +358,14 @@ pkill -f '[v]ite.*${PREVIEW_PORT}' 2>/dev/null || true
 }
 
 async function launchPreview(sandbox: Sandbox) {
-  const publicHost = previewHostFor(sandbox);
+  const runtimeConfig = await writeRuntimeViteConfig(sandbox);
   const command = `
 rm -f ${PREVIEW_LOG_FILE} ${PREVIEW_PID_FILE}
-nohup env __VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS=${publicHost} ./node_modules/.bin/vite --host 0.0.0.0 --port ${PREVIEW_PORT} --strictPort > ${PREVIEW_LOG_FILE} 2>&1 &
+nohup ./node_modules/.bin/vite --config ${RUNTIME_CONFIG_FILE} > ${PREVIEW_LOG_FILE} 2>&1 &
 echo $! > ${PREVIEW_PID_FILE}
 `;
   await runTextCommand(sandbox, command);
+  return runtimeConfig;
 }
 
 async function startPreview(sandbox: Sandbox, forceRestart = false) {
@@ -325,7 +384,8 @@ async function startPreview(sandbox: Sandbox, forceRestart = false) {
   }
 
   await stopPreview(sandbox);
-  await launchPreview(sandbox);
+  const runtimeConfig = await launchPreview(sandbox);
+  output += `Cryzo runtime config: ${runtimeConfig.userConfigPath || "no user vite.config found"} + ${runtimeConfig.publicHost}\n`;
 
   let lastCheck = await checkPublicPreview(sandbox);
   for (let attempt = 0; attempt < 90 && !lastCheck.ready; attempt++) {
@@ -467,8 +527,6 @@ async function restoreProject(sandbox: Sandbox, actions: ArtifactAction[]) {
     output += await ensureDependencies(sandbox);
   }
 
-  // Historical shell commands are not replayed on restore. Files in Convex are
-  // durable state; lifecycle commands are recreated deterministically here.
   let previewUrl: string | undefined;
   if (startActions.length > 0) {
     const result = await startPreview(sandbox, true);
