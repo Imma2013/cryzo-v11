@@ -2,7 +2,18 @@
 
 import { useEffect, useState } from "react";
 import { Panel, Group, Separator } from "react-resizable-panels";
-import { AlertCircle, Code2, Eye, Loader2 } from "lucide-react";
+import {
+  AlertCircle,
+  ArrowLeft,
+  Code2,
+  Crosshair,
+  ExternalLink,
+  Eye,
+  Loader2,
+  Mic,
+  MoreHorizontal,
+  RefreshCw,
+} from "lucide-react";
 import { useWorkspace } from "@/hooks/use-workspace";
 import { FileTree } from "./FileTree";
 import { CodeEditor } from "./CodeEditor";
@@ -23,14 +34,19 @@ export function WorkspacePanel({
   conversationId,
   onElementSelected,
   onStatusChange,
+  onBackToChat,
   mobile = false,
 }: {
   conversationId: Id<"conversations">;
   onElementSelected?: (info: ElementInfo) => void;
   onStatusChange?: (status: WorkspaceStatus) => void;
+  onBackToChat?: () => void;
   mobile?: boolean;
 }) {
   const [viewMode, setViewMode] = useState<ViewMode>("preview");
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [refreshToken, setRefreshToken] = useState(0);
+  const [inspectRequest, setInspectRequest] = useState(0);
 
   const {
     files,
@@ -53,7 +69,7 @@ export function WorkspacePanel({
 
   const selectedContent = selectedFile ? files[selectedFile]?.content || "" : "";
 
-  const previewContent = isBooting || !previewUrl ? (
+  const loadingContent = (
     <div className="flex h-full flex-col items-center justify-center gap-3 bg-zinc-950 px-6 text-center">
       <div className="h-10 w-10 animate-spin rounded-full border-2 border-zinc-700 border-t-blue-400" />
       <div>
@@ -71,6 +87,120 @@ export function WorkspacePanel({
         )}
       </div>
     </div>
+  );
+
+  if (mobile) {
+    const handleVoice = () => {
+      onBackToChat?.();
+      window.setTimeout(() => {
+        window.dispatchEvent(new Event("cryzo:start-voice"));
+      }, 80);
+    };
+
+    return (
+      <div className="flex h-full min-h-0 flex-col overflow-hidden bg-zinc-950">
+        <div className="min-h-0 flex-1 overflow-hidden">
+          {isBooting || !previewUrl ? (
+            loadingContent
+          ) : (
+            <LivePreview
+              url={previewUrl}
+              isBooting={isBooting}
+              progress={progress}
+              onElementSelected={onElementSelected}
+              mobile
+              refreshToken={refreshToken}
+              inspectRequest={inspectRequest}
+            />
+          )}
+        </div>
+
+        <div className="relative z-40 shrink-0 border-t border-zinc-200 bg-[#fafafa] px-4 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-3 text-black">
+          {mobileMenuOpen && (
+            <div className="absolute bottom-[calc(100%+0.5rem)] right-4 w-56 overflow-hidden rounded-2xl border border-zinc-200 bg-white p-1.5 shadow-2xl shadow-black/20">
+              <button
+                type="button"
+                onClick={() => {
+                  setRefreshToken((value) => value + 1);
+                  setMobileMenuOpen(false);
+                }}
+                disabled={!previewUrl}
+                className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm text-zinc-800 hover:bg-zinc-100 disabled:opacity-40"
+              >
+                <RefreshCw size={17} />
+                Refresh preview
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setInspectRequest((value) => value + 1);
+                  setMobileMenuOpen(false);
+                }}
+                disabled={!previewUrl}
+                className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm text-zinc-800 hover:bg-zinc-100 disabled:opacity-40"
+              >
+                <Crosshair size={17} />
+                Select element
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (previewUrl) window.open(previewUrl, "_blank", "noopener,noreferrer");
+                  setMobileMenuOpen(false);
+                }}
+                disabled={!previewUrl}
+                className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm text-zinc-800 hover:bg-zinc-100 disabled:opacity-40"
+              >
+                <ExternalLink size={17} />
+                Open site
+              </button>
+            </div>
+          )}
+
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={onBackToChat}
+              className="inline-flex h-12 shrink-0 items-center gap-2 rounded-full bg-white px-4 text-base font-medium text-black shadow-sm ring-1 ring-zinc-100"
+            >
+              <ArrowLeft size={20} />
+              Chat
+            </button>
+
+            <button
+              type="button"
+              onClick={handleVoice}
+              className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-white text-black shadow-sm ring-1 ring-zinc-100"
+              aria-label="Voice edit"
+            >
+              <Mic size={22} />
+            </button>
+
+            <div className="min-w-0 flex-1" />
+
+            <button
+              type="button"
+              onClick={() => setMobileMenuOpen((open) => !open)}
+              className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-white text-black shadow-sm ring-1 ring-zinc-100"
+              aria-label="Preview options"
+            >
+              <MoreHorizontal size={23} />
+            </button>
+
+            <PublishControls
+              files={files}
+              conversationId={conversationId}
+              disabled={isBooting || !!error}
+              variant="mobile"
+            />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const previewContent = isBooting || !previewUrl ? (
+    loadingContent
   ) : (
     <LivePreview
       url={previewUrl}
@@ -79,10 +209,6 @@ export function WorkspacePanel({
       onElementSelected={onElementSelected}
     />
   );
-
-  if (mobile) {
-    return <div className="h-full overflow-hidden bg-zinc-950">{previewContent}</div>;
-  }
 
   return (
     <div className="flex h-full flex-col overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950">
@@ -161,7 +287,10 @@ export function WorkspacePanel({
                       {selectedFile}
                     </div>
                     <div className="flex-1 overflow-hidden">
-                      <CodeEditor filePath={selectedFile} content={selectedContent} />
+                      <CodeEditor
+                        filePath={selectedFile}
+                        content={selectedContent}
+                      />
                     </div>
                   </div>
                 ) : (
