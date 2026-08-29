@@ -1,0 +1,448 @@
+import { fetchMutation, fetchQuery } from "convex/nextjs";
+import { api } from "../../../../../convex/_generated/api";
+import type { Id } from "../../../../../convex/_generated/dataModel";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const maxDuration = 300;
+
+type PublishFile = {
+  path: string;
+  content: string;
+};
+
+type PublishRequest = {
+  conversationId: string;
+  projectName: string;
+  requestedSlug?: string;
+  files: PublishFile[];
+};
+
+const RESERVED_SLUGS = new Set([
+  "www",
+  "api",
+  "app",
+  "admin",
+  "auth",
+  "billing",
+  "blog",
+  "chat",
+  "dashboard",
+  "docs",
+  "help",
+  "login",
+  "mail",
+  "status",
+  "support",
+]);
+
+function sanitizeSlug(value: string, fallback = "cryzo-app") {
+  const slug = value
+    .toLowerCase()
+    .replace(/[\s_]+/g, "-")
+    .replace(/[^a-z0-9-]/g, "")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48);
+  return slug || fallback;
+}
+
+function sanitizeProjectName(value: string, fallback = "cryzo-app") {
+  return sanitizeSlug(value, fallback).slice(0, 80);
+}
+
+function normalizeFiles(files: PublishFile[]) {
+  return files
+    .map((file) => ({
+      file: file.path.replace(/^\/+/, ""),
+      data: file.content,
+    }))
+    .filter((file) => file.file && !file.file.includes(".."));
+}
+
+function getBearerToken(req: Request) {
+  const authorization = req.headers.get("authorization") || "";
+  return authorization.startsWith("Bearer ")
+    ? authorization.slice("Bearer ".length).trim()
+    : "";
+}
+
+async function readApiError(response: Response) {
+  try {
+    const data = (await response.json()) as {
+      error?: { message?: string; code?: string };
+      message?: string;
+    };
+    return data.error?.message || data.message || JSON.stringify(data);
+  } catch {
+    return await response.text().catch(() => "");
+  }
+}
+
+function vercelUrl(path: string, teamId: string) {
+  const separator = path.includes("?") ? "&" : "?";
+  return `https://api.vercel.com${path}${separator}teamId=${encodeURIComponent(teamId)}`;
+}
+
+async function vercelFetch(
+  token: string,
+  teamId: string,
+  path: string,
+  init: RequestInit = {},
+) {
+  return await fetch(vercelUrl(path, teamId), {
+    ...init,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+      ...init.headers,
+    },
+  });
+}
+
+async function ensureVercelProject({
+  token,
+  teamId,
+  projectName,
+  existingProjectId,
+}: {
+  token: string;
+  teamId: string;
+  projectName: string;
+  existingProjectId?: string;
+}) {
+  if (existingProjectId) return { id: existingProjectId, name: projectName };
+
+  const create = await vercelFetch(token, teamId, "/v10/projects", {
+    method: "POST",
+    body: JSON.stringify({
+      name: projectName,
+      framework: "vite",
+      buildCommand: "npm run build",
+      installCommand: "npm install",
+      outputDirectory: "dist",
+    }),
+  });
+
+  if (create.ok) {
+    const project = (await create.json()) as { id: string; name: string };
+    return project;
+  }
+
+  if (create.status !== 409) {
+    throw new Error((await readApiError(create)) || "Failed to create Cryzo hosting project");
+  }
+
+  const existing = await vercelFetch(
+    token,
+    teamId,
+    `/v9/projects/${encodeURIComponent(projectName)}`,
+  );
+  if (!existing.ok) {
+    throw new Error((await readApiError(existing)) || "Failed to load Cryzo hosting project");
+  }
+  return (await existing.json()) as { id: string; name: string };
+}
+
+async function createDeployment({
+  token,
+  teamId,
+  projectId,
+  projectName,
+  files,
+}: {
+  token: string;
+  teamId: string;
+  projectId: string;
+  projectName: string;
+  files: PublishFile[];
+}) {
+  const normalized = normalizeFiles(files);
+  if (normalized.length === 0) throw new Error("No files to publish");
+
+  const response = await vercelFetch(
+    token,
+    teamId,
+    "/v13/deployments?forceNew=1&skipAutoDetectionConfirmation=1",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        name: projectName,
+        project: projectId,
+        target: "production",
+        files: normalized,
+        projectSettings: {
+          framework: "vite",
+          installCommand: "npm install",
+          buildCommand: "npm run build",
+          outputDirectory: "dist",
+        },
+        meta: {
+          platform: "cryzo",
+        },
+      }),
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error((await readApiError(response)) || `Vercel deployment failed (${response.status})`);
+  }
+
+  return (await response.json()) as {
+    id: string;
+    url?: string;
+    readyState?: string;
+    status?: string;
+    alias?: string[];
+  };
+}
+
+async function waitForDeployment(
+  token: string,
+  teamId: string,
+  deploymentId: string,
+) {
+  for (let attempt = 0; attempt < 40; attempt++) {
+    const response = await vercelFetch(
+      token,
+      teamId,
+      `/v13/deployments/${encodeURIComponent(deploymentId)}`,
+    );
+    if (!response.ok) break;
+    const deployment = (await response.json()) as {
+      readyState?: string;
+      status?: string;
+      alias?: string[];
+      url?: string;
+      errorMessage?: string;
+    };
+    const state = deployment.readyState || deployment.status;
+    if (state === "READY") return deployment;
+    if (state === "ERROR" || state === "CANCELED") {
+      throw new Error(deployment.errorMessage || `Cryzo hosting deployment ${state.toLowerCase()}`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+  return null;
+}
+
+async function assignCryzoSubdomain({
+  token,
+  teamId,
+  projectId,
+  deploymentId,
+  hostname,
+}: {
+  token: string;
+  teamId: string;
+  projectId: string;
+  deploymentId: string;
+  hostname: string;
+}) {
+  const addDomain = await vercelFetch(
+    token,
+    teamId,
+    `/v10/projects/${encodeURIComponent(projectId)}/domains`,
+    {
+      method: "POST",
+      body: JSON.stringify({ name: hostname }),
+    },
+  );
+
+  if (!addDomain.ok && addDomain.status !== 409) {
+    return false;
+  }
+
+  const alias = await vercelFetch(
+    token,
+    teamId,
+    `/v2/deployments/${encodeURIComponent(deploymentId)}/aliases`,
+    {
+      method: "POST",
+      body: JSON.stringify({ alias: hostname }),
+    },
+  );
+  return alias.ok;
+}
+
+async function requireConversation(req: Request, conversationId: string) {
+  const token = getBearerToken(req);
+  if (!token) throw new Error("Unauthorized");
+
+  const conversation = await fetchQuery(
+    api.conversations.get,
+    { id: conversationId as Id<"conversations"> },
+    { token },
+  );
+  if (!conversation) throw new Error("Conversation not found");
+  return { token, conversation };
+}
+
+async function chooseSlug({
+  token,
+  conversationId,
+  requestedSlug,
+  fallback,
+}: {
+  token: string;
+  conversationId: string;
+  requestedSlug?: string;
+  fallback: string;
+}) {
+  const requested = sanitizeSlug(requestedSlug || fallback);
+  if (RESERVED_SLUGS.has(requested)) {
+    throw new Error("That Cryzo URL is reserved. Pick another name.");
+  }
+
+  const availability = await fetchQuery(
+    api.hosting.findCryzoSlug,
+    {
+      conversationId: conversationId as Id<"conversations">,
+      slug: requested,
+    },
+    { token },
+  );
+  if (availability.available) return requested;
+
+  if (requestedSlug) throw new Error("That Cryzo URL is already taken");
+  return `${requested.slice(0, 39)}-${conversationId.slice(-7).toLowerCase()}`;
+}
+
+export async function GET(req: Request) {
+  try {
+    const conversationId = new URL(req.url).searchParams.get("conversationId") || "";
+    if (!conversationId) {
+      return Response.json({ error: "Missing conversationId" }, { status: 400 });
+    }
+    const { token } = await requireConversation(req, conversationId);
+    const target = await fetchQuery(
+      api.hosting.getCryzoTarget,
+      { conversationId: conversationId as Id<"conversations"> },
+      { token },
+    );
+    return Response.json({
+      target,
+      configured: Boolean(
+        process.env.CRYZO_VERCEL_TOKEN ||
+          process.env.VERCEL_PLATFORM_TOKEN ||
+          process.env.VERCEL_TOKEN,
+      ),
+      hostingDomain: process.env.CRYZO_HOSTING_DOMAIN || "cryzo.me",
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unable to load hosting status";
+    return Response.json({ error: message }, { status: message === "Unauthorized" ? 401 : 500 });
+  }
+}
+
+export async function POST(req: Request) {
+  try {
+    const body = (await req.json()) as PublishRequest;
+    if (!body.conversationId) {
+      return Response.json({ error: "Missing conversationId" }, { status: 400 });
+    }
+    if (!Array.isArray(body.files) || body.files.length === 0) {
+      return Response.json({ error: "No files to publish" }, { status: 400 });
+    }
+
+    const { token: authToken } = await requireConversation(req, body.conversationId);
+    const platformToken =
+      process.env.CRYZO_VERCEL_TOKEN ||
+      process.env.VERCEL_PLATFORM_TOKEN ||
+      process.env.VERCEL_TOKEN;
+    if (!platformToken) {
+      return Response.json(
+        {
+          error:
+            "Cryzo Hosting needs a server-side Vercel platform token before managed publishing can be used.",
+          code: "CRYZO_HOSTING_NOT_CONFIGURED",
+        },
+        { status: 503 },
+      );
+    }
+
+    const teamId =
+      process.env.CRYZO_VERCEL_TEAM_ID ||
+      process.env.VERCEL_TEAM_ID ||
+      "team_ZityBkke0oJwGHtvANucmg3m";
+    const hostingDomain = (process.env.CRYZO_HOSTING_DOMAIN || "cryzo.me")
+      .replace(/^https?:\/\//, "")
+      .replace(/^\*\./, "")
+      .replace(/\/$/, "");
+
+    const existing = await fetchQuery(
+      api.hosting.getCryzoTarget,
+      { conversationId: body.conversationId as Id<"conversations"> },
+      { token: authToken },
+    );
+
+    const slug = await chooseSlug({
+      token: authToken,
+      conversationId: body.conversationId,
+      requestedSlug: body.requestedSlug,
+      fallback: existing?.slug || body.projectName,
+    });
+    const projectName = existing?.targetId
+      ? `cryzo-${slug}-${body.conversationId.slice(-6).toLowerCase()}`
+      : sanitizeProjectName(`cryzo-${slug}-${body.conversationId.slice(-6)}`);
+
+    const project = await ensureVercelProject({
+      token: platformToken,
+      teamId,
+      projectName,
+      existingProjectId: existing?.targetId,
+    });
+
+    const deployment = await createDeployment({
+      token: platformToken,
+      teamId,
+      projectId: project.id,
+      projectName: project.name || projectName,
+      files: body.files,
+    });
+    const ready = await waitForDeployment(platformToken, teamId, deployment.id);
+
+    const desiredHostname = `${slug}.${hostingDomain}`;
+    const subdomainAssigned = await assignCryzoSubdomain({
+      token: platformToken,
+      teamId,
+      projectId: project.id,
+      deploymentId: deployment.id,
+      hostname: desiredHostname,
+    }).catch(() => false);
+
+    const aliasList = ready?.alias || deployment.alias || [];
+    const defaultVercelAlias = aliasList.find((alias) => alias.endsWith(".vercel.app"));
+    const fallbackUrl = defaultVercelAlias
+      ? `https://${defaultVercelAlias}`
+      : `https://${project.name || projectName}.vercel.app`;
+    const url = subdomainAssigned ? `https://${desiredHostname}` : fallbackUrl;
+
+    await fetchMutation(
+      api.hosting.upsertCryzoTarget,
+      {
+        conversationId: body.conversationId as Id<"conversations">,
+        targetId: project.id,
+        slug,
+        url,
+        deploymentId: deployment.id,
+        customDomain: subdomainAssigned ? desiredHostname : undefined,
+      },
+      { token: authToken },
+    );
+
+    return Response.json({
+      success: true,
+      projectId: project.id,
+      deploymentId: deployment.id,
+      slug,
+      url,
+      desiredUrl: `https://${desiredHostname}`,
+      subdomainAssigned,
+      state: ready?.readyState || ready?.status || deployment.readyState || deployment.status,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Cryzo hosting publish failed";
+    return Response.json({ error: message }, { status: 500 });
+  }
+}
