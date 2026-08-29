@@ -10,6 +10,11 @@ export interface StreamingRuntimeSnapshot {
   error: string | null;
 }
 
+export type SandboxBuildFile = {
+  path: string;
+  content: string;
+};
+
 type Listener = (snapshot: StreamingRuntimeSnapshot) => void;
 
 type RuntimeState = StreamingRuntimeSnapshot & {
@@ -138,6 +143,7 @@ type SandboxResponse = {
   previewUrl?: string | null;
   progress?: ProgressStage;
   output?: string;
+  files?: SandboxBuildFile[];
   error?: string;
 };
 
@@ -269,6 +275,25 @@ export async function restoreStreamingRuntime(
     state.active = false;
     setError(state, error);
   }
+}
+
+export async function buildStreamingRuntime(conversationId: string) {
+  const state = getState(conversationId);
+  const response = await callSandbox({
+    operation: "build",
+    conversationId,
+  });
+  if (response.output) {
+    appendOutput(state, `\n${response.output}\n`);
+    emit(state);
+  }
+  if (!response.files || response.files.length === 0) {
+    throw new Error("Sandbox build produced no publishable files");
+  }
+  return {
+    files: response.files,
+    output: response.output || "",
+  };
 }
 
 export function subscribeStreamingRuntime(
