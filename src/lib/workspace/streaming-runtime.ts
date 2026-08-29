@@ -169,7 +169,10 @@ async function callSandbox(body: Record<string, unknown>): Promise<SandboxRespon
 function applyResponse(state: RuntimeState, response: SandboxResponse) {
   if (response.output) appendOutput(state, response.output);
   if (response.previewUrl) state.previewUrl = response.previewUrl;
-  if (response.progress) state.progress = response.progress;
+  if (response.progress) {
+    const keepReadyDuringHmr = state.previewUrl && response.progress === "writing";
+    state.progress = keepReadyDuringHmr ? "ready" : response.progress;
+  }
   state.error = null;
   emit(state);
 }
@@ -181,7 +184,7 @@ async function executeRemoteAction(
 ) {
   if (action.type === "file") {
     updateFileMap(state, action);
-    state.progress = "writing";
+    state.progress = state.previewUrl ? "ready" : "writing";
     emit(state);
   } else if (action.type === "shell") {
     state.progress = "installing";
@@ -275,6 +278,39 @@ export async function restoreStreamingRuntime(
     state.active = false;
     setError(state, error);
   }
+}
+
+export async function restartStreamingRuntime(conversationId: string) {
+  const state = getState(conversationId);
+  state.active = true;
+  state.progress = "starting";
+  state.error = null;
+  appendOutput(state, "\nRestarting preview server...\n");
+  emit(state);
+
+  try {
+    const response = await callSandbox({
+      operation: "restart",
+      conversationId,
+    });
+    applyResponse(state, response);
+  } catch (error) {
+    setError(state, error);
+    throw error;
+  }
+}
+
+export async function refreshStreamingRuntimeLogs(conversationId: string) {
+  const state = getState(conversationId);
+  const response = await callSandbox({
+    operation: "logs",
+    conversationId,
+  });
+  if (response.output) {
+    appendOutput(state, `\n--- Preview diagnostics ---\n${response.output}\n`);
+    emit(state);
+  }
+  return response.output || "";
 }
 
 export async function buildStreamingRuntime(conversationId: string) {
