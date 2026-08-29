@@ -134,7 +134,6 @@ function updateFileMap(state: RuntimeState, action: ArtifactAction) {
 }
 
 async function startInstall(
-  conversationId: string,
   state: RuntimeState,
   packageJson: string,
 ) {
@@ -185,7 +184,6 @@ async function startInstall(
 }
 
 async function handleFileAction(
-  conversationId: string,
   state: RuntimeState,
   action: ArtifactAction,
 ) {
@@ -198,12 +196,11 @@ async function handleFileAction(
   if (action.filePath === "package.json") {
     // package.json is generated first. Start dependency installation immediately
     // so npm runs in parallel with the model streaming the rest of the site.
-    void startInstall(conversationId, state, action.content);
+    void startInstall(state, action.content);
   }
 }
 
 async function handleShellAction(
-  conversationId: string,
   state: RuntimeState,
   action: ArtifactAction,
 ) {
@@ -215,7 +212,7 @@ async function handleShellAction(
     const packageJsonEntry = state.files["package.json"];
     const packageJson =
       packageJsonEntry?.type === "file" ? packageJsonEntry.content : null;
-    if (packageJson) await startInstall(conversationId, state, packageJson);
+    if (packageJson) await startInstall(state, packageJson);
     return;
   }
 
@@ -265,21 +262,18 @@ async function handleStartAction(
 }
 
 async function executeAction(
-  conversationId: string,
   state: RuntimeState,
   action: ArtifactAction,
 ) {
   try {
     if (action.type === "file") {
-      state.fileQueue = state.fileQueue.then(() =>
-        handleFileAction(conversationId, state, action),
-      );
+      state.fileQueue = state.fileQueue.then(() => handleFileAction(state, action));
       await state.fileQueue;
       return;
     }
 
     if (action.type === "shell") {
-      await handleShellAction(conversationId, state, action);
+      await handleShellAction(state, action);
       return;
     }
 
@@ -311,7 +305,7 @@ export function processStreamingArtifactText(
   state.processedActionsByMessage.set(messageId, actions.length);
 
   for (const action of newActions) {
-    void executeAction(conversationId, state, action);
+    void executeAction(state, action);
   }
 
   return true;
@@ -324,7 +318,9 @@ export function subscribeStreamingRuntime(
   const state = getState(conversationId);
   state.listeners.add(listener);
   listener(snapshot(state));
-  return () => state.listeners.delete(listener);
+  return () => {
+    state.listeners.delete(listener);
+  };
 }
 
 export function getStreamingRuntimeSnapshot(conversationId: string) {
