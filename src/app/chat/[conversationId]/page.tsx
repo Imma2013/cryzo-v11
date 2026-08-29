@@ -38,6 +38,17 @@ export default function ConversationPage({
   const hasArtifacts = !!artifacts?.length;
   const workspaceStarted = workspaceOpen || hasArtifacts;
 
+  // Boot the browser runtime while the user is still in Chat. By the time the
+  // first package.json arrives from the model, WebContainer should already be
+  // available instead of beginning its cold start then.
+  useEffect(() => {
+    void import("@/lib/workspace/webcontainer")
+      .then(({ prebootWebContainer }) => prebootWebContainer())
+      .catch(() => {
+        // The workspace will surface a useful error if the runtime cannot boot.
+      });
+  }, []);
+
   useEffect(() => {
     const media = window.matchMedia("(max-width: 767px)");
     const update = () => setIsMobile(media.matches);
