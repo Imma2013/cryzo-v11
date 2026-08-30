@@ -39,10 +39,16 @@ export default defineSchema({
     title: v.string(),
     actions: v.array(
       v.object({
-        type: v.union(v.literal("file"), v.literal("shell"), v.literal("start")),
+        type: v.union(
+          v.literal("file"),
+          v.literal("shell"),
+          v.literal("start"),
+          v.literal("supabase"),
+        ),
         filePath: v.optional(v.string()),
+        operation: v.optional(v.union(v.literal("migration"), v.literal("query"))),
         content: v.string(),
-      })
+      }),
     ),
     createdAt: v.number(),
   }).index("by_conversation", ["conversationId", "createdAt"]),
@@ -65,6 +71,24 @@ export default defineSchema({
       "provider",
     ])
     .index("by_provider_slug", ["provider", "slug"]),
+
+  mobileBuilds: defineTable({
+    userId: v.id("users"),
+    conversationId: v.id("conversations"),
+    platform: v.union(v.literal("ios"), v.literal("android")),
+    expoProjectId: v.optional(v.string()),
+    buildId: v.optional(v.string()),
+    buildUrl: v.optional(v.string()),
+    artifactUrl: v.optional(v.string()),
+    status: v.string(),
+    appName: v.string(),
+    identifier: v.string(),
+    webUrl: v.string(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_user_conversation", ["userId", "conversationId", "updatedAt"])
+    .index("by_build_id", ["buildId"]),
 
   subscriptions: defineTable({
     userId: v.id("users"),
