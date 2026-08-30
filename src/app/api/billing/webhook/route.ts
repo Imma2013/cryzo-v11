@@ -27,10 +27,16 @@ function subscriptionPriceId(subscription: Stripe.Subscription) {
 }
 
 function subscriptionPlan(subscription: Stripe.Subscription) {
+  const metadataPlan = subscription.metadata?.plan;
+  if (metadataPlan && isPaidPlan(metadataPlan)) return metadataPlan;
   return resolvePlanFromPriceId(subscriptionPriceId(subscription));
 }
 
 function subscriptionBillingCycle(subscription: Stripe.Subscription) {
+  const metadataCycle = subscription.metadata?.billingCycle;
+  if (metadataCycle === "monthly" || metadataCycle === "yearly") {
+    return metadataCycle;
+  }
   return resolveBillingCycleFromPriceId(subscriptionPriceId(subscription));
 }
 
