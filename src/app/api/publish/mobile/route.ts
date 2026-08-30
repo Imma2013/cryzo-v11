@@ -2,6 +2,10 @@ import { Sandbox } from "@vercel/sandbox";
 import { fetchMutation, fetchQuery } from "convex/nextjs";
 import { api } from "../../../../../convex/_generated/api";
 import type { Id } from "../../../../../convex/_generated/dataModel";
+import {
+  canUseManagedMobileBuilds,
+  canUseManagedStoreSubmission,
+} from "@/lib/billing/entitlements";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -9,11 +13,25 @@ export const maxDuration = 300;
 
 const LEGACY_MOBILE_DIR = "/vercel/sandbox/mobile-wrapper";
 const SOURCE_PROJECT_DIR = "/vercel/sandbox/project";
-const MOBILE_TIMEOUT_MS = 45 * 60 * 1000;
+const MOBILE_TIMEOUT_MS = 45 * 60 * 60 * 1000;
 const SOURCE_PREVIEW_PORT = 5173;
 
 type Platform = "ios" | "android";
 type SourceType = "expo-native" | "expo-webview";
+type ScanStatus = "pass" | "warning" | "blocking";
+type StoreReadinessCheck = {
+  id: string;
+  title: string;
+  status: ScanStatus;
+  detail: string;
+  fix?: string;
+};
+type StoreReadinessReport = {
+  overall: "ready" | "almost-ready" | "needs-improvement" | "not-ready";
+  summary: string;
+  checks: StoreReadinessCheck[];
+  counts: { pass: number; warning: number; blocking: number };
+};
 type IosSubmitCredentials = {
   keyContent?: string;
   keyId?: string;
@@ -289,6 +307,290 @@ async function hasNativeExpoSource(workspace: Workspace) {
   return Boolean(dependencies.expo && dependencies["react-native"]);
 }
 
+async function collectNativeSource(workspace: Workspace) {
+  if (workspace.sourceType !== "expo-native") return "";
+  const result = await run(
+    workspace,
+    `find . -type f \\( -name '*.ts' -o -name '*.tsx' -o -name '*.js' -o -name '*.jsx' -o -name '*.json' \\) -not -path './node_modules/*' -not -path './.git/*' -not -path './.expo/*' -print0 | xargs -0 cat 2>/dev/null | head -c 600000`,
+    undefined,
+    true,
+  );
+  return result.output;
+}
+
+function hasPattern(text: string, pattern: RegExp) {
+  return pattern.test(text);
+}
+
+function readinessOverall(checks: StoreReadinessCheck[]): StoreReadinessReport["overall"] {
+  const blocking = checks.filter((check) => check.status === "blocking").length;
+  const warnings = checks.filter((check) => check.status === "warning").length;
+  if (blocking >= 2) return "not-ready";
+  if (blocking === 1) return "needs-improvement";
+  if (warnings > 0) return "almost-ready";
+  return "ready";
+}
+
+async function scanStoreReadiness(
+  workspace: Workspace,
+  body: MobileRequest,
+  nativeSourceReady: boolean,
+): Promise<StoreReadinessReport> {
+  const checks: StoreReadinessCheck[] = [];
+  const packageJson = await readJsonFile(workspace, "package.json");
+  const appJson = await readJsonFile(workspace, "app.json");
+  const source = await collectNativeSource(workspace);
+  const sourceLower = source.toLowerCase();
+  const expo = (appJson?.expo || {}) as Record<string, any>;
+  const appConfigText = JSON.stringify(expo);
+
+  if (workspace.sourceType === "expo-native") {
+    checks.push(
+      nativeSourceReady
+        ? {
+            id: "native-source",
+            title: "Native source",
+            status: "pass",
+            detail: "Expo and React Native source are present in the Cryzo workspace.",
+          }
+        : {
+            id: "native-source",
+            title: "Native source",
+            status: "blocking",
+            detail: "The workspace is marked as mobile but does not contain a usable Expo/React Native project.",
+            fix: "Ask Cryzo to regenerate the project as a native Expo app before building store files.",
+          },
+    );
+  } else {
+    checks.push({
+      id: "native-source",
+      title: "Native-like layout",
+      status: "warning",
+      detail: "This project will ship through Cryzo's legacy WebView wrapper rather than native Expo source.",
+      fix: "Regenerate the project with iOS or Android selected to get native layouts and navigation checks.",
+    });
+  }
+
+  const identityReady = Boolean(body.appName?.trim() && body.identifier?.trim());
+  checks.push(
+    identityReady
+      ? {
+          id: "identity",
+          title: "App identity",
+          status: "pass",
+          detail: "App name and bundle/package identifier are configured.",
+        }
+      : {
+          id: "identity",
+          title: "App identity",
+          status: "blocking",
+          detail: "The app needs a name and stable bundle/package identifier before store submission.",
+          fix: "Set an app name and a reverse-domain identifier such as com.company.app.",
+        },
+  );
+
+  if (workspace.sourceType === "expo-native") {
+    const safeArea = hasPattern(
+      source,
+      /SafeAreaView|react-native-safe-area-context|useSafeAreaInsets|safeAreaInsets/i,
+    );
+    checks.push({
+      id: "safe-area",
+      title: "Safe area handling",
+      status: safeArea ? "pass" : "warning",
+      detail: safeArea
+        ? "The source includes native safe-area handling."
+        : "Cryzo could not find safe-area handling for notches, the Dynamic Island, or Android system bars.",
+      fix: safeArea ? undefined : "Use react-native-safe-area-context or SafeAreaView around top-level screens.",
+    });
+
+    const navigation = hasPattern(
+      source,
+      /expo-router|@react-navigation|BackHandler|router\.back|navigation\.goBack|canGoBack/i,
+    );
+    checks.push({
+      id: "navigation",
+      title: "Unified navigation & back stack",
+      status: navigation ? "pass" : "warning",
+      detail: navigation
+        ? "Native navigation/back-stack APIs were detected."
+        : "No native navigation or back-stack implementation was detected.",
+      fix: navigation ? undefined : "Use Expo Router or React Navigation and preserve per-tab navigation state.",
+    });
+
+    const darkMode =
+      expo.userInterfaceStyle === "automatic" ||
+      hasPattern(source, /useColorScheme|colorScheme|darkMode|theme.*dark|dark:/i);
+    checks.push({
+      id: "dark-mode",
+      title: "Dark mode & theming",
+      status: darkMode ? "pass" : "warning",
+      detail: darkMode
+        ? "Automatic or explicit light/dark theming was detected."
+        : "No clear dark-mode or system-theme handling was detected.",
+      fix: darkMode ? undefined : "Use userInterfaceStyle: automatic and map app colors to the device color scheme.",
+    });
+
+    const webOnlyApis = hasPattern(
+      source,
+      /\bdocument\.|\blocalStorage\b|\bsessionStorage\b|\bwindow\.location\b/,
+    );
+    checks.push({
+      id: "native-apis",
+      title: "Native API compatibility",
+      status: webOnlyApis ? "warning" : "pass",
+      detail: webOnlyApis
+        ? "Browser-only APIs appear in the native source and may break outside web builds."
+        : "No obvious browser-only APIs were detected in the native source.",
+      fix: webOnlyApis ? "Replace browser storage/navigation APIs with React Native or Expo equivalents, or guard them by platform." : undefined,
+    });
+
+    const hardcodedSecret = hasPattern(
+      source,
+      /(?:sk-[A-Za-z0-9_-]{24,}|nvapi-[A-Za-z0-9_-]{20,}|ghp_[A-Za-z0-9]{20,}|AIza[0-9A-Za-z_-]{30,}|sb_secret_[A-Za-z0-9_-]{12,})/,
+    );
+    checks.push({
+      id: "secrets",
+      title: "Secrets & credentials",
+      status: hardcodedSecret ? "blocking" : "pass",
+      detail: hardcodedSecret
+        ? "A token-like secret appears to be hard-coded in source that could ship to the store."
+        : "No obvious provider secrets were detected in the scanned source.",
+      fix: hardcodedSecret ? "Move private keys to server-side environment variables and rotate any key that was committed." : undefined,
+    });
+
+    const createsAccounts = hasPattern(
+      source,
+      /signUp|signup|createUser|createAccount|registerUser|register\(/i,
+    );
+    const deletesAccounts = hasPattern(
+      source,
+      /deleteAccount|deleteUser|removeAccount|account deletion|delete account/i,
+    );
+    checks.push({
+      id: "account-deletion",
+      title: "Account deletion",
+      status: createsAccounts && !deletesAccounts ? "blocking" : "pass",
+      detail:
+        createsAccounts && !deletesAccounts
+          ? "Account creation is present, but Cryzo could not find an in-app account deletion path."
+          : createsAccounts
+            ? "Account creation and deletion flows were both detected."
+            : "No account-creation flow was detected, so the deletion rule is not currently applicable.",
+      fix:
+        createsAccounts && !deletesAccounts
+          ? "Add a visible in-app Delete Account flow that deletes or initiates deletion of the user's account and data."
+          : undefined,
+    });
+
+    const usesSensitiveApis = hasPattern(
+      source,
+      /expo-camera|CameraView|ImagePicker|expo-location|Location\.|Notifications\.|expo-notifications|Microphone|Contacts\./i,
+    );
+    const permissionCopy = hasPattern(
+      appConfigText,
+      /NSCameraUsageDescription|NSPhotoLibraryUsageDescription|NSLocationWhenInUseUsageDescription|NSMicrophoneUsageDescription|permissions/i,
+    );
+    checks.push({
+      id: "permissions",
+      title: "Permissions & privacy strings",
+      status: usesSensitiveApis && !permissionCopy ? "warning" : "pass",
+      detail:
+        usesSensitiveApis && !permissionCopy
+          ? "Sensitive device APIs are used, but store-facing permission descriptions were not clearly detected."
+          : "Permission usage is either absent or paired with app configuration.",
+      fix:
+        usesSensitiveApis && !permissionCopy
+          ? "Add precise iOS usage descriptions and Android permissions only for the device capabilities your app actually uses."
+          : undefined,
+    });
+
+    const hasStoreAssets = Boolean(
+      expo.icon || expo.splash || expo.android?.adaptiveIcon || packageJson?.expo?.icon,
+    );
+    checks.push({
+      id: "assets",
+      title: "App icon & launch assets",
+      status: hasStoreAssets ? "pass" : "warning",
+      detail: hasStoreAssets
+        ? "App icon or splash/adaptive-icon configuration was detected."
+        : "No app icon or splash/adaptive-icon configuration was detected.",
+      fix: hasStoreAssets ? undefined : "Add a production app icon, Android adaptive icon and launch/splash assets before submitting.",
+    });
+
+    const hasPrivacy = sourceLower.includes("privacy") || appConfigText.toLowerCase().includes("privacy");
+    checks.push({
+      id: "privacy",
+      title: "Privacy disclosure",
+      status: hasPrivacy ? "pass" : "warning",
+      detail: hasPrivacy
+        ? "Privacy-related copy or configuration was detected."
+        : "Cryzo could not find a privacy policy or privacy disclosure in the scanned project.",
+      fix: hasPrivacy ? undefined : "Add a privacy policy link and make sure App Store / Play data disclosures match the app's actual behavior.",
+    });
+
+    const usesPayments = hasPattern(source, /stripe|checkout|subscription|digital purchase|purchase\(/i);
+    const usesStoreBilling = hasPattern(
+      source,
+      /react-native-iap|expo-in-app-purchases|RevenueCat|react-native-purchases|StoreKit|BillingClient/i,
+    );
+    checks.push({
+      id: "payments",
+      title: "Digital payments",
+      status: usesPayments && !usesStoreBilling ? "warning" : "pass",
+      detail:
+        usesPayments && !usesStoreBilling
+          ? "Payment/subscription code was detected without an obvious App Store / Play billing implementation."
+          : "No obvious digital-goods billing conflict was detected.",
+      fix:
+        usesPayments && !usesStoreBilling
+          ? "If the app sells digital goods or subscriptions consumed in-app, review Apple's and Google's in-app purchase requirements before submission."
+          : undefined,
+    });
+  } else {
+    checks.push(
+      {
+        id: "safe-area",
+        title: "Safe area handling",
+        status: "pass",
+        detail: "Cryzo's legacy wrapper uses a React Native SafeAreaView around the WebView.",
+      },
+      {
+        id: "navigation",
+        title: "Navigation & gestures",
+        status: "warning",
+        detail: "The wrapper enables back/forward gestures, but native tab-stack behavior depends on the web app.",
+        fix: "For a fully native navigation experience, regenerate the project as an Expo-native app.",
+      },
+      {
+        id: "dark-mode",
+        title: "Dark mode & theming",
+        status: "pass",
+        detail: "The wrapper follows the device appearance automatically; the embedded web app still controls its own theme.",
+      },
+    );
+  }
+
+  const counts = checks.reduce(
+    (acc, check) => {
+      acc[check.status] += 1;
+      return acc;
+    },
+    { pass: 0, warning: 0, blocking: 0 },
+  );
+  const overall = readinessOverall(checks);
+  const summary =
+    overall === "ready"
+      ? "Ready for store build preparation."
+      : overall === "almost-ready"
+        ? "No blocking source issues found, but review the warnings before submission."
+        : overall === "needs-improvement"
+          ? "One blocking issue should be fixed before submission."
+          : "Multiple blocking issues should be fixed before submission.";
+
+  return { overall, summary, checks, counts };
+}
+
 async function configureNativeExpoProject(
   workspace: Workspace,
   appName: string,
@@ -534,32 +836,38 @@ export async function POST(req: Request) {
       req,
       body.conversationId,
     );
+    const subscription = await fetchQuery(
+      api.billing.getSubscription,
+      { userId: conversation.userId },
+      { token: authToken },
+    );
     const nativeTarget = isNativeConversation(conversation);
     const workspace = await workspaceFor(body.conversationId, nativeTarget);
 
     if (body.operation === "check") {
-      const issues: string[] = [];
+      const prerequisiteIssues: string[] = [];
       const nativeSourceReady = nativeTarget
         ? await hasNativeExpoSource(workspace)
         : false;
+      const storeReadiness = await scanStoreReadiness(
+        workspace,
+        body,
+        nativeSourceReady,
+      );
 
       if (nativeTarget && !nativeSourceReady) {
-        issues.push(
+        prerequisiteIssues.push(
           "Build the mobile project in Cryzo first so its Expo source is available.",
         );
       }
       if (!nativeTarget && (!body.webUrl || !/^https:\/\//i.test(body.webUrl))) {
-        issues.push("Publish the web app to an HTTPS URL first.");
+        prerequisiteIssues.push("Publish the web app to an HTTPS URL first.");
       }
-      if (!body.appName?.trim()) issues.push("App name is required.");
+      if (!body.appName?.trim()) prerequisiteIssues.push("App name is required.");
       if (!body.identifier?.trim()) {
-        issues.push("Bundle/package identifier is required.");
+        prerequisiteIssues.push("Bundle/package identifier is required.");
       }
-      if (!body.expoToken?.trim()) issues.push("Connect an Expo access token.");
-      if (!body.expoAccount?.trim()) {
-        issues.push("Expo account or organization is required.");
-      }
-      if (!body.platform) issues.push("Choose iOS or Android.");
+      if (!body.platform) prerequisiteIssues.push("Choose iOS or Android.");
 
       let webReachable = false;
       if (!nativeTarget && body.webUrl && /^https:\/\//i.test(body.webUrl)) {
@@ -578,12 +886,20 @@ export async function POST(req: Request) {
           }
           webReachable = response.ok;
           if (!response.ok) {
-            issues.push(`Published web app returned HTTP ${response.status}.`);
+            prerequisiteIssues.push(`Published web app returned HTTP ${response.status}.`);
           }
         } catch {
-          issues.push("Published web app could not be reached.");
+          prerequisiteIssues.push("Published web app could not be reached.");
         }
       }
+
+      const sourceBlocking = storeReadiness.checks
+        .filter((check) => check.status === "blocking")
+        .map((check) => `${check.title}: ${check.detail}`);
+      const issues = [...prerequisiteIssues, ...sourceBlocking];
+      const warnings = storeReadiness.checks
+        .filter((check) => check.status === "warning")
+        .map((check) => `${check.title}: ${check.detail}`);
 
       return Response.json({
         success: issues.length === 0,
@@ -593,7 +909,34 @@ export async function POST(req: Request) {
         wrapperType: workspace.sourceType,
         nativeSourceReady,
         issues,
+        warnings,
+        storeReadiness,
+        plan: subscription.plan,
+        managedBuildIncluded: canUseManagedMobileBuilds(subscription.plan),
+        managedSubmissionIncluded: canUseManagedStoreSubmission(subscription.plan),
       });
+    }
+
+    if (body.operation === "build" && !canUseManagedMobileBuilds(subscription.plan)) {
+      return Response.json(
+        {
+          error: "Cryzo-managed EAS builds require Builder or above. Store-readiness scans and native source remain free, and you can build/submit the exported Expo project yourself.",
+          code: "MANAGED_MOBILE_BUILD_REQUIRES_BUILDER",
+          requiredPlan: "builder",
+        },
+        { status: 402 },
+      );
+    }
+
+    if (body.operation === "submit" && !canUseManagedStoreSubmission(subscription.plan)) {
+      return Response.json(
+        {
+          error: "One-click App Store / Google Play submission requires Builder or above. You can still export and submit the app yourself.",
+          code: "MANAGED_STORE_SUBMISSION_REQUIRES_BUILDER",
+          requiredPlan: "builder",
+        },
+        { status: 402 },
+      );
     }
 
     if (!body.expoToken?.trim()) {
