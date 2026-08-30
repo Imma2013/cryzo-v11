@@ -343,10 +343,12 @@ async function httpsIsReady(hostname: string) {
   }
 }
 
-async function waitForHttps(hostname: string) {
-  for (let attempt = 0; attempt < 8; attempt++) {
+async function waitForHttps(hostname: string, attempts = 1) {
+  for (let attempt = 0; attempt < attempts; attempt++) {
     if (await httpsIsReady(hostname)) return true;
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    if (attempt < attempts - 1) {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
   }
   return false;
 }
@@ -357,12 +359,14 @@ async function ensureCryzoSubdomain({
   projectId,
   hostname,
   hostingDomain,
+  sslAttempts = 1,
 }: {
   token: string;
   teamId: string;
   projectId: string;
   hostname: string;
   hostingDomain: string;
+  sslAttempts?: number;
 }): Promise<DomainResult> {
   let domain = await getProjectDomain(token, teamId, projectId, hostname);
 
@@ -415,7 +419,7 @@ async function ensureCryzoSubdomain({
       setupRequired: false,
       sslPending: false,
       verification: domain?.verification,
-      error: "Vercel could not inspect the Cryzo subdomain configuration yet. Try again shortly.",
+      error: "Vercel could not inspect the Cryzo subdomain configuration yet. Cryzo can re-check it without rebuilding the app.",
     };
   }
 
@@ -433,7 +437,7 @@ async function ensureCryzoSubdomain({
       sslPending: false,
       dns,
       verification: domain?.verification,
-      error: "Cryzo owns the deployment, but Vercel still needs domain verification before it can serve this subdomain.",
+      error: "Cryzo owns the deployment, but Vercel still needs domain verification before it can serve this subdomain. No rebuild is required.",
     };
   }
 
@@ -447,11 +451,11 @@ async function ensureCryzoSubdomain({
       sslPending: false,
       dns,
       verification: domain?.verification,
-      error: "One-time Squarespace DNS setup is required for Cryzo Hosting. Add the wildcard record shown, wait for DNS propagation, then publish again.",
+      error: "One-time Squarespace DNS setup is required for Cryzo Hosting. Keep the wildcard record in place and wait for DNS propagation; you do not need to rebuild the app.",
     };
   }
 
-  const sslReady = await waitForHttps(hostname);
+  const sslReady = await waitForHttps(hostname, sslAttempts);
   if (!sslReady) {
     return {
       assigned: false,
@@ -462,7 +466,7 @@ async function ensureCryzoSubdomain({
       sslPending: true,
       dns: null,
       verification: domain?.verification,
-      error: "DNS is configured. Vercel is provisioning SSL for this Cryzo URL; publish again in about a minute.",
+      error: "DNS is configured and Vercel is provisioning SSL. You do not need to redeploy; Cryzo will re-check this existing deployment.",
     };
   }
 
@@ -536,7 +540,7 @@ export async function GET(req: Request) {
     const conversationId = new URL(req.url).searchParams.get("conversationId") || "";
     if (!conversationId) return Response.json({ error: "Missing conversationId" }, { status: 400 });
     const { token } = await requireConversation(req, conversationId);
-    const target = await fetchQuery(
+    let target = await fetchQuery(
       api.hosting.getCryzoTarget,
       { conversationId: conversationId as Id<"conversations"> },
       { token },
@@ -544,11 +548,53 @@ export async function GET(req: Request) {
     const { platformToken, teamId, hostingDomain } = getPlatformConfig();
 
     let hostingHealth: Record<string, unknown> | null = null;
-    if (platformToken) {
-      const hostname = target?.slug
-        ? `${target.slug}.${hostingDomain}`
-        : `cryzo-hosting-probe.${hostingDomain}`;
-      const projectIdOrName = target?.targetId || process.env.CRYZO_VERCEL_ROOT_PROJECT_ID || "cryzo-v11";
+    let domainStatus: DomainResult | null = null;
+
+    if (platformToken && target?.slug && target.targetId) {
+      const hostname = `${target.slug}.${hostingDomain}`;
+      const desiredUrl = `https://${hostname}`;
+      domainStatus = await ensureCryzoSubdomain({
+        token: platformToken,
+        teamId,
+        projectId: target.targetId,
+        hostname,
+        hostingDomain,
+        sslAttempts: 1,
+      });
+
+      if (domainStatus.assigned && (target.url !== desiredUrl || target.customDomain !== hostname)) {
+        await fetchMutation(
+          api.hosting.upsertCryzoTarget,
+          {
+            conversationId: conversationId as Id<"conversations">,
+            targetId: target.targetId,
+            slug: target.slug,
+            url: desiredUrl,
+            deploymentId: target.deploymentId,
+            customDomain: hostname,
+          },
+          { token },
+        );
+        target = {
+          ...target,
+          url: desiredUrl,
+          customDomain: hostname,
+        };
+      }
+
+      hostingHealth = {
+        dnsReady: !domainStatus.misconfigured,
+        misconfigured: domainStatus.misconfigured,
+        sslReady: domainStatus.sslReady,
+        sslPending: domainStatus.sslPending,
+        setupRequired: domainStatus.setupRequired,
+        verified: domainStatus.verified,
+        dns: domainStatus.dns || null,
+        error: domainStatus.error || null,
+      };
+    } else if (platformToken) {
+      const hostname = `cryzo-hosting-probe.${hostingDomain}`;
+      const projectIdOrName = process.env.CRYZO_VERCEL_ROOT_PROJECT_ID || "cryzo-v11";
       const config = await getDomainConfig(platformToken, teamId, hostname, projectIdOrName);
       hostingHealth = config
         ? {
@@ -566,6 +612,7 @@ export async function GET(req: Request) {
       hostingDomain,
       desiredUrl: target?.slug ? `https://${target.slug}.${hostingDomain}` : null,
       hostingHealth,
+      domainStatus,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to load hosting status";
@@ -638,6 +685,9 @@ export async function POST(req: Request) {
       projectId: project.id,
       hostname: desiredHostname,
       hostingDomain,
+      // Give the first publish a useful SSL grace period. If provisioning takes
+      // longer, the GET status endpoint reconciles the same deployment later.
+      sslAttempts: 30,
     });
 
     const aliasList = ready?.alias || deployment.alias || [];
