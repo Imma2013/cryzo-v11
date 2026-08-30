@@ -10,6 +10,10 @@ import {
   filesToUIParts,
   saveInitialChatMessage,
 } from "@/lib/chat/initial-message";
+import {
+  DEFAULT_MODEL_SELECTION,
+  type ModelSelection,
+} from "@/lib/ai/models";
 
 export default function ChatEmptyPage() {
   const { userId } = useAuth();
@@ -17,6 +21,9 @@ export default function ChatEmptyPage() {
   const router = useRouter();
   const [input, setInput] = useState("");
   const [chatMode, setChatMode] = useState<ChatMode>("build");
+  const [modelSelection, setModelSelection] = useState<ModelSelection>(
+    DEFAULT_MODEL_SELECTION,
+  );
   const [isStarting, setIsStarting] = useState(false);
 
   const handleSubmit = async (files: File[] = []) => {
@@ -29,6 +36,10 @@ export default function ChatEmptyPage() {
       const id = await createConversation({
         userId: userId,
         chatMode,
+        modelProvider: modelSelection.providerId,
+        modelId: modelSelection.modelId,
+        modelCredentialMode: modelSelection.credentialMode,
+        modelBaseUrl: modelSelection.baseURL,
       });
 
       saveInitialChatMessage({
@@ -65,6 +76,8 @@ export default function ChatEmptyPage() {
           disabled={!userId}
           chatMode={chatMode}
           onChatModeChange={setChatMode}
+          modelSelection={modelSelection}
+          onModelSelectionChange={setModelSelection}
           variant="hero"
         />
       </div>
