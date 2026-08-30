@@ -312,6 +312,13 @@ function DeployPublishModal({
   const [mobileStatus, setMobileStatus] = useState<PublishStatus>({ type: "idle" });
   const [mobileCheckPassed, setMobileCheckPassed] = useState(false);
   const [mobileBuild, setMobileBuild] = useState<MobileBuild | null>(null);
+  const [iosKeyContent, setIosKeyContent] = useState("");
+  const [iosKeyId, setIosKeyId] = useState("");
+  const [iosIssuerId, setIosIssuerId] = useState("");
+  const [iosTeamId, setIosTeamId] = useState("");
+  const [iosAscAppId, setIosAscAppId] = useState("");
+  const [androidServiceAccountJson, setAndroidServiceAccountJson] = useState("");
+  const [androidTrack, setAndroidTrack] = useState<"internal" | "alpha" | "beta" | "production">("internal");
 
   useEffect(() => {
     if (!authToken) return;
@@ -495,7 +502,26 @@ function DeployPublishModal({
     if (!mobileBuild) return;
     setMobileStatus({ type: "loading", message: `Submitting ${mobileBuild.platform === "ios" ? "to App Store Connect" : "to Google Play"}...` });
     try {
-      await mobileRequest("submit", { buildId: mobileBuild.buildId, platform: mobileBuild.platform });
+      await mobileRequest("submit", {
+        buildId: mobileBuild.buildId,
+        platform: mobileBuild.platform,
+        ...(mobileBuild.platform === "ios"
+          ? {
+              iosSubmit: {
+                keyContent: iosKeyContent,
+                keyId: iosKeyId,
+                issuerId: iosIssuerId,
+                appleTeamId: iosTeamId,
+                ascAppId: iosAscAppId,
+              },
+            }
+          : {
+              androidSubmit: {
+                serviceAccountJson: androidServiceAccountJson,
+                track: androidTrack,
+              },
+            }),
+      });
       setMobileStatus({
         type: "success",
         message: mobileBuild.platform === "ios"
@@ -510,6 +536,11 @@ function DeployPublishModal({
 
   const isLoading = status.type === "loading";
   const mobileLoading = mobileStatus.type === "loading";
+  const mobileSubmitReady = mobileBuild?.platform === "ios"
+    ? Boolean(iosKeyContent.trim() && iosKeyId.trim() && iosIssuerId.trim() && iosAscAppId.trim())
+    : mobileBuild?.platform === "android"
+      ? Boolean(androidServiceAccountJson.trim())
+      : false;
 
   return (
     <Modal title="Publish Your App" onClose={onClose}>
@@ -596,7 +627,7 @@ function DeployPublishModal({
             <TextField label="App name" value={mobileAppName} onChange={setMobileAppName} />
             <TextField label={mobilePlatform === "ios" ? "Bundle identifier" : "Android package"} value={mobileIdentifier} onChange={setMobileIdentifier} placeholder="com.yourcompany.app" />
             <TextField label="Expo account / organization" value={expoAccount} onChange={setExpoAccount} placeholder="your-expo-account" />
-            <TextField label="Expo access token" value={expoToken} onChange={setExpoToken} type="password" placeholder="Expo access token" helper={<TokenHelp href="https://expo.dev/accounts/[account]/settings/access-tokens" note="You can save it under Developer Connections." />} />
+            <TextField label="Expo access token" value={expoToken} onChange={setExpoToken} type="password" placeholder="Expo access token" helper={<TokenHelp href="https://expo.dev/accounts/[account]/settings/access-tokens" note="Used for EAS Build/Submit. Saved only on this device when you publish." />} />
 
             <MobileStep number={1} title="Check Your App" complete={mobileCheckPassed}>
               <button type="button" onClick={() => void checkMobile()} disabled={mobileLoading} className="inline-flex h-9 items-center gap-2 rounded-lg bg-white px-3 text-sm font-medium text-black disabled:opacity-40">
@@ -616,10 +647,62 @@ function DeployPublishModal({
             </MobileStep>
 
             <MobileStep number={3} title="Submit Your App" complete={false}>
-              <button type="button" onClick={() => void submitMobile()} disabled={!mobileBuild || mobileLoading} className="inline-flex h-9 items-center gap-2 rounded-lg bg-white px-3 text-sm font-medium text-black disabled:opacity-40">
-                <Store size={14} />Submit with EAS
-              </button>
-              <p className="mt-2 text-xs leading-5 text-zinc-500">Your Expo project must already have the required Apple or Google store credentials configured for non-interactive submission.</p>
+              <div className="space-y-3">
+                <p className="rounded-lg border border-zinc-800 bg-zinc-900/60 px-3 py-2 text-xs leading-5 text-zinc-400">
+                  Store credentials are sent only when you press Submit. Cryzo writes them into the temporary EAS workspace, starts the submission, and deletes those credential files immediately afterward.
+                </p>
+
+                {mobileBuild?.platform === "ios" ? (
+                  <div className="space-y-3">
+                    <SecretTextarea
+                      label="App Store Connect .p8 API key"
+                      value={iosKeyContent}
+                      onChange={setIosKeyContent}
+                      placeholder="-----BEGIN PRIVATE KEY-----"
+                      accept=".p8,text/plain"
+                      uploadLabel="Load .p8 file"
+                    />
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <TextField label="Key ID" value={iosKeyId} onChange={setIosKeyId} placeholder="ABC123DEFG" />
+                      <TextField label="Issuer ID" value={iosIssuerId} onChange={setIosIssuerId} placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" />
+                      <TextField label="App Store Connect App ID" value={iosAscAppId} onChange={setIosAscAppId} placeholder="1234567890" />
+                      <TextField label="Apple Team ID (optional)" value={iosTeamId} onChange={setIosTeamId} placeholder="A1B2C3D4E5" />
+                    </div>
+                    <TokenHelp href="https://appstoreconnect.apple.com/access/integrations/api" note="Create an App Store Connect API key with the access needed to submit builds." />
+                  </div>
+                ) : mobileBuild?.platform === "android" ? (
+                  <div className="space-y-3">
+                    <SecretTextarea
+                      label="Google Play service-account JSON"
+                      value={androidServiceAccountJson}
+                      onChange={setAndroidServiceAccountJson}
+                      placeholder="{ \"type\": \"service_account\", ... }"
+                      accept="application/json,.json"
+                      uploadLabel="Load JSON key"
+                    />
+                    <label className="block">
+                      <span className="mb-1.5 block text-xs font-medium text-zinc-400">Google Play track</span>
+                      <select
+                        value={androidTrack}
+                        onChange={(event) => setAndroidTrack(event.target.value as typeof androidTrack)}
+                        className="h-10 w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 text-base text-white outline-none focus:border-zinc-600 sm:text-sm"
+                      >
+                        <option value="internal">Internal testing</option>
+                        <option value="alpha">Closed / alpha</option>
+                        <option value="beta">Open / beta</option>
+                        <option value="production">Production</option>
+                      </select>
+                    </label>
+                    <TokenHelp href="https://play.google.com/console/developers/api-access" note="Use a Google service account that has access to this app in Play Console." />
+                  </div>
+                ) : (
+                  <p className="text-xs text-zinc-500">Build an iOS or Android store file first.</p>
+                )}
+
+                <button type="button" onClick={() => void submitMobile()} disabled={!mobileBuild || !mobileSubmitReady || mobileLoading} className="inline-flex h-9 items-center gap-2 rounded-lg bg-white px-3 text-sm font-medium text-black disabled:opacity-40">
+                  {mobileLoading ? <Loader2 size={14} className="animate-spin" /> : <Store size={14} />}Submit with EAS
+                </button>
+              </div>
             </MobileStep>
 
             {mobileBuild && (
@@ -654,7 +737,7 @@ function MobileStep({ number, title, complete, children }: { number: number; tit
         <div className={cn("flex h-7 w-7 items-center justify-center rounded-full border text-xs", complete ? "border-green-700 bg-green-950 text-green-300" : "border-zinc-700 text-zinc-400")}>{complete ? "✓" : number}</div>
         <div className="text-sm font-medium text-white">{title}</div>
       </div>
-      <div className="pl-10">{children}</div>
+      <div className="pl-0 sm:pl-10">{children}</div>
     </div>
   );
 }
@@ -673,6 +756,57 @@ function TextField({ label, value, onChange, type = "text", placeholder, helper 
       <span className="mb-1.5 block text-xs font-medium text-zinc-400">{label}</span>
       <input type={type} value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} className="h-10 w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 text-base text-white outline-none transition-colors placeholder:text-zinc-600 focus:border-zinc-600 sm:text-sm" />
       {helper && <span className="mt-2 block">{helper}</span>}
+    </label>
+  );
+}
+
+function SecretTextarea({
+  label,
+  value,
+  onChange,
+  placeholder,
+  accept,
+  uploadLabel,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder: string;
+  accept: string;
+  uploadLabel: string;
+}) {
+  const loadFile = async (file?: File) => {
+    if (!file) return;
+    onChange(await file.text());
+  };
+
+  return (
+    <label className="block">
+      <span className="mb-1.5 block text-xs font-medium text-zinc-400">{label}</span>
+      <textarea
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        rows={5}
+        spellCheck={false}
+        autoComplete="off"
+        className="w-full resize-y rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-[16px] leading-5 text-white outline-none placeholder:text-zinc-600 focus:border-zinc-600 sm:text-sm"
+      />
+      <span className="mt-2 flex items-center justify-between gap-2 text-xs text-zinc-500">
+        <span>{value.trim() ? "Credential loaded" : "Paste it above or choose a file."}</span>
+        <span className="relative inline-flex cursor-pointer items-center rounded-lg border border-zinc-700 px-2.5 py-1.5 text-zinc-300 hover:border-zinc-500 hover:text-white">
+          {uploadLabel}
+          <input
+            type="file"
+            accept={accept}
+            className="absolute inset-0 cursor-pointer opacity-0"
+            onChange={(event) => {
+              void loadFile(event.target.files?.[0]);
+              event.currentTarget.value = "";
+            }}
+          />
+        </span>
+      </span>
     </label>
   );
 }
