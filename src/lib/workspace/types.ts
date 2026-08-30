@@ -1,6 +1,7 @@
 export interface ArtifactAction {
-  type: "file" | "shell" | "start";
+  type: "file" | "shell" | "start" | "supabase";
   filePath?: string;
+  operation?: "migration" | "query";
   content: string;
 }
 
