@@ -32,20 +32,12 @@ export function setStreamingRuntimeAuthToken(token: string | null) {
   sandboxAuthToken = token;
 }
 
-async function waitForSandboxAuthToken(options?: {
-  differentFrom?: string;
-  attempts?: number;
-}) {
-  const attempts = options?.attempts ?? 100;
-  for (let attempt = 0; attempt < attempts; attempt++) {
-    const token = sandboxAuthToken;
-    if (token && (!options?.differentFrom || token !== options.differentFrom)) {
-      return token;
-    }
+async function waitForSandboxAuthToken() {
+  for (let attempt = 0; attempt < 100; attempt++) {
+    if (sandboxAuthToken) return sandboxAuthToken;
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
-  if (options?.differentFrom) return null;
-  throw new Error("Your Cryzo session is still loading. Please retry the preview.");
+  throw new Error("Authentication is still loading. Please retry.");
 }
 
 function createState(): RuntimeState {
@@ -178,53 +170,22 @@ type GuardResponse = {
   error?: string;
 };
 
-async function parseJsonResponse<T>(response: Response) {
-  try {
-    return (await response.json()) as T & { error?: string; code?: string };
-  } catch {
-    return {} as T & { error?: string; code?: string };
-  }
-}
-
 async function authenticatedPost<T>(url: string, body: Record<string, unknown>): Promise<T> {
-  let authToken = await waitForSandboxAuthToken();
+  const authToken = await waitForSandboxAuthToken();
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${authToken}`,
+    },
+    body: JSON.stringify(body),
+  });
 
-  for (let attempt = 0; attempt < 2; attempt++) {
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${authToken}`,
-      },
-      body: JSON.stringify(body),
-    });
-
-    const data = await parseJsonResponse<T>(response);
-    if (response.ok) return data;
-
-    if (response.status === 401 && attempt === 0) {
-      // A quick sign-out/sign-in can invalidate the token between the render that
-      // queued an action and the request reaching the server. Wait briefly for the
-      // current Convex token and retry exactly once; never keep retrying a stale
-      // credential indefinitely.
-      const refreshedToken = await waitForSandboxAuthToken({
-        differentFrom: authToken,
-        attempts: 20,
-      });
-      if (refreshedToken) {
-        authToken = refreshedToken;
-        continue;
-      }
-      throw new Error(
-        data.error ||
-          "Your Cryzo session changed or expired. Sign in again, then retry the preview.",
-      );
-    }
-
+  const data = (await response.json()) as T & { error?: string };
+  if (!response.ok) {
     throw new Error(data.error || `Request failed with ${response.status}`);
   }
-
-  throw new Error("Your Cryzo session changed. Please retry the preview.");
+  return data;
 }
 
 async function callSandbox(body: Record<string, unknown>): Promise<SandboxResponse> {
