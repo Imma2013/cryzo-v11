@@ -4,6 +4,12 @@ import { getAuthUserId } from "@convex-dev/auth/server";
 import type { QueryCtx, MutationCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 
+const projectPlatformValidator = v.union(
+  v.literal("web"),
+  v.literal("ios"),
+  v.literal("android"),
+);
+
 async function requireOwner(
   ctx: QueryCtx | MutationCtx,
   conversationId: Id<"conversations">,
@@ -20,6 +26,7 @@ export const create = mutation({
   args: {
     userId: v.id("users"),
     chatMode: v.optional(v.union(v.literal("build"), v.literal("plan"))),
+    projectPlatforms: v.optional(v.array(projectPlatformValidator)),
     modelProvider: v.optional(v.string()),
     modelId: v.optional(v.string()),
     modelCredentialMode: v.optional(
@@ -38,6 +45,10 @@ export const create = mutation({
       userId: args.userId,
       title: "New Chat",
       chatMode: args.chatMode,
+      projectPlatforms:
+        args.projectPlatforms && args.projectPlatforms.length > 0
+          ? args.projectPlatforms
+          : ["web"],
       composioSessionId: null,
       modelProvider: args.modelProvider || "cryzo",
       modelId: args.modelId || "minimax/minimax-m3:free",
@@ -92,6 +103,25 @@ export const updateChatMode = mutation({
     await requireOwner(ctx, args.id);
     await ctx.db.patch(args.id, {
       chatMode: args.chatMode,
+      updatedAt: Date.now(),
+    });
+  },
+});
+
+export const updateProjectPlatforms = mutation({
+  args: {
+    id: v.id("conversations"),
+    projectPlatforms: v.array(projectPlatformValidator),
+  },
+  handler: async (ctx, args) => {
+    await requireOwner(ctx, args.id);
+    const normalized = args.projectPlatforms.includes("web")
+      ? ["web" as const]
+      : args.projectPlatforms.length > 0
+        ? args.projectPlatforms
+        : ["web" as const];
+    await ctx.db.patch(args.id, {
+      projectPlatforms: normalized,
       updatedAt: Date.now(),
     });
   },
