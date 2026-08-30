@@ -6,6 +6,7 @@ import {
   canUseManagedCustomDomains,
   entitlementSnapshot,
 } from "@/lib/billing/entitlements";
+import { ensureAppConvexBackend } from "@/lib/convex/app-platform";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -52,7 +53,6 @@ const RESERVED_SLUGS = new Set([
   "www", "api", "app", "admin", "auth", "billing", "blog", "chat",
   "dashboard", "docs", "help", "login", "mail", "status", "support",
 ]);
-
 const MANAGED_BRANDING_MARKER = "data-cryzo-managed-branding";
 
 function sanitizeSlug(value: string, fallback = "cryzo-app") {
@@ -66,18 +66,11 @@ function sanitizeSlug(value: string, fallback = "cryzo-app") {
   return slug || fallback;
 }
 
-/**
- * Branding is injected only into the deployment payload. The user's generated
- * source, GitHub export and DIY deployments remain untouched.
- */
 function withManagedCryzoBranding(files: PublishFile[]) {
   const index = files.findIndex((file) => file.path.replace(/^\/+/, "") === "index.html");
   if (index < 0) return files;
   if (files[index].content.includes(MANAGED_BRANDING_MARKER)) return files;
-
-  const badge = `
-<a ${MANAGED_BRANDING_MARKER} href="https://cryzo.me" target="_blank" rel="noreferrer" aria-label="Built with Cryzo" style="position:fixed!important;right:14px!important;bottom:14px!important;z-index:2147483647!important;display:inline-flex!important;align-items:center!important;gap:6px!important;padding:8px 11px!important;border:1px solid rgba(255,255,255,.16)!important;border-radius:999px!important;background:rgba(18,18,20,.90)!important;color:#fff!important;font:600 12px/1.1 ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif!important;text-decoration:none!important;box-shadow:0 8px 28px rgba(0,0,0,.28)!important;backdrop-filter:blur(12px)!important;-webkit-backdrop-filter:blur(12px)!important"><span aria-hidden="true" style="display:inline-block!important;width:7px!important;height:7px!important;border-radius:999px!important;background:#fff!important"></span>Built with Cryzo</a>`;
-
+  const badge = `\n<a ${MANAGED_BRANDING_MARKER} href="https://cryzo.me" target="_blank" rel="noreferrer" aria-label="Built with Cryzo" style="position:fixed!important;right:14px!important;bottom:14px!important;z-index:2147483647!important;display:inline-flex!important;align-items:center!important;gap:6px!important;padding:8px 11px!important;border:1px solid rgba(255,255,255,.16)!important;border-radius:999px!important;background:rgba(18,18,20,.90)!important;color:#fff!important;font:600 12px/1.1 ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif!important;text-decoration:none!important;box-shadow:0 8px 28px rgba(0,0,0,.28)!important;backdrop-filter:blur(12px)!important;-webkit-backdrop-filter:blur(12px)!important"><span aria-hidden="true" style="display:inline-block!important;width:7px!important;height:7px!important;border-radius:999px!important;background:#fff!important"></span>Built with Cryzo</a>`;
   const next = files.map((file) => ({ ...file }));
   const html = next[index].content;
   next[index].content = /<\/body>/i.test(html)
@@ -116,12 +109,7 @@ function vercelUrl(path: string, teamId: string) {
   return `https://api.vercel.com${path}${separator}teamId=${encodeURIComponent(teamId)}`;
 }
 
-async function vercelFetch(
-  token: string,
-  teamId: string,
-  path: string,
-  init: RequestInit = {},
-) {
+async function vercelFetch(token: string, teamId: string, path: string, init: RequestInit = {}) {
   return await fetch(vercelUrl(path, teamId), {
     ...init,
     headers: {
@@ -149,81 +137,31 @@ function recommendedValue(items?: Array<string | { value?: string; rank?: number
 
 function dnsInstructionFromConfig(config: DomainConfig, hostingDomain: string): DnsInstruction | null {
   const cname = recommendedValue(config.recommendedCNAME);
-  if (cname) {
-    return {
-      type: "CNAME",
-      name: "*",
-      value: cname,
-      note: `Add this once in Squarespace DNS for *.${hostingDomain}.`,
-    };
-  }
+  if (cname) return { type: "CNAME", name: "*", value: cname, note: `Add this once in Squarespace DNS for *.${hostingDomain}.` };
   const ipv4 = recommendedValue(config.recommendedIPv4);
-  if (ipv4) {
-    return {
-      type: "A",
-      name: "*",
-      value: ipv4,
-      note: `Add this once in Squarespace DNS for *.${hostingDomain}.`,
-    };
-  }
+  if (ipv4) return { type: "A", name: "*", value: ipv4, note: `Add this once in Squarespace DNS for *.${hostingDomain}.` };
   return null;
 }
 
-async function getDomainConfig(
-  token: string,
-  teamId: string,
-  hostname: string,
-  projectIdOrName?: string,
-) {
+async function getDomainConfig(token: string, teamId: string, hostname: string, projectIdOrName?: string) {
   const projectQuery = projectIdOrName
     ? `?projectIdOrName=${encodeURIComponent(projectIdOrName)}&strict=true`
     : "?strict=true";
-  const response = await vercelFetch(
-    token,
-    teamId,
-    `/v6/domains/${encodeURIComponent(hostname)}/config${projectQuery}`,
-  );
+  const response = await vercelFetch(token, teamId, `/v6/domains/${encodeURIComponent(hostname)}/config${projectQuery}`);
   if (!response.ok) return null;
   return (await response.json()) as DomainConfig;
 }
 
-async function ensureVercelProject({
-  token,
-  teamId,
-  projectName,
-  existingProjectId,
-}: {
-  token: string;
-  teamId: string;
-  projectName: string;
-  existingProjectId?: string;
-}) {
+async function ensureVercelProject({ token, teamId, projectName, existingProjectId }: { token: string; teamId: string; projectName: string; existingProjectId?: string }) {
   if (existingProjectId) return { id: existingProjectId, name: projectName };
-
   const create = await vercelFetch(token, teamId, "/v10/projects", {
     method: "POST",
-    body: JSON.stringify({
-      name: projectName,
-      framework: "vite",
-      buildCommand: "npm run build",
-      installCommand: "npm install",
-      outputDirectory: "dist",
-    }),
+    body: JSON.stringify({ name: projectName, framework: "vite", buildCommand: "npm run build", installCommand: "npm install", outputDirectory: "dist" }),
   });
-
   if (create.ok) return (await create.json()) as { id: string; name: string };
-  if (create.status !== 409) {
-    throw new Error((await readApiError(create)) || "Failed to create Cryzo hosting project");
-  }
-
-  const existing = await vercelFetch(
-    token,
-    teamId,
-    `/v9/projects/${encodeURIComponent(projectName)}`,
-  );
-  if (!existing.ok) {
-    throw new Error((await readApiError(existing)) || "Failed to load Cryzo hosting project");
-  }
+  if (create.status !== 409) throw new Error((await readApiError(create)) || "Failed to create Cryzo hosting project");
+  const existing = await vercelFetch(token, teamId, `/v9/projects/${encodeURIComponent(projectName)}`);
+  if (!existing.ok) throw new Error((await readApiError(existing)) || "Failed to load Cryzo hosting project");
   return (await existing.json()) as { id: string; name: string };
 }
 
@@ -232,138 +170,77 @@ async function upsertProjectEnvironment({
   teamId,
   projectId,
   supabase,
+  convexUrl,
 }: {
   token: string;
   teamId: string;
   projectId: string;
   supabase?: SupabaseEnv | null;
+  convexUrl?: string | null;
 }) {
-  if (!supabase?.url || !supabase?.publicKey) return;
-
-  const variables = [
-    { key: "VITE_SUPABASE_URL", value: supabase.url },
-    { key: "VITE_SUPABASE_ANON_KEY", value: supabase.publicKey },
-    { key: "VITE_SUPABASE_PUBLISHABLE_KEY", value: supabase.publicKey },
-  ].map((item) => ({
-    ...item,
-    type: "plain",
-    target: ["production", "preview"],
-  }));
-
-  const response = await vercelFetch(
-    token,
-    teamId,
-    `/v10/projects/${encodeURIComponent(projectId)}/env?upsert=true`,
-    { method: "POST", body: JSON.stringify(variables) },
-  );
-  if (!response.ok) {
-    throw new Error(
-      (await readApiError(response)) || "Failed to configure Supabase environment variables",
+  const rawVariables: Array<{ key: string; value: string }> = [];
+  if (supabase?.url && supabase?.publicKey) {
+    rawVariables.push(
+      { key: "VITE_SUPABASE_URL", value: supabase.url },
+      { key: "VITE_SUPABASE_ANON_KEY", value: supabase.publicKey },
+      { key: "VITE_SUPABASE_PUBLISHABLE_KEY", value: supabase.publicKey },
     );
   }
+  if (convexUrl) {
+    rawVariables.push(
+      { key: "VITE_CONVEX_URL", value: convexUrl },
+      { key: "NEXT_PUBLIC_CONVEX_URL", value: convexUrl },
+    );
+  }
+  if (rawVariables.length === 0) return;
+  const variables = rawVariables.map((item) => ({ ...item, type: "plain", target: ["production", "preview"] }));
+  const response = await vercelFetch(token, teamId, `/v10/projects/${encodeURIComponent(projectId)}/env?upsert=true`, {
+    method: "POST",
+    body: JSON.stringify(variables),
+  });
+  if (!response.ok) throw new Error((await readApiError(response)) || "Failed to configure project environment variables");
 }
 
-async function createDeployment({
-  token,
-  teamId,
-  projectId,
-  projectName,
-  files,
-}: {
-  token: string;
-  teamId: string;
-  projectId: string;
-  projectName: string;
-  files: PublishFile[];
-}) {
+async function createDeployment({ token, teamId, projectId, projectName, files }: { token: string; teamId: string; projectId: string; projectName: string; files: PublishFile[] }) {
   const normalized = normalizeFiles(files);
   if (normalized.length === 0) throw new Error("No files to publish");
-
-  const response = await vercelFetch(
-    token,
-    teamId,
-    "/v13/deployments?forceNew=1&skipAutoDetectionConfirmation=1",
-    {
-      method: "POST",
-      body: JSON.stringify({
-        name: projectName,
-        project: projectId,
-        target: "production",
-        files: normalized,
-        projectSettings: {
-          framework: "vite",
-          installCommand: "npm install",
-          buildCommand: "npm run build",
-          outputDirectory: "dist",
-        },
-        meta: { platform: "cryzo" },
-      }),
-    },
-  );
-  if (!response.ok) {
-    throw new Error((await readApiError(response)) || `Vercel deployment failed (${response.status})`);
-  }
-  return (await response.json()) as {
-    id: string;
-    url?: string;
-    readyState?: string;
-    status?: string;
-    alias?: string[];
-  };
+  const response = await vercelFetch(token, teamId, "/v13/deployments?forceNew=1&skipAutoDetectionConfirmation=1", {
+    method: "POST",
+    body: JSON.stringify({
+      name: projectName,
+      project: projectId,
+      target: "production",
+      files: normalized,
+      projectSettings: { framework: "vite", installCommand: "npm install", buildCommand: "npm run build", outputDirectory: "dist" },
+      meta: { platform: "cryzo" },
+    }),
+  });
+  if (!response.ok) throw new Error((await readApiError(response)) || `Vercel deployment failed (${response.status})`);
+  return (await response.json()) as { id: string; url?: string; readyState?: string; status?: string; alias?: string[] };
 }
 
 async function waitForDeployment(token: string, teamId: string, deploymentId: string) {
   for (let attempt = 0; attempt < 50; attempt++) {
-    const response = await vercelFetch(
-      token,
-      teamId,
-      `/v13/deployments/${encodeURIComponent(deploymentId)}`,
-    );
+    const response = await vercelFetch(token, teamId, `/v13/deployments/${encodeURIComponent(deploymentId)}`);
     if (!response.ok) break;
-    const deployment = (await response.json()) as {
-      readyState?: string;
-      status?: string;
-      alias?: string[];
-      url?: string;
-      errorMessage?: string;
-    };
+    const deployment = (await response.json()) as { readyState?: string; status?: string; alias?: string[]; url?: string; errorMessage?: string };
     const state = deployment.readyState || deployment.status;
     if (state === "READY") return deployment;
-    if (state === "ERROR" || state === "CANCELED") {
-      throw new Error(deployment.errorMessage || `Cryzo hosting deployment ${state.toLowerCase()}`);
-    }
+    if (state === "ERROR" || state === "CANCELED") throw new Error(deployment.errorMessage || `Cryzo hosting deployment ${state.toLowerCase()}`);
     await new Promise((resolve) => setTimeout(resolve, 1000));
   }
   return null;
 }
 
-async function getProjectDomain(
-  token: string,
-  teamId: string,
-  projectId: string,
-  hostname: string,
-) {
-  const response = await vercelFetch(
-    token,
-    teamId,
-    `/v9/projects/${encodeURIComponent(projectId)}/domains/${encodeURIComponent(hostname)}`,
-  );
+async function getProjectDomain(token: string, teamId: string, projectId: string, hostname: string) {
+  const response = await vercelFetch(token, teamId, `/v9/projects/${encodeURIComponent(projectId)}/domains/${encodeURIComponent(hostname)}`);
   if (!response.ok) return null;
-  return (await response.json()) as {
-    name?: string;
-    verified?: boolean;
-    verification?: unknown;
-  };
+  return (await response.json()) as { name?: string; verified?: boolean; verification?: unknown };
 }
 
 async function httpsIsReady(hostname: string) {
   try {
-    const response = await fetch(`https://${hostname}/`, {
-      method: "HEAD",
-      redirect: "manual",
-      cache: "no-store",
-      signal: AbortSignal.timeout(5000),
-    });
+    const response = await fetch(`https://${hostname}/`, { method: "HEAD", redirect: "manual", cache: "no-store", signal: AbortSignal.timeout(5000) });
     return response.status < 500;
   } catch {
     return false;
@@ -373,192 +250,59 @@ async function httpsIsReady(hostname: string) {
 async function waitForHttps(hostname: string, attempts = 1) {
   for (let attempt = 0; attempt < attempts; attempt++) {
     if (await httpsIsReady(hostname)) return true;
-    if (attempt < attempts - 1) {
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-    }
+    if (attempt < attempts - 1) await new Promise((resolve) => setTimeout(resolve, 1000));
   }
   return false;
 }
 
-async function ensureCryzoSubdomain({
-  token,
-  teamId,
-  projectId,
-  hostname,
-  hostingDomain,
-  sslAttempts = 1,
-}: {
-  token: string;
-  teamId: string;
-  projectId: string;
-  hostname: string;
-  hostingDomain: string;
-  sslAttempts?: number;
-}): Promise<DomainResult> {
+async function ensureCryzoSubdomain({ token, teamId, projectId, hostname, hostingDomain, sslAttempts = 1 }: { token: string; teamId: string; projectId: string; hostname: string; hostingDomain: string; sslAttempts?: number }): Promise<DomainResult> {
   let domain = await getProjectDomain(token, teamId, projectId, hostname);
-
   if (!domain) {
-    const addDomain = await vercelFetch(
-      token,
-      teamId,
-      `/v10/projects/${encodeURIComponent(projectId)}/domains`,
-      { method: "POST", body: JSON.stringify({ name: hostname }) },
-    );
+    const addDomain = await vercelFetch(token, teamId, `/v10/projects/${encodeURIComponent(projectId)}/domains`, { method: "POST", body: JSON.stringify({ name: hostname }) });
     if (!addDomain.ok && addDomain.status !== 409 && addDomain.status !== 400) {
-      return {
-        assigned: false,
-        verified: false,
-        misconfigured: true,
-        sslReady: false,
-        setupRequired: false,
-        sslPending: false,
-        error: (await readApiError(addDomain)) || "Unable to attach Cryzo subdomain",
-      };
+      return { assigned: false, verified: false, misconfigured: true, sslReady: false, setupRequired: false, sslPending: false, error: (await readApiError(addDomain)) || "Unable to attach Cryzo subdomain" };
     }
     domain = addDomain.ok
       ? ((await addDomain.json()) as { name?: string; verified?: boolean; verification?: unknown })
       : await getProjectDomain(token, teamId, projectId, hostname);
   }
-
   if (domain && !domain.verified) {
-    const verify = await vercelFetch(
-      token,
-      teamId,
-      `/v9/projects/${encodeURIComponent(projectId)}/domains/${encodeURIComponent(hostname)}/verify`,
-      { method: "POST" },
-    );
-    if (verify.ok) {
-      domain = (await verify.json()) as {
-        name?: string;
-        verified?: boolean;
-        verification?: unknown;
-      };
-    }
+    const verify = await vercelFetch(token, teamId, `/v9/projects/${encodeURIComponent(projectId)}/domains/${encodeURIComponent(hostname)}/verify`, { method: "POST" });
+    if (verify.ok) domain = (await verify.json()) as { name?: string; verified?: boolean; verification?: unknown };
   }
-
   const config = await getDomainConfig(token, teamId, hostname, projectId);
-  if (!config) {
-    return {
-      assigned: false,
-      verified: Boolean(domain?.verified),
-      misconfigured: true,
-      sslReady: false,
-      setupRequired: false,
-      sslPending: false,
-      verification: domain?.verification,
-      error: "Vercel could not inspect the Cryzo subdomain configuration yet. Cryzo can re-check it without rebuilding the app.",
-    };
-  }
-
+  if (!config) return { assigned: false, verified: Boolean(domain?.verified), misconfigured: true, sslReady: false, setupRequired: false, sslPending: false, verification: domain?.verification, error: "Vercel could not inspect the Cryzo subdomain configuration yet. Cryzo can re-check it without rebuilding the app." };
   const misconfigured = Boolean(config.misconfigured);
   const verified = Boolean(domain?.verified);
   const dns = dnsInstructionFromConfig(config, hostingDomain);
-
-  if (!verified) {
-    return {
-      assigned: false,
-      verified: false,
-      misconfigured,
-      sslReady: false,
-      setupRequired: true,
-      sslPending: false,
-      dns,
-      verification: domain?.verification,
-      error: "Cryzo owns the deployment, but Vercel still needs domain verification before it can serve this subdomain. No rebuild is required.",
-    };
-  }
-
-  if (misconfigured) {
-    return {
-      assigned: false,
-      verified: true,
-      misconfigured: true,
-      sslReady: false,
-      setupRequired: true,
-      sslPending: false,
-      dns,
-      verification: domain?.verification,
-      error: "One-time Squarespace DNS setup is required for Cryzo Hosting. Keep the wildcard record in place and wait for DNS propagation; you do not need to rebuild the app.",
-    };
-  }
-
+  if (!verified) return { assigned: false, verified: false, misconfigured, sslReady: false, setupRequired: true, sslPending: false, dns, verification: domain?.verification, error: "Cryzo owns the deployment, but Vercel still needs domain verification before it can serve this subdomain. No rebuild is required." };
+  if (misconfigured) return { assigned: false, verified: true, misconfigured: true, sslReady: false, setupRequired: true, sslPending: false, dns, verification: domain?.verification, error: "One-time Squarespace DNS setup is required for Cryzo Hosting. Keep the wildcard record in place and wait for DNS propagation; you do not need to rebuild the app." };
   const sslReady = await waitForHttps(hostname, sslAttempts);
-  if (!sslReady) {
-    return {
-      assigned: false,
-      verified: true,
-      misconfigured: false,
-      sslReady: false,
-      setupRequired: false,
-      sslPending: true,
-      dns: null,
-      verification: domain?.verification,
-      error: "DNS is configured and Vercel is provisioning SSL. You do not need to redeploy; Cryzo will re-check this existing deployment.",
-    };
-  }
-
-  return {
-    assigned: true,
-    verified: true,
-    misconfigured: false,
-    sslReady: true,
-    setupRequired: false,
-    sslPending: false,
-    dns: null,
-    verification: domain?.verification,
-  };
+  if (!sslReady) return { assigned: false, verified: true, misconfigured: false, sslReady: false, setupRequired: false, sslPending: true, dns: null, verification: domain?.verification, error: "DNS is configured and Vercel is provisioning SSL. You do not need to redeploy; Cryzo will re-check this existing deployment." };
+  return { assigned: true, verified: true, misconfigured: false, sslReady: true, setupRequired: false, sslPending: false, dns: null, verification: domain?.verification };
 }
 
 async function requireConversation(req: Request, conversationId: string) {
   const token = getBearerToken(req);
   if (!token) throw new Error("Unauthorized");
-  const conversation = await fetchQuery(
-    api.conversations.get,
-    { id: conversationId as Id<"conversations"> },
-    { token },
-  );
+  const conversation = await fetchQuery(api.conversations.get, { id: conversationId as Id<"conversations"> }, { token });
   if (!conversation) throw new Error("Conversation not found");
   return { token, conversation };
 }
 
-async function chooseSlug({
-  token,
-  conversationId,
-  requestedSlug,
-  fallback,
-}: {
-  token: string;
-  conversationId: string;
-  requestedSlug?: string;
-  fallback: string;
-}) {
+async function chooseSlug({ token, conversationId, requestedSlug, fallback }: { token: string; conversationId: string; requestedSlug?: string; fallback: string }) {
   const requested = sanitizeSlug(requestedSlug || fallback);
-  if (RESERVED_SLUGS.has(requested)) {
-    throw new Error("That Cryzo URL is reserved. Pick another name.");
-  }
-  const availability = await fetchQuery(
-    api.hosting.findCryzoSlug,
-    { conversationId: conversationId as Id<"conversations">, slug: requested },
-    { token },
-  );
+  if (RESERVED_SLUGS.has(requested)) throw new Error("That Cryzo URL is reserved. Pick another name.");
+  const availability = await fetchQuery(api.hosting.findCryzoSlug, { conversationId: conversationId as Id<"conversations">, slug: requested }, { token });
   if (availability.available) return requested;
   if (requestedSlug) throw new Error("That Cryzo URL is already taken");
   return `${requested.slice(0, 39)}-${conversationId.slice(-7).toLowerCase()}`;
 }
 
 function getPlatformConfig() {
-  const platformToken =
-    process.env.CRYZO_VERCEL_TOKEN ||
-    process.env.VERCEL_PLATFORM_TOKEN ||
-    process.env.VERCEL_TOKEN;
-  const teamId =
-    process.env.CRYZO_VERCEL_TEAM_ID ||
-    process.env.VERCEL_TEAM_ID ||
-    "team_ZityBkke0oJwGHtvANucmg3m";
-  const hostingDomain = (process.env.CRYZO_HOSTING_DOMAIN || "cryzo.me")
-    .replace(/^https?:\/\//, "")
-    .replace(/^\*\./, "")
-    .replace(/\/$/, "");
+  const platformToken = process.env.CRYZO_VERCEL_TOKEN || process.env.VERCEL_PLATFORM_TOKEN || process.env.VERCEL_TOKEN;
+  const teamId = process.env.CRYZO_VERCEL_TEAM_ID || process.env.VERCEL_TEAM_ID || "team_ZityBkke0oJwGHtvANucmg3m";
+  const hostingDomain = (process.env.CRYZO_HOSTING_DOMAIN || "cryzo.me").replace(/^https?:\/\//, "").replace(/^\*\./, "").replace(/\/$/, "");
   return { platformToken, teamId, hostingDomain };
 }
 
@@ -567,88 +311,28 @@ export async function GET(req: Request) {
     const conversationId = new URL(req.url).searchParams.get("conversationId") || "";
     if (!conversationId) return Response.json({ error: "Missing conversationId" }, { status: 400 });
     const { token, conversation } = await requireConversation(req, conversationId);
-    const subscription = await fetchQuery(
-      api.billing.getSubscription,
-      { userId: conversation.userId },
-      { token },
-    );
-    let target = await fetchQuery(
-      api.hosting.getCryzoTarget,
-      { conversationId: conversationId as Id<"conversations"> },
-      { token },
-    );
+    const subscription = await fetchQuery(api.billing.getSubscription, { userId: conversation.userId }, { token });
+    let target = await fetchQuery(api.hosting.getCryzoTarget, { conversationId: conversationId as Id<"conversations"> }, { token });
+    const backend = await fetchQuery((api as any).appBackends.getByConversation, { conversationId: conversationId as Id<"conversations"> }, { token }).catch(() => null);
     const { platformToken, teamId, hostingDomain } = getPlatformConfig();
-
     let hostingHealth: Record<string, unknown> | null = null;
     let domainStatus: DomainResult | null = null;
-
     if (platformToken && target?.slug && target.targetId) {
       const hostname = `${target.slug}.${hostingDomain}`;
       const desiredUrl = `https://${hostname}`;
-      domainStatus = await ensureCryzoSubdomain({
-        token: platformToken,
-        teamId,
-        projectId: target.targetId,
-        hostname,
-        hostingDomain,
-        sslAttempts: 1,
-      });
-
+      domainStatus = await ensureCryzoSubdomain({ token: platformToken, teamId, projectId: target.targetId, hostname, hostingDomain, sslAttempts: 1 });
       if (domainStatus.assigned && (target.url !== desiredUrl || target.customDomain !== hostname)) {
-        await fetchMutation(
-          api.hosting.upsertCryzoTarget,
-          {
-            conversationId: conversationId as Id<"conversations">,
-            targetId: target.targetId,
-            slug: target.slug,
-            url: desiredUrl,
-            deploymentId: target.deploymentId,
-            customDomain: hostname,
-          },
-          { token },
-        );
-        target = {
-          ...target,
-          url: desiredUrl,
-          customDomain: hostname,
-        };
+        await fetchMutation(api.hosting.upsertCryzoTarget, { conversationId: conversationId as Id<"conversations">, targetId: target.targetId, slug: target.slug, url: desiredUrl, deploymentId: target.deploymentId, customDomain: hostname }, { token });
+        target = { ...target, url: desiredUrl, customDomain: hostname };
       }
-
-      hostingHealth = {
-        dnsReady: !domainStatus.misconfigured,
-        misconfigured: domainStatus.misconfigured,
-        sslReady: domainStatus.sslReady,
-        sslPending: domainStatus.sslPending,
-        setupRequired: domainStatus.setupRequired,
-        verified: domainStatus.verified,
-        dns: domainStatus.dns || null,
-        error: domainStatus.error || null,
-      };
+      hostingHealth = { dnsReady: !domainStatus.misconfigured, misconfigured: domainStatus.misconfigured, sslReady: domainStatus.sslReady, sslPending: domainStatus.sslPending, setupRequired: domainStatus.setupRequired, verified: domainStatus.verified, dns: domainStatus.dns || null, error: domainStatus.error || null };
     } else if (platformToken) {
       const hostname = `cryzo-hosting-probe.${hostingDomain}`;
       const projectIdOrName = process.env.CRYZO_VERCEL_ROOT_PROJECT_ID || "cryzo-v11";
       const config = await getDomainConfig(platformToken, teamId, hostname, projectIdOrName);
-      hostingHealth = config
-        ? {
-            dnsReady: !config.misconfigured,
-            misconfigured: Boolean(config.misconfigured),
-            configuredBy: config.configuredBy || null,
-            dns: dnsInstructionFromConfig(config, hostingDomain),
-          }
-        : { dnsReady: false, misconfigured: true, dns: null };
+      hostingHealth = config ? { dnsReady: !config.misconfigured, misconfigured: Boolean(config.misconfigured), configuredBy: config.configuredBy || null, dns: dnsInstructionFromConfig(config, hostingDomain) } : { dnsReady: false, misconfigured: true, dns: null };
     }
-
-    return Response.json({
-      target,
-      configured: Boolean(platformToken),
-      hostingDomain,
-      desiredUrl: target?.slug ? `https://${target.slug}.${hostingDomain}` : null,
-      hostingHealth,
-      domainStatus,
-      plan: subscription.plan,
-      brandingRequired: !canRemoveManagedBranding(subscription.plan),
-      entitlements: entitlementSnapshot(subscription.plan),
-    });
+    return Response.json({ target, backend, configured: Boolean(platformToken), managedConvexConfigured: Boolean(process.env.CRYZO_CONVEX_TEAM_TOKEN && process.env.CRYZO_CONVEX_TEAM_ID), hostingDomain, desiredUrl: target?.slug ? `https://${target.slug}.${hostingDomain}` : null, hostingHealth, domainStatus, plan: subscription.plan, brandingRequired: !canRemoveManagedBranding(subscription.plan), entitlements: entitlementSnapshot(subscription.plan) });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to load hosting status";
     return Response.json({ error: message }, { status: message === "Unauthorized" ? 401 : 500 });
@@ -659,120 +343,43 @@ export async function POST(req: Request) {
   try {
     const body = (await req.json()) as PublishRequest;
     if (!body.conversationId) return Response.json({ error: "Missing conversationId" }, { status: 400 });
-    if (!Array.isArray(body.files) || body.files.length === 0) {
-      return Response.json({ error: "No files to publish" }, { status: 400 });
-    }
-
+    if (!Array.isArray(body.files) || body.files.length === 0) return Response.json({ error: "No files to publish" }, { status: 400 });
     const { token: authToken, conversation } = await requireConversation(req, body.conversationId);
-    const subscription = await fetchQuery(
-      api.billing.getSubscription,
-      { userId: conversation.userId },
-      { token: authToken },
-    );
+    const subscription = await fetchQuery(api.billing.getSubscription, { userId: conversation.userId }, { token: authToken });
     const canUnbrand = canRemoveManagedBranding(subscription.plan);
     const { platformToken, teamId, hostingDomain } = getPlatformConfig();
-    if (!platformToken) {
-      return Response.json(
-        {
-          error: "Cryzo Hosting needs CRYZO_VERCEL_TOKEN on the Cryzo server.",
-          code: "CRYZO_HOSTING_NOT_CONFIGURED",
-        },
-        { status: 503 },
-      );
+    if (!platformToken) return Response.json({ error: "Cryzo Hosting needs CRYZO_VERCEL_TOKEN on the Cryzo server.", code: "CRYZO_HOSTING_NOT_CONFIGURED" }, { status: 503 });
+
+    const existing = await fetchQuery(api.hosting.getCryzoTarget, { conversationId: body.conversationId as Id<"conversations"> }, { token: authToken });
+    if (existing?.slug && body.requestedSlug && sanitizeSlug(body.requestedSlug) !== existing.slug && !canUseManagedCustomDomains(subscription.plan)) {
+      return Response.json({ error: "Changing a managed Cryzo domain requires Starter or above. You can still export or deploy to your own Vercel account for free.", code: "MANAGED_DOMAIN_REQUIRES_STARTER", requiredPlan: "starter" }, { status: 402 });
     }
 
-    const existing = await fetchQuery(
-      api.hosting.getCryzoTarget,
-      { conversationId: body.conversationId as Id<"conversations"> },
-      { token: authToken },
-    );
+    const slug = await chooseSlug({ token: authToken, conversationId: body.conversationId, requestedSlug: body.requestedSlug, fallback: existing?.slug || body.projectName });
+    const projectName = existing?.targetId ? `cryzo-${slug}-${body.conversationId.slice(-6).toLowerCase()}` : sanitizeSlug(`cryzo-${slug}-${body.conversationId.slice(-6)}`);
+    const project = await ensureVercelProject({ token: platformToken, teamId, projectName, existingProjectId: existing?.targetId });
 
-    if (
-      existing?.slug &&
-      body.requestedSlug &&
-      sanitizeSlug(body.requestedSlug) !== existing.slug &&
-      !canUseManagedCustomDomains(subscription.plan)
-    ) {
-      return Response.json(
-        {
-          error: "Changing a managed Cryzo domain requires Starter or above. You can still export or deploy to your own Vercel account for free.",
-          code: "MANAGED_DOMAIN_REQUIRES_STARTER",
-          requiredPlan: "starter",
-        },
-        { status: 402 },
-      );
-    }
-
-    const slug = await chooseSlug({
-      token: authToken,
+    const convexBackend = await ensureAppConvexBackend({
       conversationId: body.conversationId,
-      requestedSlug: body.requestedSlug,
-      fallback: existing?.slug || body.projectName,
-    });
-    const projectName = existing?.targetId
-      ? `cryzo-${slug}-${body.conversationId.slice(-6).toLowerCase()}`
-      : sanitizeSlug(`cryzo-${slug}-${body.conversationId.slice(-6)}`);
-
-    const project = await ensureVercelProject({
-      token: platformToken,
-      teamId,
-      projectName,
-      existingProjectId: existing?.targetId,
+      projectName: body.projectName,
+      files: body.files,
+      authToken,
     });
 
-    await upsertProjectEnvironment({
-      token: platformToken,
-      teamId,
-      projectId: project.id,
-      supabase: body.supabase,
-    });
+    await upsertProjectEnvironment({ token: platformToken, teamId, projectId: project.id, supabase: body.supabase, convexUrl: convexBackend?.deploymentUrl });
 
-    const deployFiles = canUnbrand
-      ? body.files
-      : withManagedCryzoBranding(body.files);
-    const deployment = await createDeployment({
-      token: platformToken,
-      teamId,
-      projectId: project.id,
-      projectName: project.name || projectName,
-      files: deployFiles,
-    });
+    const deployFiles = canUnbrand ? body.files : withManagedCryzoBranding(body.files);
+    const deployment = await createDeployment({ token: platformToken, teamId, projectId: project.id, projectName: project.name || projectName, files: deployFiles });
     const ready = await waitForDeployment(platformToken, teamId, deployment.id);
-
     const desiredHostname = `${slug}.${hostingDomain}`;
-    const domain = await ensureCryzoSubdomain({
-      token: platformToken,
-      teamId,
-      projectId: project.id,
-      hostname: desiredHostname,
-      hostingDomain,
-      // Give the first publish a useful SSL grace period. If provisioning takes
-      // longer, the GET status endpoint reconciles the same deployment later.
-      sslAttempts: 30,
-    });
-
+    const domain = await ensureCryzoSubdomain({ token: platformToken, teamId, projectId: project.id, hostname: desiredHostname, hostingDomain, sslAttempts: 30 });
     const aliasList = ready?.alias || deployment.alias || [];
     const defaultVercelAlias = aliasList.find((alias) => alias.endsWith(".vercel.app"));
-    const fallbackUrl = defaultVercelAlias
-      ? `https://${defaultVercelAlias}`
-      : deployment.url
-        ? `https://${deployment.url}`
-        : `https://${project.name || projectName}.vercel.app`;
+    const fallbackUrl = defaultVercelAlias ? `https://${defaultVercelAlias}` : deployment.url ? `https://${deployment.url}` : `https://${project.name || projectName}.vercel.app`;
     const cryzoUrl = `https://${desiredHostname}`;
     const canonicalUrl = domain.assigned ? cryzoUrl : fallbackUrl;
 
-    await fetchMutation(
-      api.hosting.upsertCryzoTarget,
-      {
-        conversationId: body.conversationId as Id<"conversations">,
-        targetId: project.id,
-        slug,
-        url: canonicalUrl,
-        deploymentId: deployment.id,
-        customDomain: domain.assigned ? desiredHostname : undefined,
-      },
-      { token: authToken },
-    );
+    await fetchMutation(api.hosting.upsertCryzoTarget, { conversationId: body.conversationId as Id<"conversations">, targetId: project.id, slug, url: canonicalUrl, deploymentId: deployment.id, customDomain: domain.assigned ? desiredHostname : undefined }, { token: authToken });
 
     return Response.json({
       success: true,
@@ -784,6 +391,7 @@ export async function POST(req: Request) {
       fallbackUrl,
       brandingRequired: !canUnbrand,
       plan: subscription.plan,
+      convexBackend: convexBackend ? { projectId: convexBackend.projectId, projectName: convexBackend.projectName, deploymentName: convexBackend.deploymentName, deploymentUrl: convexBackend.deploymentUrl } : null,
       subdomainAssigned: domain.assigned,
       domainVerified: domain.verified,
       domainMisconfigured: domain.misconfigured,
