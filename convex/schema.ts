@@ -19,6 +19,9 @@ export default defineSchema({
     userId: v.id("users"),
     title: v.string(),
     chatMode: v.optional(v.union(v.literal("build"), v.literal("plan"))),
+    projectPlatforms: v.optional(
+      v.array(v.union(v.literal("web"), v.literal("ios"), v.literal("android"))),
+    ),
     composioSessionId: v.union(v.string(), v.null()),
     modelProvider: v.optional(v.string()),
     modelId: v.optional(v.string()),
