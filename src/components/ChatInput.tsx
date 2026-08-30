@@ -13,6 +13,11 @@ import {
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { ModelPicker } from "@/components/ModelPicker";
+import {
+  DEFAULT_MODEL_SELECTION,
+  type ModelSelection,
+} from "@/lib/ai/models";
 
 export type ChatMode = "build" | "plan";
 
@@ -91,6 +96,8 @@ export function ChatInput({
   disabled,
   chatMode,
   onChatModeChange,
+  modelSelection = DEFAULT_MODEL_SELECTION,
+  onModelSelectionChange = () => {},
   variant = "dock",
 }: {
   value: string;
@@ -101,6 +108,8 @@ export function ChatInput({
   disabled: boolean;
   chatMode: ChatMode;
   onChatModeChange: (mode: ChatMode) => void;
+  modelSelection?: ModelSelection;
+  onModelSelectionChange?: (selection: ModelSelection) => void;
   variant?: "dock" | "hero";
 }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -335,7 +344,7 @@ export function ChatInput({
         />
 
         <div className="flex items-center justify-between gap-2 px-3 pb-3">
-          <div className="flex min-w-0 items-center gap-1">
+          <div className="flex min-w-0 items-center gap-1 overflow-hidden">
             <div className="flex shrink-0 rounded-lg border border-zinc-800 bg-zinc-900 p-0.5">
               <button
                 type="button"
@@ -366,6 +375,12 @@ export function ChatInput({
                 Plan
               </button>
             </div>
+
+            <ModelPicker
+              selection={modelSelection}
+              onChange={onModelSelectionChange}
+              compact
+            />
 
             <input
               ref={fileInputRef}
