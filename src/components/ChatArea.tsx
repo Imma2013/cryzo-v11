@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useChat } from "@ai-sdk/react";
+import { useAuthToken } from "@convex-dev/auth/react";
 import {
   DefaultChatTransport,
   isToolUIPart,
@@ -22,6 +23,14 @@ import {
   filesToUIParts,
   takeInitialChatMessage,
 } from "@/lib/chat/initial-message";
+import {
+  DEFAULT_MODEL_SELECTION,
+  getProvider,
+  readRuntimeProviderBaseURL,
+  readRuntimeProviderKey,
+  type ModelSelection,
+} from "@/lib/ai/models";
+import { buildLocalSystemPrompt } from "@/lib/ai/local-prompt";
 import type { ElementInfo } from "./workspace/LivePreview";
 import { Id } from "../../convex/_generated/dataModel";
 
@@ -37,6 +46,21 @@ function hasVisibleAssistantContent(message: UIMessage) {
   );
 }
 
+function textFromMessage(message: UIMessage) {
+  return (
+    message.parts
+      ?.filter((part): part is { type: "text"; text: string } => part.type === "text")
+      .map((part) => part.text)
+      .join("\n") || ""
+  );
+}
+
+function localMessageId(prefix: string) {
+  return typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? `${prefix}-${crypto.randomUUID()}`
+    : `${prefix}-${Date.now()}-${Math.random()}`;
+}
+
 export function ChatArea({
   conversationId,
   onArtifactCreated,
@@ -49,17 +73,26 @@ export function ChatArea({
   onElementUsed?: () => void;
 }) {
   const { userId } = useAuth();
+  const authToken = useAuthToken();
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const localAbortRef = useRef<AbortController | null>(null);
   const [input, setInput] = useState("");
+  const [localLoading, setLocalLoading] = useState(false);
+  const [localError, setLocalError] = useState<string | null>(null);
   const [optimisticMode, setOptimisticMode] = useState<{
     conversationId: string;
     mode: ChatMode;
+  } | null>(null);
+  const [optimisticModel, setOptimisticModel] = useState<{
+    conversationId: string;
+    selection: ModelSelection;
   } | null>(null);
 
   const { conversation, loadedMessages, saveMessages, generateTitle } =
     useChatHistory(userId, conversationId);
   const createArtifact = useMutation(api.artifacts.create);
   const updateChatMode = useMutation(api.conversations.updateChatMode);
+  const updateModel = useMutation(api.conversations.updateModel);
   const savedArtifactsRef = useRef<Set<string>>(new Set());
   const liveMessageIdsRef = useRef<Set<string>>(new Set());
   const openedStreamingMessagesRef = useRef<Set<string>>(new Set());
@@ -81,6 +114,17 @@ export function ChatArea({
       ? optimisticMode.mode
       : conversation?.chatMode ?? "build";
 
+  const modelSelection: ModelSelection =
+    optimisticModel?.conversationId === conversationId
+      ? optimisticModel.selection
+      : {
+          providerId: conversation?.modelProvider || DEFAULT_MODEL_SELECTION.providerId,
+          modelId: conversation?.modelId || DEFAULT_MODEL_SELECTION.modelId,
+          credentialMode:
+            conversation?.modelCredentialMode || DEFAULT_MODEL_SELECTION.credentialMode,
+          baseURL: conversation?.modelBaseUrl,
+        };
+
   const prevConvIdRef = useRef<string | null>(null);
   const loadedRef = useRef(false);
   useEffect(() => {
@@ -90,6 +134,10 @@ export function ChatArea({
       savedArtifactsRef.current = new Set();
       liveMessageIdsRef.current = new Set();
       openedStreamingMessagesRef.current = new Set();
+      localAbortRef.current?.abort();
+      setLocalLoading(false);
+      setLocalError(null);
+      setOptimisticModel(null);
     }
     if (!loadedRef.current && loadedMessages !== undefined) {
       loadedRef.current = true;
@@ -126,13 +174,7 @@ export function ChatArea({
           .filter((m) => m.role === "assistant")
           .pop();
         if (lastAssistant) {
-          const text =
-            lastAssistant.parts
-              ?.filter(
-                (p): p is { type: "text"; text: string } => p.type === "text",
-              )
-              .map((p) => p.text)
-              .join("") || "";
+          const text = textFromMessage(lastAssistant);
           if (text) generateTitle(conversationId, text);
         }
       }
@@ -142,6 +184,7 @@ export function ChatArea({
 
   useEffect(() => {
     return () => {
+      localAbortRef.current?.abort();
       if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
       if (messagesRef.current.length > 0) {
         saveMessages(conversationId, messagesRef.current);
@@ -163,7 +206,7 @@ export function ChatArea({
       .find((message) => message.role === "assistant");
     if (!latestAssistant) return;
 
-    if (status === "streaming" || status === "submitted") {
+    if (status === "streaming" || status === "submitted" || localLoading) {
       liveMessageIdsRef.current.add(latestAssistant.id);
     }
 
@@ -190,7 +233,7 @@ export function ChatArea({
       openedStreamingMessagesRef.current.add(latestAssistant.id);
       onArtifactCreated?.();
     }
-  }, [messages, status, conversationId, onArtifactCreated]);
+  }, [messages, status, localLoading, conversationId, onArtifactCreated]);
 
   // Persist only completed artifacts. Persistence is deliberately decoupled
   // from live execution so database latency cannot hold up the preview.
@@ -226,10 +269,174 @@ export function ChatArea({
     [conversationId, updateChatMode],
   );
 
+  const handleModelSelectionChange = useCallback(
+    (selection: ModelSelection) => {
+      setOptimisticModel({ conversationId, selection });
+      updateModel({
+        id: conversationId,
+        providerId: selection.providerId,
+        modelId: selection.modelId,
+        credentialMode: selection.credentialMode,
+        baseUrl: selection.baseURL,
+      });
+    },
+    [conversationId, updateModel],
+  );
+
   const fileToUIPart = async (file: File): Promise<FileUIPart> => {
     const [part] = await filesToUIParts([file]);
     return part;
   };
+
+  const runLocalModel = useCallback(
+    async (
+      text: string,
+      fileParts: FileUIPart[],
+      mode: ChatMode,
+      selection: ModelSelection,
+    ) => {
+      const provider = getProvider(selection.providerId);
+      const baseURL = (
+        readRuntimeProviderBaseURL(selection.providerId) ||
+        selection.baseURL ||
+        provider.defaultBaseURL ||
+        ""
+      ).replace(/\/$/, "");
+      if (!baseURL) throw new Error("Local model base URL is missing");
+
+      const apiKey = readRuntimeProviderKey(selection.providerId);
+      const controller = new AbortController();
+      localAbortRef.current = controller;
+      setLocalLoading(true);
+      setLocalError(null);
+
+      const userMessage: UIMessage = {
+        id: localMessageId("user"),
+        role: "user",
+        parts: [
+          { type: "text", text },
+          ...fileParts,
+        ],
+      };
+      const assistantId = localMessageId("assistant");
+      const assistantMessage: UIMessage = {
+        id: assistantId,
+        role: "assistant",
+        parts: [{ type: "text", text: "" }],
+      };
+      liveMessageIdsRef.current.add(assistantId);
+
+      const history = messagesRef.current
+        .filter((message) => message.role === "user" || message.role === "assistant")
+        .map((message) => ({
+          role: message.role,
+          content: textFromMessage(message),
+        }))
+        .filter((message) => message.content.trim());
+
+      const imageParts = fileParts
+        .filter((part) => part.mediaType?.startsWith("image/"))
+        .map((part) => ({
+          type: "image_url",
+          image_url: { url: part.url },
+        }));
+      const localUserContent = imageParts.length
+        ? [{ type: "text", text }, ...imageParts]
+        : text;
+
+      let nextMessages = [...messagesRef.current, userMessage, assistantMessage];
+      messagesRef.current = nextMessages;
+      setMessages(nextMessages);
+
+      try {
+        const response = await fetch(`${baseURL}/chat/completions`, {
+          method: "POST",
+          signal: controller.signal,
+          headers: {
+            "Content-Type": "application/json",
+            ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+          },
+          body: JSON.stringify({
+            model: selection.modelId,
+            stream: true,
+            messages: [
+              { role: "system", content: buildLocalSystemPrompt(mode) },
+              ...history,
+              { role: "user", content: localUserContent },
+            ],
+          }),
+        });
+        if (!response.ok) {
+          const detail = await response.text();
+          throw new Error(detail || `Local model returned HTTP ${response.status}`);
+        }
+        if (!response.body) throw new Error("Local model returned no response body");
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let assistantText = "";
+
+        const updateAssistant = (content: string) => {
+          nextMessages = nextMessages.map((message) =>
+            message.id === assistantId
+              ? { ...message, parts: [{ type: "text" as const, text: content }] }
+              : message,
+          );
+          messagesRef.current = nextMessages;
+          setMessages(nextMessages);
+        };
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() || "";
+          for (const raw of lines) {
+            const line = raw.trim();
+            if (!line || !line.startsWith("data:")) continue;
+            const payload = line.slice(5).trim();
+            if (!payload || payload === "[DONE]") continue;
+            try {
+              const parsed = JSON.parse(payload);
+              const delta =
+                parsed.choices?.[0]?.delta?.content ??
+                parsed.choices?.[0]?.message?.content ??
+                "";
+              if (typeof delta === "string" && delta) {
+                assistantText += delta;
+                updateAssistant(assistantText);
+              }
+            } catch {
+              // Some local servers emit keepalive/non-JSON SSE frames.
+            }
+          }
+        }
+
+        if (!assistantText && buffer.trim()) {
+          try {
+            const parsed = JSON.parse(buffer.replace(/^data:\s*/, ""));
+            assistantText = parsed.choices?.[0]?.message?.content || "";
+            if (assistantText) updateAssistant(assistantText);
+          } catch {}
+        }
+
+        debouncedSave();
+        if (conversation?.title === "New Chat" && assistantText) {
+          generateTitle(conversationId, assistantText);
+        }
+      } catch (error) {
+        if (!(error instanceof DOMException && error.name === "AbortError")) {
+          setLocalError(error instanceof Error ? error.message : "Local model request failed");
+        }
+      } finally {
+        localAbortRef.current = null;
+        setLocalLoading(false);
+      }
+    },
+    [conversation?.title, conversationId, debouncedSave, generateTitle, setMessages],
+  );
 
   const sendPreparedMessage = useCallback(
     async (
@@ -239,12 +446,36 @@ export function ChatArea({
     ) => {
       if (!text.trim() && fileParts.length === 0) return;
 
+      const selection = modelSelection;
+      const provider = getProvider(selection.providerId);
+      if (provider.local) {
+        await runLocalModel(text, fileParts, mode, selection);
+        return;
+      }
+
+      const modelApiKey =
+        selection.credentialMode === "device"
+          ? readRuntimeProviderKey(selection.providerId)
+          : undefined;
+      const modelBaseUrl =
+        readRuntimeProviderBaseURL(selection.providerId) || selection.baseURL;
+
       await sendMessage(
         fileParts.length > 0 ? { text, files: fileParts } : { text },
-        { body: { chatMode: mode } },
+        {
+          body: {
+            chatMode: mode,
+            modelProvider: selection.providerId,
+            modelId: selection.modelId,
+            modelCredentialMode: selection.credentialMode,
+            modelBaseUrl,
+            modelApiKey,
+            authToken: selection.credentialMode === "account" ? authToken : undefined,
+          },
+        },
       );
     },
-    [chatMode, sendMessage],
+    [authToken, chatMode, modelSelection, runLocalModel, sendMessage],
   );
 
   const handleSend = async (files: File[] = []) => {
@@ -266,8 +497,15 @@ export function ChatArea({
     await sendPreparedMessage(text, fileParts);
   };
 
-  const isLoading = status === "streaming" || status === "submitted";
+  const isLoading =
+    status === "streaming" || status === "submitted" || localLoading;
   const initialMessageSentRef = useRef(false);
+
+  const stopAll = useCallback(() => {
+    localAbortRef.current?.abort();
+    setLocalLoading(false);
+    stop();
+  }, [stop]);
 
   useEffect(() => {
     if (initialMessageSentRef.current) return;
@@ -301,11 +539,13 @@ export function ChatArea({
               value={input}
               onChange={setInput}
               onSubmit={handleSend}
-              onStop={stop}
+              onStop={stopAll}
               isLoading={isLoading}
               disabled={!userId}
               chatMode={chatMode}
               onChatModeChange={handleChatModeChange}
+              modelSelection={modelSelection}
+              onModelSelectionChange={handleModelSelectionChange}
               variant="hero"
             />
           </div>
@@ -433,8 +673,8 @@ export function ChatArea({
                 </div>
               )}
 
-              {error &&
-                (error.message?.includes("no_credits") || error.message?.includes("402") ? (
+              {(error || localError) &&
+                (error?.message?.includes("no_credits") || error?.message?.includes("402") ? (
                   <div className="rounded-xl border border-yellow-800 bg-yellow-900/20 px-4 py-3 text-sm text-yellow-300">
                     <p className="font-medium">Out of credits</p>
                     <p className="mt-1 text-yellow-400/80">
@@ -449,7 +689,7 @@ export function ChatArea({
                   </div>
                 ) : (
                   <div className="rounded-xl border border-red-800 bg-red-900/20 px-4 py-3 text-sm text-red-400">
-                    Error: {error.message}
+                    Error: {localError || error?.message}
                   </div>
                 ))}
 
@@ -474,11 +714,13 @@ export function ChatArea({
             value={input}
             onChange={setInput}
             onSubmit={handleSend}
-            onStop={stop}
+            onStop={stopAll}
             isLoading={isLoading}
             disabled={!userId}
             chatMode={chatMode}
             onChatModeChange={handleChatModeChange}
+            modelSelection={modelSelection}
+            onModelSelectionChange={handleModelSelectionChange}
           />
         </>
       )}
