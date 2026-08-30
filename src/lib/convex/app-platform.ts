@@ -121,7 +121,7 @@ async function deployGeneratedConvex(files: PublishFile[], deployKey: string, co
 
     const deploy = await sandbox.runCommand({
       cmd: "sh",
-      args: ["-lc", `npx convex deploy --yes --message ${JSON.stringify(`Cryzo publish ${conversationId}`)}`],
+      args: ["-lc", `npx convex deploy --message ${JSON.stringify(`Cryzo publish ${conversationId}`)}`],
       cwd: CONVEX_SANDBOX_DIR,
       env: { CONVEX_DEPLOY_KEY: deployKey },
     });
@@ -156,13 +156,14 @@ export async function ensureAppConvexBackend({
   )) as BackendRecord | null;
 
   if (!backend) {
-    const created = await createProject(safeProjectName(projectName, conversationId));
+    const projectNameForBackend = safeProjectName(projectName, conversationId);
+    const created = await createProject(projectNameForBackend);
     if (!created.deploymentName || !created.deploymentUrl) {
       throw new Error("Convex project was created without a production deployment");
     }
     backend = {
       projectId: created.projectId,
-      projectName: safeProjectName(projectName, conversationId),
+      projectName: projectNameForBackend,
       deploymentName: created.deploymentName,
       deploymentUrl: created.deploymentUrl,
     };
