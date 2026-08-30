@@ -8,9 +8,21 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 const MOBILE_DIR = "/vercel/sandbox/mobile-wrapper";
+const CREDENTIAL_DIR = `${MOBILE_DIR}/.cryzo-credentials`;
 const MOBILE_TIMEOUT_MS = 45 * 60 * 1000;
 
 type Platform = "ios" | "android";
+type IosSubmitCredentials = {
+  keyContent?: string;
+  keyId?: string;
+  issuerId?: string;
+  appleTeamId?: string;
+  ascAppId?: string;
+};
+type AndroidSubmitCredentials = {
+  serviceAccountJson?: string;
+  track?: "internal" | "alpha" | "beta" | "production";
+};
 type MobileRequest = {
   operation: "check" | "build" | "status" | "submit";
   conversationId: string;
@@ -21,6 +33,8 @@ type MobileRequest = {
   webUrl?: string;
   platform?: Platform;
   buildId?: string;
+  iosSubmit?: IosSubmitCredentials;
+  androidSubmit?: AndroidSubmitCredentials;
 };
 
 function bearer(req: Request) {
@@ -40,13 +54,12 @@ function safeSlug(value: string) {
   );
 }
 
-function safeIdentifier(value: string, platform: Platform) {
+function safeIdentifier(value: string) {
   const cleaned = value
     .trim()
     .replace(/[^A-Za-z0-9._-]/g, "")
     .replace(/^[.-]+|[.-]+$/g, "");
-  if (!cleaned) return platform === "ios" ? "com.cryzo.app" : "com.cryzo.app";
-  return cleaned;
+  return cleaned || "com.cryzo.app";
 }
 
 async function requireConversation(req: Request, conversationId: string) {
@@ -101,18 +114,31 @@ async function run(
   return { exitCode: result.exitCode, output };
 }
 
+function baseEasJson() {
+  return {
+    cli: { version: ">= 16.0.0", appVersionSource: "remote" },
+    build: {
+      production: {
+        distribution: "store",
+        autoIncrement: true,
+      },
+    },
+    submit: {
+      production: {},
+    },
+  };
+}
+
 function wrapperFiles({
   appName,
   slug,
   webUrl,
-  iosIdentifier,
-  androidIdentifier,
+  identifier,
 }: {
   appName: string;
   slug: string;
   webUrl: string;
-  iosIdentifier: string;
-  androidIdentifier: string;
+  identifier: string;
 }) {
   const packageJson = {
     name: slug,
@@ -137,28 +163,15 @@ function wrapperFiles({
       orientation: "default",
       userInterfaceStyle: "automatic",
       ios: {
-        bundleIdentifier: iosIdentifier,
+        bundleIdentifier: identifier,
         supportsTablet: true,
       },
       android: {
-        package: androidIdentifier,
+        package: identifier,
       },
       extra: {
         cryzoWebUrl: webUrl,
       },
-    },
-  };
-
-  const easJson = {
-    cli: { version: ">= 16.0.0", appVersionSource: "remote" },
-    build: {
-      production: {
-        distribution: "store",
-        autoIncrement: true,
-      },
-    },
-    submit: {
-      production: {},
     },
   };
 
@@ -167,7 +180,7 @@ function wrapperFiles({
   return [
     { path: `${MOBILE_DIR}/package.json`, content: Buffer.from(JSON.stringify(packageJson, null, 2), "utf8") },
     { path: `${MOBILE_DIR}/app.json`, content: Buffer.from(JSON.stringify(appJson, null, 2), "utf8") },
-    { path: `${MOBILE_DIR}/eas.json`, content: Buffer.from(JSON.stringify(easJson, null, 2), "utf8") },
+    { path: `${MOBILE_DIR}/eas.json`, content: Buffer.from(JSON.stringify(baseEasJson(), null, 2), "utf8") },
     { path: `${MOBILE_DIR}/App.js`, content: Buffer.from(appSource, "utf8") },
   ];
 }
@@ -177,9 +190,7 @@ async function prepareProject(
   body: Required<Pick<MobileRequest, "expoToken" | "expoAccount" | "appName" | "identifier" | "webUrl" | "platform">>,
 ) {
   const slug = safeSlug(body.appName);
-  const identifier = safeIdentifier(body.identifier, body.platform);
-  const iosIdentifier = body.platform === "ios" ? identifier : identifier;
-  const androidIdentifier = body.platform === "android" ? identifier : identifier;
+  const identifier = safeIdentifier(body.identifier);
 
   await sandbox.runCommand("mkdir", ["-p", MOBILE_DIR]);
   await sandbox.writeFiles(
@@ -187,8 +198,7 @@ async function prepareProject(
       appName: body.appName,
       slug,
       webUrl: body.webUrl,
-      iosIdentifier,
-      androidIdentifier,
+      identifier,
     }),
   );
 
@@ -236,6 +246,83 @@ function parseBuildJson(output: string) {
   }
 }
 
+async function configureSubmitCredentials(
+  sandbox: Sandbox,
+  body: MobileRequest,
+) {
+  await run(sandbox, `rm -rf ${JSON.stringify(CREDENTIAL_DIR)} && mkdir -p ${JSON.stringify(CREDENTIAL_DIR)}`);
+
+  if (body.platform === "ios") {
+    const credentials = body.iosSubmit;
+    if (
+      !credentials?.keyContent?.trim() ||
+      !credentials.keyId?.trim() ||
+      !credentials.issuerId?.trim() ||
+      !credentials.ascAppId?.trim()
+    ) {
+      throw new Error("iOS submission requires the App Store Connect .p8 key, Key ID, Issuer ID, and App Store Connect App ID");
+    }
+    const keyPath = `${CREDENTIAL_DIR}/AuthKey_${credentials.keyId.trim()}.p8`;
+    await sandbox.writeFiles([
+      {
+        path: keyPath,
+        content: Buffer.from(credentials.keyContent.trim() + "\n", "utf8"),
+      },
+    ]);
+    const easJson = baseEasJson();
+    (easJson.submit.production as any) = {
+      ios: {
+        ascApiKeyPath: `.cryzo-credentials/AuthKey_${credentials.keyId.trim()}.p8`,
+        ascApiKeyIssuerId: credentials.issuerId.trim(),
+        ascApiKeyId: credentials.keyId.trim(),
+        ascAppId: credentials.ascAppId.trim(),
+        ...(credentials.appleTeamId?.trim()
+          ? { appleTeamId: credentials.appleTeamId.trim() }
+          : {}),
+      },
+    };
+    await sandbox.writeFiles([
+      {
+        path: `${MOBILE_DIR}/eas.json`,
+        content: Buffer.from(JSON.stringify(easJson, null, 2), "utf8"),
+      },
+    ]);
+    return;
+  }
+
+  if (body.platform === "android") {
+    const credentials = body.androidSubmit;
+    if (!credentials?.serviceAccountJson?.trim()) {
+      throw new Error("Android submission requires a Google Play service-account JSON key");
+    }
+    try {
+      JSON.parse(credentials.serviceAccountJson);
+    } catch {
+      throw new Error("The Google Play service-account file is not valid JSON");
+    }
+    await sandbox.writeFiles([
+      {
+        path: `${CREDENTIAL_DIR}/google-service-account.json`,
+        content: Buffer.from(credentials.serviceAccountJson.trim() + "\n", "utf8"),
+      },
+    ]);
+    const easJson = baseEasJson();
+    (easJson.submit.production as any) = {
+      android: {
+        serviceAccountKeyPath: ".cryzo-credentials/google-service-account.json",
+        track: credentials.track || "internal",
+        releaseStatus: "draft",
+      },
+    };
+    await sandbox.writeFiles([
+      {
+        path: `${MOBILE_DIR}/eas.json`,
+        content: Buffer.from(JSON.stringify(easJson, null, 2), "utf8"),
+      },
+    ]);
+  }
+}
+
 export async function POST(req: Request) {
   try {
     const body = (await req.json()) as MobileRequest;
@@ -258,7 +345,10 @@ export async function POST(req: Request) {
       let webReachable = false;
       if (body.webUrl && /^https:\/\//i.test(body.webUrl)) {
         try {
-          const response = await fetch(body.webUrl, { method: "HEAD", redirect: "follow", cache: "no-store" });
+          let response = await fetch(body.webUrl, { method: "HEAD", redirect: "follow", cache: "no-store" });
+          if (response.status === 405) {
+            response = await fetch(body.webUrl, { method: "GET", redirect: "follow", cache: "no-store" });
+          }
           webReachable = response.ok;
           if (!response.ok) issues.push(`Published web app returned HTTP ${response.status}.`);
         } catch {
@@ -270,6 +360,7 @@ export async function POST(req: Request) {
         success: issues.length === 0,
         ready: issues.length === 0,
         webReachable,
+        wrapperType: "expo-webview",
         issues,
       });
     }
@@ -303,16 +394,21 @@ export async function POST(req: Request) {
       if (!body.platform || !body.buildId) {
         return Response.json({ error: "Missing platform or buildId" }, { status: 400 });
       }
-      const result = await run(
-        sandbox,
-        `npx --yes eas-cli@latest submit --platform ${body.platform} --id ${JSON.stringify(body.buildId)} --profile production --non-interactive --no-wait`,
-        env,
-      );
-      return Response.json({
-        success: true,
-        status: "submission-started",
-        output: result.output.slice(-12000),
-      });
+      try {
+        await configureSubmitCredentials(sandbox, body);
+        const result = await run(
+          sandbox,
+          `npx --yes eas-cli@latest submit --platform ${body.platform} --id ${JSON.stringify(body.buildId)} --profile production --non-interactive --no-wait`,
+          env,
+        );
+        return Response.json({
+          success: true,
+          status: "submission-started",
+          output: result.output.slice(-12000),
+        });
+      } finally {
+        await run(sandbox, `rm -rf ${JSON.stringify(CREDENTIAL_DIR)}`, env, true);
+      }
     }
 
     if (body.operation !== "build") {
@@ -356,7 +452,7 @@ export async function POST(req: Request) {
         artifactUrl: build.artifacts?.buildUrl || build.artifacts?.applicationArchiveUrl,
         status: build.status || "queued",
         appName: body.appName.trim(),
-        identifier: safeIdentifier(body.identifier, body.platform),
+        identifier: safeIdentifier(body.identifier),
         webUrl: body.webUrl.trim(),
       },
       { token: authToken },
@@ -365,6 +461,7 @@ export async function POST(req: Request) {
     return Response.json({
       success: true,
       platform: body.platform,
+      wrapperType: "expo-webview",
       expoProjectId: prepared.expoProjectId,
       buildId: build.id,
       status: build.status || "queued",
@@ -374,7 +471,14 @@ export async function POST(req: Request) {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Mobile build failed";
-    const status = message === "Unauthorized" ? 401 : message === "Conversation not found" ? 404 : 500;
+    const status =
+      message === "Unauthorized"
+        ? 401
+        : message === "Conversation not found"
+          ? 404
+          : /requires|invalid|missing/i.test(message)
+            ? 400
+            : 500;
     return Response.json({ error: message }, { status });
   }
 }
