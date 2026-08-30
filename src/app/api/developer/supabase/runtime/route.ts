@@ -57,6 +57,9 @@ export async function POST(req: Request) {
       `VITE_SUPABASE_ANON_KEY=${project.publicKey}`,
       `VITE_SUPABASE_PUBLISHABLE_KEY=${project.publicKey}`,
       `VITE_CRYZO_SUPABASE_PROJECT_REF=${project.ref || ""}`,
+      `EXPO_PUBLIC_SUPABASE_URL=${project.url}`,
+      `EXPO_PUBLIC_SUPABASE_ANON_KEY=${project.publicKey}`,
+      `EXPO_PUBLIC_CRYZO_SUPABASE_PROJECT_REF=${project.ref || ""}`,
       "",
     ].join("\n");
 
@@ -64,7 +67,11 @@ export async function POST(req: Request) {
       { path: `${PROJECT_DIR}/.env.local`, content: Buffer.from(env, "utf8") },
     ]);
 
-    return Response.json({ success: true, project: project.ref || null });
+    return Response.json({
+      success: true,
+      project: project.ref || null,
+      targets: conversation.projectPlatforms || ["web"],
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to configure Supabase runtime";
     return Response.json({ error: message }, { status: 500 });
