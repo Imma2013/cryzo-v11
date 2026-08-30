@@ -114,10 +114,15 @@ export default defineSchema({
     userId: v.id("users"),
     plan: v.union(
       v.literal("free"),
+      v.literal("starter"),
+      v.literal("builder"),
       v.literal("pro"),
+      v.literal("elite"),
+      // Legacy values are retained so existing workspaces migrate without downtime.
       v.literal("pro_plus"),
       v.literal("business"),
     ),
+    billingCycle: v.optional(v.union(v.literal("monthly"), v.literal("yearly"))),
     stripeCustomerId: v.optional(v.string()),
     stripeSubscriptionId: v.optional(v.string()),
     status: v.union(
@@ -126,12 +131,28 @@ export default defineSchema({
       v.literal("past_due"),
     ),
     currentPeriodEnd: v.number(),
+
+    // Legacy single-credit fields. New code mirrors message-credit state into these
+    // fields so older clients/webhooks keep working during the rollout.
     monthlyCredits: v.number(),
     creditsUsed: v.number(),
     rolloverCredits: v.number(),
     rolloverExpiresAt: v.optional(v.number()),
     topUpCredits: v.optional(v.number()),
     topUpExpiresAt: v.optional(v.number()),
+
+    // Message credits meter AI usage for Cryzo-managed premium models only.
+    messageMonthlyCredits: v.optional(v.number()),
+    messageCreditsUsed: v.optional(v.number()),
+    messageRolloverCredits: v.optional(v.number()),
+    messageRolloverExpiresAt: v.optional(v.number()),
+    messageTopUpCredits: v.optional(v.number()),
+    messageTopUpExpiresAt: v.optional(v.number()),
+
+    // Integration credits meter Composio/runtime tool actions separately.
+    integrationMonthlyCredits: v.optional(v.number()),
+    integrationCreditsUsed: v.optional(v.number()),
+
     dailyCreditsUsed: v.optional(v.number()),
     dailyResetAt: v.optional(v.number()),
     freeMonthlyCreditsUsed: v.optional(v.number()),
@@ -145,10 +166,14 @@ export default defineSchema({
 
   creditLedger: defineTable({
     userId: v.id("users"),
+    creditType: v.optional(v.union(v.literal("message"), v.literal("integration"))),
     amount: v.number(),
     balance: v.number(),
     reason: v.string(),
     description: v.optional(v.string()),
+    providerId: v.optional(v.string()),
+    modelId: v.optional(v.string()),
+    toolName: v.optional(v.string()),
     stripeEventId: v.optional(v.string()),
     messageId: v.optional(v.id("messages")),
     createdAt: v.number(),
