@@ -1,3 +1,8 @@
+import {
+  DEFAULT_MANAGED_MODEL_ID,
+  getManagedModel,
+} from "@/lib/ai/managed-models";
+
 export type CredentialMode = "cryzo" | "device" | "account";
 
 export type ModelSelection = {
@@ -11,6 +16,7 @@ export type ProviderDefinition = {
   id: string;
   name: string;
   catalogId?: string;
+  logoSlug?: string;
   apiKeyLabel?: string;
   apiKeyPlaceholder?: string;
   defaultBaseURL?: string;
@@ -22,7 +28,7 @@ export type ProviderDefinition = {
 
 export const DEFAULT_MODEL_SELECTION: ModelSelection = {
   providerId: "cryzo",
-  modelId: "minimax/minimax-m3:free",
+  modelId: DEFAULT_MANAGED_MODEL_ID,
   credentialMode: "cryzo",
 };
 
@@ -30,30 +36,32 @@ export const PROVIDERS: ProviderDefinition[] = [
   {
     id: "cryzo",
     name: "Cryzo",
-    catalogId: "openrouter",
-    description: "Cryzo-managed model access. No API key required.",
+    description: "Free rotating models plus Cryzo-managed premium models. No API key required.",
   },
   {
     id: "openrouter",
     name: "OpenRouter",
+    logoSlug: "openrouter",
     catalogId: "openrouter",
     apiKeyLabel: "OpenRouter API key",
     apiKeyPlaceholder: "sk-or-v1-...",
     defaultBaseURL: "https://openrouter.ai/api/v1",
-    description: "Use any model available through your OpenRouter account.",
+    description: "Bring your OpenRouter key. BYOK model usage does not consume Cryzo message credits.",
   },
   {
     id: "openai",
     name: "OpenAI",
+    logoSlug: "openai",
     catalogId: "openai",
     apiKeyLabel: "OpenAI API key",
     apiKeyPlaceholder: "sk-...",
     defaultBaseURL: "https://api.openai.com/v1",
-    description: "Use OpenAI models with your own API key.",
+    description: "Use OpenAI models with your own API key and no Cryzo message-credit charge.",
   },
   {
     id: "anthropic",
     name: "Anthropic",
+    logoSlug: "anthropic",
     catalogId: "anthropic",
     apiKeyLabel: "Anthropic API key",
     apiKeyPlaceholder: "sk-ant-...",
@@ -64,15 +72,18 @@ export const PROVIDERS: ProviderDefinition[] = [
   {
     id: "google",
     name: "Google Gemini",
+    logoSlug: "googlegemini",
     catalogId: "google",
     apiKeyLabel: "Google AI API key",
     apiKeyPlaceholder: "AIza...",
+    defaultBaseURL: "https://generativelanguage.googleapis.com/v1beta/openai/",
     native: "google",
     description: "Use Gemini models with a Google AI Studio API key.",
   },
   {
     id: "xai",
     name: "xAI",
+    logoSlug: "x",
     catalogId: "xai",
     apiKeyLabel: "xAI API key",
     defaultBaseURL: "https://api.x.ai/v1",
@@ -81,6 +92,7 @@ export const PROVIDERS: ProviderDefinition[] = [
   {
     id: "groq",
     name: "Groq",
+    logoSlug: "groq",
     catalogId: "groq",
     apiKeyLabel: "Groq API key",
     defaultBaseURL: "https://api.groq.com/openai/v1",
@@ -89,6 +101,7 @@ export const PROVIDERS: ProviderDefinition[] = [
   {
     id: "deepseek",
     name: "DeepSeek",
+    logoSlug: "deepseek",
     catalogId: "deepseek",
     apiKeyLabel: "DeepSeek API key",
     defaultBaseURL: "https://api.deepseek.com/v1",
@@ -97,6 +110,7 @@ export const PROVIDERS: ProviderDefinition[] = [
   {
     id: "mistral",
     name: "Mistral",
+    logoSlug: "mistralai",
     catalogId: "mistral",
     apiKeyLabel: "Mistral API key",
     defaultBaseURL: "https://api.mistral.ai/v1",
@@ -113,6 +127,7 @@ export const PROVIDERS: ProviderDefinition[] = [
   {
     id: "cerebras",
     name: "Cerebras",
+    logoSlug: "cerebras",
     catalogId: "cerebras",
     apiKeyLabel: "Cerebras API key",
     defaultBaseURL: "https://api.cerebras.ai/v1",
@@ -121,11 +136,12 @@ export const PROVIDERS: ProviderDefinition[] = [
   {
     id: "nvidia",
     name: "NVIDIA NIM",
+    logoSlug: "nvidia",
     catalogId: "nvidia",
     apiKeyLabel: "NVIDIA API key",
     apiKeyPlaceholder: "nvapi-...",
     defaultBaseURL: "https://integrate.api.nvidia.com/v1",
-    description: "Use NVIDIA-hosted models through the OpenAI-compatible NIM API.",
+    description: "Use NVIDIA-hosted models with your own key.",
   },
   {
     id: "moonshotai",
@@ -146,6 +162,7 @@ export const PROVIDERS: ProviderDefinition[] = [
   {
     id: "ollama",
     name: "Ollama",
+    logoSlug: "ollama",
     defaultBaseURL: "http://127.0.0.1:11434/v1",
     local: true,
     description: "Connect a local Ollama server. Enable CORS for cryzo.me in Ollama.",
@@ -233,6 +250,7 @@ export function storeSessionProviderBaseURL(providerId: string, value: string) {
 }
 
 export function displayModelName(modelId: string) {
+  if (modelId.startsWith("cryzo/")) return getManagedModel(modelId).name;
   const tail = modelId.split("/").pop() || modelId;
   return tail
     .replace(/[-_]+/g, " ")
