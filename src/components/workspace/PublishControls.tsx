@@ -9,6 +9,7 @@ import {
   ExternalLink,
   Globe2,
   Loader2,
+  LockKeyhole,
   RefreshCw,
   Rocket,
   Smartphone,
@@ -23,6 +24,10 @@ import {
   readSupabaseProject,
   storeDeveloperToken,
 } from "@/lib/developer-connections";
+import {
+  StoreReadinessReport,
+  type StoreReadinessReportData,
+} from "@/components/workspace/StoreReadinessReport";
 
 type PublishFile = { path: string; content: string };
 type PublishStatus = {
@@ -36,6 +41,12 @@ type CryzoHostingTarget = {
   url?: string;
   deploymentId?: string;
   customDomain?: string;
+};
+type ConvexBackend = {
+  projectId?: number;
+  projectName?: string;
+  deploymentName?: string;
+  deploymentUrl?: string;
 };
 type MobileBuild = {
   platform: "ios" | "android";
@@ -304,6 +315,10 @@ function DeployPublishModal({
   const [desiredCryzoUrl, setDesiredCryzoUrl] = useState<string>(`https://${defaultName}.cryzo.me`);
   const [status, setStatus] = useState<PublishStatus>({ type: "idle" });
   const [buildLog, setBuildLog] = useState("");
+  const [plan, setPlan] = useState("free");
+  const [brandingRequired, setBrandingRequired] = useState(true);
+  const [managedConvexConfigured, setManagedConvexConfigured] = useState(false);
+  const [convexBackend, setConvexBackend] = useState<ConvexBackend | null>(null);
 
   const [mobilePlatform, setMobilePlatform] = useState<"ios" | "android">("ios");
   const [mobileAppName, setMobileAppName] = useState(defaultName.replace(/-/g, " "));
@@ -312,6 +327,9 @@ function DeployPublishModal({
   const [mobileStatus, setMobileStatus] = useState<PublishStatus>({ type: "idle" });
   const [mobileCheckPassed, setMobileCheckPassed] = useState(false);
   const [mobileBuild, setMobileBuild] = useState<MobileBuild | null>(null);
+  const [mobileReport, setMobileReport] = useState<StoreReadinessReportData | null>(null);
+  const [managedBuildIncluded, setManagedBuildIncluded] = useState(false);
+  const [managedSubmissionIncluded, setManagedSubmissionIncluded] = useState(false);
   const [iosKeyContent, setIosKeyContent] = useState("");
   const [iosKeyId, setIosKeyId] = useState("");
   const [iosIssuerId, setIosIssuerId] = useState("");
@@ -330,6 +348,10 @@ function DeployPublishModal({
       const data = await response.json();
       if (cancelled || !response.ok) return;
       setHostingConfigured(Boolean(data.configured));
+      setManagedConvexConfigured(Boolean(data.managedConvexConfigured));
+      setPlan(data.plan || "free");
+      setBrandingRequired(Boolean(data.brandingRequired));
+      if (data.backend) setConvexBackend(data.backend);
       if (data.hostingDomain) setHostingDomain(data.hostingDomain);
       if (data.desiredUrl) setDesiredCryzoUrl(data.desiredUrl);
       if (data.target) {
@@ -348,7 +370,7 @@ function DeployPublishModal({
 
   const deployCryzo = async () => {
     if (!authToken) return setStatus({ type: "error", message: "Your Cryzo session is still loading. Try again." });
-    setStatus({ type: "loading", message: existingTarget ? "Publishing a new version..." : "Creating your Cryzo-hosted app..." });
+    setStatus({ type: "loading", message: existingTarget ? "Publishing app and syncing its backend..." : "Creating your Cryzo app and isolated backend..." });
     const supabase = readSupabaseProject();
     const response = await fetch("/api/publish/cryzo", {
       method: "POST",
@@ -368,6 +390,9 @@ function DeployPublishModal({
     }
 
     setHostingConfigured(true);
+    setPlan(data.plan || plan);
+    setBrandingRequired(Boolean(data.brandingRequired));
+    setConvexBackend(data.convexBackend || null);
     setCryzoSlug(data.slug);
     setDesiredCryzoUrl(data.desiredUrl || `https://${data.slug}.${hostingDomain}`);
     setExistingTarget({
@@ -380,7 +405,7 @@ function DeployPublishModal({
     setMobileWebUrl(data.url || data.desiredUrl || "");
 
     if (data.subdomainAssigned) {
-      setStatus({ type: "success", message: "Published to your permanent Cryzo URL.", url: data.url });
+      setStatus({ type: "success", message: data.convexBackend ? "Published with its isolated Convex backend." : "Published to your permanent Cryzo URL.", url: data.url });
     } else {
       const dnsText = data.dns
         ? ` One-time DNS needed: ${data.dns.type} ${data.dns.name} → ${data.dns.value}.`
@@ -454,15 +479,20 @@ function DeployPublishModal({
   };
 
   const checkMobile = async () => {
-    setMobileStatus({ type: "loading", message: "Checking store readiness..." });
+    setMobileStatus({ type: "loading", message: "Scanning store readiness..." });
+    setMobileReport(null);
     try {
       const data = await mobileRequest("check");
+      setMobileReport(data.storeReadiness || null);
+      setManagedBuildIncluded(Boolean(data.managedBuildIncluded));
+      setManagedSubmissionIncluded(Boolean(data.managedSubmissionIncluded));
+      setPlan(data.plan || plan);
       if (!data.ready) {
         setMobileCheckPassed(false);
-        return setMobileStatus({ type: "error", message: (data.issues || []).join(" ") || "App is not ready." });
+        return setMobileStatus({ type: "error", message: (data.issues || []).join(" ") || "App has blocking store-readiness issues." });
       }
       setMobileCheckPassed(true);
-      setMobileStatus({ type: "success", message: "App passed the basic Cryzo store-readiness checks." });
+      setMobileStatus({ type: "success", message: (data.warnings || []).length ? "Scan complete. No blocking issues; review warnings below." : "Scan complete. No blocking issues found." });
     } catch (error) {
       setMobileCheckPassed(false);
       setMobileStatus({ type: "error", message: error instanceof Error ? error.message : "Check failed" });
@@ -470,16 +500,13 @@ function DeployPublishModal({
   };
 
   const buildMobile = async () => {
+    if (!managedBuildIncluded) {
+      return setMobileStatus({ type: "error", message: "Managed EAS builds are included on Builder and above. The readiness scan and source stay free." });
+    }
     setMobileStatus({ type: "loading", message: `Starting ${mobilePlatform === "ios" ? "iOS" : "Android"} EAS build...` });
     try {
       const data = await mobileRequest("build");
-      setMobileBuild({
-        platform: mobilePlatform,
-        buildId: data.buildId,
-        status: data.status,
-        buildUrl: data.buildUrl,
-        artifactUrl: data.artifactUrl,
-      });
+      setMobileBuild({ platform: mobilePlatform, buildId: data.buildId, status: data.status, buildUrl: data.buildUrl, artifactUrl: data.artifactUrl });
       setMobileStatus({ type: "success", message: `EAS build ${data.status || "queued"}.`, url: data.buildUrl });
     } catch (error) {
       setMobileStatus({ type: "error", message: error instanceof Error ? error.message : "Build failed" });
@@ -500,27 +527,17 @@ function DeployPublishModal({
 
   const submitMobile = async () => {
     if (!mobileBuild) return;
+    if (!managedSubmissionIncluded) {
+      return setMobileStatus({ type: "error", message: "One-click store submission is included on Builder and above. You can still submit the exported project yourself." });
+    }
     setMobileStatus({ type: "loading", message: `Submitting ${mobileBuild.platform === "ios" ? "to App Store Connect" : "to Google Play"}...` });
     try {
       await mobileRequest("submit", {
         buildId: mobileBuild.buildId,
         platform: mobileBuild.platform,
         ...(mobileBuild.platform === "ios"
-          ? {
-              iosSubmit: {
-                keyContent: iosKeyContent,
-                keyId: iosKeyId,
-                issuerId: iosIssuerId,
-                appleTeamId: iosTeamId,
-                ascAppId: iosAscAppId,
-              },
-            }
-          : {
-              androidSubmit: {
-                serviceAccountJson: androidServiceAccountJson,
-                track: androidTrack,
-              },
-            }),
+          ? { iosSubmit: { keyContent: iosKeyContent, keyId: iosKeyId, issuerId: iosIssuerId, appleTeamId: iosTeamId, ascAppId: iosAscAppId } }
+          : { androidSubmit: { serviceAccountJson: androidServiceAccountJson, track: androidTrack } }),
       });
       setMobileStatus({
         type: "success",
@@ -562,6 +579,19 @@ function DeployPublishModal({
 
             {activeProvider === "cryzo" && (
               <div className="space-y-4">
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-3">
+                    <div className="text-[11px] uppercase tracking-wide text-zinc-500">Managed hosting</div>
+                    <div className="mt-1 text-sm text-white">{brandingRequired ? "Built with Cryzo badge" : "Branding removed"}</div>
+                    <div className="mt-1 text-xs leading-5 text-zinc-500">{brandingRequired ? "Free managed deployments include a subtle badge. Exported and BYO deployments stay clean." : `${plan} includes unbranded managed hosting.`}</div>
+                  </div>
+                  <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-3">
+                    <div className="text-[11px] uppercase tracking-wide text-zinc-500">App backend</div>
+                    <div className="mt-1 text-sm text-white">{convexBackend?.deploymentUrl ? "Isolated Convex backend" : managedConvexConfigured ? "Provisioned when needed" : "Managed Convex not configured"}</div>
+                    <div className="mt-1 text-xs leading-5 text-zinc-500">{convexBackend?.deploymentUrl || "Apps containing Convex code get their own project and production deployment automatically."}</div>
+                  </div>
+                </div>
+
                 <div>
                   <label className="mb-1.5 block text-xs font-medium text-zinc-400">Cryzo URL</label>
                   <div className="flex h-10 items-center overflow-hidden rounded-lg border border-zinc-800 bg-zinc-900">
@@ -569,7 +599,7 @@ function DeployPublishModal({
                     <input value={cryzoSlug} onChange={(event) => setCryzoSlug(sanitizeName(event.target.value, "app").slice(0, 48))} className="min-w-0 flex-1 bg-transparent px-2 text-base text-white outline-none sm:text-sm" aria-label="Cryzo URL slug" />
                     <span className="shrink-0 px-3 text-xs text-zinc-500">.{hostingDomain}</span>
                   </div>
-                  <p className="mt-1.5 text-xs text-zinc-500">Built-in Cryzo URLs are included. Custom domains can be added separately later.</p>
+                  <p className="mt-1.5 text-xs text-zinc-500">Built-in Cryzo URLs are included. Renaming a managed Cryzo URL is Starter+; DIY Vercel domains remain yours.</p>
                 </div>
 
                 {existingTarget?.url && (
@@ -582,6 +612,9 @@ function DeployPublishModal({
 
                 {hostingConfigured === false && (
                   <p className="rounded-lg border border-amber-900/70 bg-amber-950/30 px-3 py-2 text-xs leading-5 text-amber-300">Managed hosting needs CRYZO_VERCEL_TOKEN on the Cryzo server. Your Vercel tab remains available.</p>
+                )}
+                {managedConvexConfigured === false && files.some((file) => file.path.startsWith("convex/")) && (
+                  <p className="rounded-lg border border-amber-900/70 bg-amber-950/30 px-3 py-2 text-xs leading-5 text-amber-300">This app contains Convex code. Set CRYZO_CONVEX_TEAM_TOKEN and CRYZO_CONVEX_TEAM_ID on Cryzo to enable isolated backend provisioning.</p>
                 )}
 
                 <button type="button" onClick={() => void deployCryzo()} disabled={!projectName.trim() || !cryzoSlug.trim() || isLoading || !authToken} className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-500 disabled:opacity-40">
@@ -615,29 +648,34 @@ function DeployPublishModal({
           <div className="space-y-5">
             <div>
               <h3 className="text-base font-semibold text-white">Prepare for App Store and Google Play</h3>
-              <p className="mt-1 text-xs leading-5 text-zinc-500">Cryzo wraps your published web app in an Expo/React Native WebView, then uses EAS Build and EAS Submit.</p>
+              <p className="mt-1 text-xs leading-5 text-zinc-500">The readiness scan is free. Cryzo-managed EAS builds and one-click store submission are Builder+ conveniences; source export and manual submission remain available.</p>
             </div>
 
             <div className="grid grid-cols-2 gap-2">
-              <ProviderButton active={mobilePlatform === "ios"} label="iOS" icon={<Store size={15} />} onClick={() => { setMobilePlatform("ios"); setMobileCheckPassed(false); setMobileIdentifier(`com.cryzo.${sanitizeName(defaultName, "app").replace(/-/g, "")}`); }} />
-              <ProviderButton active={mobilePlatform === "android"} label="Android" icon={<Smartphone size={15} />} onClick={() => { setMobilePlatform("android"); setMobileCheckPassed(false); setMobileIdentifier(`com.cryzo.${sanitizeName(defaultName, "app").replace(/-/g, "")}`); }} />
+              <ProviderButton active={mobilePlatform === "ios"} label="iOS" icon={<Store size={15} />} onClick={() => { setMobilePlatform("ios"); setMobileCheckPassed(false); setMobileReport(null); setMobileIdentifier(`com.cryzo.${sanitizeName(defaultName, "app").replace(/-/g, "")}`); }} />
+              <ProviderButton active={mobilePlatform === "android"} label="Android" icon={<Smartphone size={15} />} onClick={() => { setMobilePlatform("android"); setMobileCheckPassed(false); setMobileReport(null); setMobileIdentifier(`com.cryzo.${sanitizeName(defaultName, "app").replace(/-/g, "")}`); }} />
             </div>
 
             <TextField label="Published web URL" value={mobileWebUrl} onChange={setMobileWebUrl} placeholder="https://your-app.cryzo.me" />
             <TextField label="App name" value={mobileAppName} onChange={setMobileAppName} />
             <TextField label={mobilePlatform === "ios" ? "Bundle identifier" : "Android package"} value={mobileIdentifier} onChange={setMobileIdentifier} placeholder="com.yourcompany.app" />
             <TextField label="Expo account / organization" value={expoAccount} onChange={setExpoAccount} placeholder="your-expo-account" />
-            <TextField label="Expo access token" value={expoToken} onChange={setExpoToken} type="password" placeholder="Expo access token" helper={<TokenHelp href="https://expo.dev/accounts/[account]/settings/access-tokens" note="Used for EAS Build/Submit. Saved only on this device when you publish." />} />
+            <TextField label="Expo access token" value={expoToken} onChange={setExpoToken} type="password" placeholder="Expo access token" helper={<TokenHelp href="https://expo.dev/accounts/[account]/settings/access-tokens" note="Needed only for Cryzo-managed EAS build/submit. Saved on this device when used." />} />
 
-            <MobileStep number={1} title="Check Your App" complete={mobileCheckPassed}>
+            <MobileStep number={1} title="Scan Store Readiness" complete={mobileCheckPassed}>
               <button type="button" onClick={() => void checkMobile()} disabled={mobileLoading} className="inline-flex h-9 items-center gap-2 rounded-lg bg-white px-3 text-sm font-medium text-black disabled:opacity-40">
-                {mobileLoading ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}Run checks
+                {mobileLoading ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}Run free scan
               </button>
             </MobileStep>
 
+            {mobileReport && <StoreReadinessReport report={mobileReport} />}
+
             <MobileStep number={2} title="Build Store Files" complete={Boolean(mobileBuild)}>
-              <button type="button" onClick={() => void buildMobile()} disabled={!mobileCheckPassed || mobileLoading} className="inline-flex h-9 items-center gap-2 rounded-lg bg-blue-600 px-3 text-sm font-medium text-white disabled:opacity-40">
-                {mobileLoading ? <Loader2 size={14} className="animate-spin" /> : <Smartphone size={14} />}Build with EAS
+              {!managedBuildIncluded && mobileReport && (
+                <PlanGate title="Builder+ managed build" text="Your scan and source are still free. Upgrade only if you want Cryzo to run EAS Build for you." />
+              )}
+              <button type="button" onClick={() => void buildMobile()} disabled={!mobileCheckPassed || mobileLoading || !managedBuildIncluded} className="inline-flex h-9 items-center gap-2 rounded-lg bg-blue-600 px-3 text-sm font-medium text-white disabled:opacity-40">
+                {mobileLoading ? <Loader2 size={14} className="animate-spin" /> : managedBuildIncluded ? <Smartphone size={14} /> : <LockKeyhole size={14} />}Build with EAS
               </button>
               {mobileBuild && (
                 <button type="button" onClick={() => void refreshMobile()} disabled={mobileLoading} className="ml-2 inline-flex h-9 items-center gap-2 rounded-lg border border-zinc-700 px-3 text-sm text-zinc-200 disabled:opacity-40">
@@ -648,20 +686,16 @@ function DeployPublishModal({
 
             <MobileStep number={3} title="Submit Your App" complete={false}>
               <div className="space-y-3">
+                {!managedSubmissionIncluded && mobileReport && (
+                  <PlanGate title="Builder+ one-click submission" text="You can still submit the generated Expo app manually. Builder+ lets Cryzo handle the EAS submission step." />
+                )}
                 <p className="rounded-lg border border-zinc-800 bg-zinc-900/60 px-3 py-2 text-xs leading-5 text-zinc-400">
                   Store credentials are sent only when you press Submit. Cryzo writes them into the temporary EAS workspace, starts the submission, and deletes those credential files immediately afterward.
                 </p>
 
                 {mobileBuild?.platform === "ios" ? (
                   <div className="space-y-3">
-                    <SecretTextarea
-                      label="App Store Connect .p8 API key"
-                      value={iosKeyContent}
-                      onChange={setIosKeyContent}
-                      placeholder="-----BEGIN PRIVATE KEY-----"
-                      accept=".p8,text/plain"
-                      uploadLabel="Load .p8 file"
-                    />
+                    <SecretTextarea label="App Store Connect .p8 API key" value={iosKeyContent} onChange={setIosKeyContent} placeholder="-----BEGIN PRIVATE KEY-----" accept=".p8,text/plain" uploadLabel="Load .p8 file" />
                     <div className="grid gap-3 sm:grid-cols-2">
                       <TextField label="Key ID" value={iosKeyId} onChange={setIosKeyId} placeholder="ABC123DEFG" />
                       <TextField label="Issuer ID" value={iosIssuerId} onChange={setIosIssuerId} placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" />
@@ -672,21 +706,10 @@ function DeployPublishModal({
                   </div>
                 ) : mobileBuild?.platform === "android" ? (
                   <div className="space-y-3">
-                    <SecretTextarea
-                      label="Google Play service-account JSON"
-                      value={androidServiceAccountJson}
-                      onChange={setAndroidServiceAccountJson}
-                      placeholder={'{"type":"service_account", ...}'}
-                      accept="application/json,.json"
-                      uploadLabel="Load JSON key"
-                    />
+                    <SecretTextarea label="Google Play service-account JSON" value={androidServiceAccountJson} onChange={setAndroidServiceAccountJson} placeholder={'{"type":"service_account", ...}'} accept="application/json,.json" uploadLabel="Load JSON key" />
                     <label className="block">
                       <span className="mb-1.5 block text-xs font-medium text-zinc-400">Google Play track</span>
-                      <select
-                        value={androidTrack}
-                        onChange={(event) => setAndroidTrack(event.target.value as typeof androidTrack)}
-                        className="h-10 w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 text-base text-white outline-none focus:border-zinc-600 sm:text-sm"
-                      >
+                      <select value={androidTrack} onChange={(event) => setAndroidTrack(event.target.value as typeof androidTrack)} className="h-10 w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 text-base text-white outline-none focus:border-zinc-600 sm:text-sm">
                         <option value="internal">Internal testing</option>
                         <option value="alpha">Closed / alpha</option>
                         <option value="beta">Open / beta</option>
@@ -699,8 +722,8 @@ function DeployPublishModal({
                   <p className="text-xs text-zinc-500">Build an iOS or Android store file first.</p>
                 )}
 
-                <button type="button" onClick={() => void submitMobile()} disabled={!mobileBuild || !mobileSubmitReady || mobileLoading} className="inline-flex h-9 items-center gap-2 rounded-lg bg-white px-3 text-sm font-medium text-black disabled:opacity-40">
-                  {mobileLoading ? <Loader2 size={14} className="animate-spin" /> : <Store size={14} />}Submit with EAS
+                <button type="button" onClick={() => void submitMobile()} disabled={!mobileBuild || !mobileSubmitReady || mobileLoading || !managedSubmissionIncluded} className="inline-flex h-9 items-center gap-2 rounded-lg bg-white px-3 text-sm font-medium text-black disabled:opacity-40">
+                  {mobileLoading ? <Loader2 size={14} className="animate-spin" /> : managedSubmissionIncluded ? <Store size={14} /> : <LockKeyhole size={14} />}Submit with EAS
                 </button>
               </div>
             </MobileStep>
@@ -719,6 +742,18 @@ function DeployPublishModal({
         )}
       </div>
     </Modal>
+  );
+}
+
+function PlanGate({ title, text }: { title: string; text: string }) {
+  return (
+    <div className="mb-3 flex gap-3 rounded-lg border border-violet-900/60 bg-violet-950/20 px-3 py-2.5">
+      <LockKeyhole size={15} className="mt-0.5 shrink-0 text-violet-300" />
+      <div>
+        <div className="text-xs font-medium text-violet-200">{title}</div>
+        <div className="mt-0.5 text-xs leading-5 text-zinc-400">{text}</div>
+      </div>
+    </div>
   );
 }
 
@@ -783,28 +818,12 @@ function SecretTextarea({
   return (
     <label className="block">
       <span className="mb-1.5 block text-xs font-medium text-zinc-400">{label}</span>
-      <textarea
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        placeholder={placeholder}
-        rows={5}
-        spellCheck={false}
-        autoComplete="off"
-        className="w-full resize-y rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-[16px] leading-5 text-white outline-none placeholder:text-zinc-600 focus:border-zinc-600 sm:text-sm"
-      />
+      <textarea value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} rows={5} spellCheck={false} autoComplete="off" className="w-full resize-y rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-[16px] leading-5 text-white outline-none placeholder:text-zinc-600 focus:border-zinc-600 sm:text-sm" />
       <span className="mt-2 flex items-center justify-between gap-2 text-xs text-zinc-500">
         <span>{value.trim() ? "Credential loaded" : "Paste it above or choose a file."}</span>
         <span className="relative inline-flex cursor-pointer items-center rounded-lg border border-zinc-700 px-2.5 py-1.5 text-zinc-300 hover:border-zinc-500 hover:text-white">
           {uploadLabel}
-          <input
-            type="file"
-            accept={accept}
-            className="absolute inset-0 cursor-pointer opacity-0"
-            onChange={(event) => {
-              void loadFile(event.target.files?.[0]);
-              event.currentTarget.value = "";
-            }}
-          />
+          <input type="file" accept={accept} className="absolute inset-0 cursor-pointer opacity-0" onChange={(event) => { void loadFile(event.target.files?.[0]); event.currentTarget.value = ""; }} />
         </span>
       </span>
     </label>
