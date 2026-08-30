@@ -1,6 +1,11 @@
 import { fetchMutation, fetchQuery } from "convex/nextjs";
 import { api } from "../../../../../convex/_generated/api";
 import type { Id } from "../../../../../convex/_generated/dataModel";
+import {
+  canRemoveManagedBranding,
+  canUseManagedCustomDomains,
+  entitlementSnapshot,
+} from "@/lib/billing/entitlements";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -48,6 +53,8 @@ const RESERVED_SLUGS = new Set([
   "dashboard", "docs", "help", "login", "mail", "status", "support",
 ]);
 
+const MANAGED_BRANDING_MARKER = "data-cryzo-managed-branding";
+
 function sanitizeSlug(value: string, fallback = "cryzo-app") {
   const slug = value
     .toLowerCase()
@@ -57,6 +64,26 @@ function sanitizeSlug(value: string, fallback = "cryzo-app") {
     .replace(/^-+|-+$/g, "")
     .slice(0, 48);
   return slug || fallback;
+}
+
+/**
+ * Branding is injected only into the deployment payload. The user's generated
+ * source, GitHub export and DIY deployments remain untouched.
+ */
+function withManagedCryzoBranding(files: PublishFile[]) {
+  const index = files.findIndex((file) => file.path.replace(/^\/+/, "") === "index.html");
+  if (index < 0) return files;
+  if (files[index].content.includes(MANAGED_BRANDING_MARKER)) return files;
+
+  const badge = `
+<a ${MANAGED_BRANDING_MARKER} href="https://cryzo.me" target="_blank" rel="noreferrer" aria-label="Built with Cryzo" style="position:fixed!important;right:14px!important;bottom:14px!important;z-index:2147483647!important;display:inline-flex!important;align-items:center!important;gap:6px!important;padding:8px 11px!important;border:1px solid rgba(255,255,255,.16)!important;border-radius:999px!important;background:rgba(18,18,20,.90)!important;color:#fff!important;font:600 12px/1.1 ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif!important;text-decoration:none!important;box-shadow:0 8px 28px rgba(0,0,0,.28)!important;backdrop-filter:blur(12px)!important;-webkit-backdrop-filter:blur(12px)!important"><span aria-hidden="true" style="display:inline-block!important;width:7px!important;height:7px!important;border-radius:999px!important;background:#fff!important"></span>Built with Cryzo</a>`;
+
+  const next = files.map((file) => ({ ...file }));
+  const html = next[index].content;
+  next[index].content = /<\/body>/i.test(html)
+    ? html.replace(/<\/body>/i, `${badge}\n</body>`)
+    : `${html}\n${badge}\n`;
+  return next;
 }
 
 function normalizeFiles(files: PublishFile[]) {
@@ -539,7 +566,12 @@ export async function GET(req: Request) {
   try {
     const conversationId = new URL(req.url).searchParams.get("conversationId") || "";
     if (!conversationId) return Response.json({ error: "Missing conversationId" }, { status: 400 });
-    const { token } = await requireConversation(req, conversationId);
+    const { token, conversation } = await requireConversation(req, conversationId);
+    const subscription = await fetchQuery(
+      api.billing.getSubscription,
+      { userId: conversation.userId },
+      { token },
+    );
     let target = await fetchQuery(
       api.hosting.getCryzoTarget,
       { conversationId: conversationId as Id<"conversations"> },
@@ -613,6 +645,9 @@ export async function GET(req: Request) {
       desiredUrl: target?.slug ? `https://${target.slug}.${hostingDomain}` : null,
       hostingHealth,
       domainStatus,
+      plan: subscription.plan,
+      brandingRequired: !canRemoveManagedBranding(subscription.plan),
+      entitlements: entitlementSnapshot(subscription.plan),
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to load hosting status";
@@ -628,7 +663,13 @@ export async function POST(req: Request) {
       return Response.json({ error: "No files to publish" }, { status: 400 });
     }
 
-    const { token: authToken } = await requireConversation(req, body.conversationId);
+    const { token: authToken, conversation } = await requireConversation(req, body.conversationId);
+    const subscription = await fetchQuery(
+      api.billing.getSubscription,
+      { userId: conversation.userId },
+      { token: authToken },
+    );
+    const canUnbrand = canRemoveManagedBranding(subscription.plan);
     const { platformToken, teamId, hostingDomain } = getPlatformConfig();
     if (!platformToken) {
       return Response.json(
@@ -645,6 +686,23 @@ export async function POST(req: Request) {
       { conversationId: body.conversationId as Id<"conversations"> },
       { token: authToken },
     );
+
+    if (
+      existing?.slug &&
+      body.requestedSlug &&
+      sanitizeSlug(body.requestedSlug) !== existing.slug &&
+      !canUseManagedCustomDomains(subscription.plan)
+    ) {
+      return Response.json(
+        {
+          error: "Changing a managed Cryzo domain requires Starter or above. You can still export or deploy to your own Vercel account for free.",
+          code: "MANAGED_DOMAIN_REQUIRES_STARTER",
+          requiredPlan: "starter",
+        },
+        { status: 402 },
+      );
+    }
+
     const slug = await chooseSlug({
       token: authToken,
       conversationId: body.conversationId,
@@ -669,12 +727,15 @@ export async function POST(req: Request) {
       supabase: body.supabase,
     });
 
+    const deployFiles = canUnbrand
+      ? body.files
+      : withManagedCryzoBranding(body.files);
     const deployment = await createDeployment({
       token: platformToken,
       teamId,
       projectId: project.id,
       projectName: project.name || projectName,
-      files: body.files,
+      files: deployFiles,
     });
     const ready = await waitForDeployment(platformToken, teamId, deployment.id);
 
@@ -721,6 +782,8 @@ export async function POST(req: Request) {
       url: canonicalUrl,
       desiredUrl: cryzoUrl,
       fallbackUrl,
+      brandingRequired: !canUnbrand,
+      plan: subscription.plan,
       subdomainAssigned: domain.assigned,
       domainVerified: domain.verified,
       domainMisconfigured: domain.misconfigured,
