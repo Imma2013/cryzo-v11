@@ -2,6 +2,9 @@
 
 import { useEffect, useRef, useState } from "react";
 import {
+  Check,
+  ChevronDown,
+  Globe2,
   Hammer,
   Lightbulb,
   Loader2,
@@ -9,6 +12,7 @@ import {
   MicOff,
   Plus,
   Send,
+  Smartphone,
   Square,
   X,
 } from "lucide-react";
@@ -18,6 +22,10 @@ import {
   DEFAULT_MODEL_SELECTION,
   type ModelSelection,
 } from "@/lib/ai/models";
+import {
+  toggleProjectPlatform,
+  type ProjectPlatform,
+} from "@/lib/project-platform";
 
 export type ChatMode = "build" | "plan";
 
@@ -87,6 +95,26 @@ function validImageFiles(files: File[]) {
   );
 }
 
+const MODES: Array<{
+  id: ChatMode;
+  label: string;
+  description: string;
+  icon: typeof Hammer;
+}> = [
+  {
+    id: "build",
+    label: "Build",
+    description: "Make changes directly",
+    icon: Hammer,
+  },
+  {
+    id: "plan",
+    label: "Plan",
+    description: "Discuss before building",
+    icon: Lightbulb,
+  },
+];
+
 export function ChatInput({
   value,
   onChange,
@@ -98,6 +126,8 @@ export function ChatInput({
   onChatModeChange,
   modelSelection = DEFAULT_MODEL_SELECTION,
   onModelSelectionChange = () => {},
+  projectPlatforms,
+  onProjectPlatformsChange,
   variant = "dock",
 }: {
   value: string;
@@ -110,6 +140,8 @@ export function ChatInput({
   onChatModeChange: (mode: ChatMode) => void;
   modelSelection?: ModelSelection;
   onModelSelectionChange?: (selection: ModelSelection) => void;
+  projectPlatforms?: ProjectPlatform[];
+  onProjectPlatformsChange?: (platforms: ProjectPlatform[]) => void;
   variant?: "dock" | "hero";
 }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -117,10 +149,12 @@ export function ChatInput({
   const recognitionRef = useRef<BrowserSpeechRecognition | null>(null);
   const attachmentsRef = useRef<ImageAttachment[]>([]);
   const valueRef = useRef(value);
+  const modeMenuRef = useRef<HTMLDivElement>(null);
   const [attachments, setAttachments] = useState<ImageAttachment[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [isListening, setIsListening] = useState(false);
+  const [modeOpen, setModeOpen] = useState(false);
   const speechSupported =
     typeof window !== "undefined" &&
     !!(window.SpeechRecognition || window.webkitSpeechRecognition);
@@ -140,6 +174,16 @@ export function ChatInput({
   useEffect(() => {
     valueRef.current = value;
   }, [value]);
+
+  useEffect(() => {
+    const closeModeMenu = (event: PointerEvent) => {
+      if (!modeMenuRef.current?.contains(event.target as Node)) {
+        setModeOpen(false);
+      }
+    };
+    document.addEventListener("pointerdown", closeModeMenu);
+    return () => document.removeEventListener("pointerdown", closeModeMenu);
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -271,6 +315,8 @@ export function ChatInput({
 
   const canSend = value.trim().length > 0 || attachments.length > 0;
   const isHero = variant === "hero";
+  const activeMode = MODES.find((mode) => mode.id === chatMode) || MODES[0];
+  const ActiveModeIcon = activeMode.icon;
 
   return (
     <div
@@ -340,40 +386,64 @@ export function ChatInput({
           }
           disabled={disabled}
           rows={1}
-          className="block max-h-44 min-h-16 w-full resize-none bg-transparent px-4 py-3.5 text-[16px] leading-6 text-white outline-none placeholder:text-zinc-500 disabled:opacity-50 md:min-h-24 md:py-4 md:text-sm"
+          className="block max-h-44 min-h-20 w-full resize-none bg-transparent px-4 py-4 text-[16px] leading-6 text-white outline-none placeholder:text-zinc-500 disabled:opacity-50 md:min-h-24 md:text-sm"
         />
 
-        <div className="flex items-center justify-between gap-2 px-3 pb-3">
-          <div className="flex min-w-0 items-center gap-1 overflow-hidden">
-            <div className="flex shrink-0 rounded-lg border border-zinc-800 bg-zinc-900 p-0.5">
+        <div className="flex items-end justify-between gap-2 px-3 pb-3">
+          <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            <div ref={modeMenuRef} className="relative shrink-0">
               <button
                 type="button"
-                onClick={() => onChatModeChange("build")}
-                className={cn(
-                  "inline-flex h-8 items-center gap-1 rounded-md px-2 text-xs font-medium transition-colors md:gap-1.5 md:px-2.5",
-                  chatMode === "build"
-                    ? "bg-white text-black"
-                    : "text-zinc-400 hover:text-white",
-                )}
-                title="Build mode"
+                onClick={() => setModeOpen((current) => !current)}
+                className="inline-flex h-9 items-center gap-1.5 rounded-lg px-2.5 text-xs font-medium text-zinc-200 transition-colors hover:bg-zinc-900"
+                aria-haspopup="menu"
+                aria-expanded={modeOpen}
               >
-                <Hammer size={14} />
-                Build
+                <ActiveModeIcon size={14} />
+                {activeMode.label}
+                <ChevronDown
+                  size={13}
+                  className={cn("transition-transform", modeOpen && "rotate-180")}
+                />
               </button>
-              <button
-                type="button"
-                onClick={() => onChatModeChange("plan")}
-                className={cn(
-                  "inline-flex h-8 items-center gap-1 rounded-md px-2 text-xs font-medium transition-colors md:gap-1.5 md:px-2.5",
-                  chatMode === "plan"
-                    ? "bg-blue-500 text-white"
-                    : "text-zinc-400 hover:text-white",
-                )}
-                title="Plan mode"
-              >
-                <Lightbulb size={14} />
-                Plan
-              </button>
+
+              {modeOpen && (
+                <div
+                  className={cn(
+                    "absolute z-50 w-[min(310px,calc(100vw-2rem))] overflow-hidden rounded-xl border border-zinc-800 bg-zinc-950 p-1.5 shadow-2xl shadow-black/50",
+                    isHero ? "left-0 top-full mt-2" : "bottom-full left-0 mb-2",
+                  )}
+                  role="menu"
+                >
+                  {MODES.map((mode) => {
+                    const Icon = mode.icon;
+                    const selected = mode.id === chatMode;
+                    return (
+                      <button
+                        key={mode.id}
+                        type="button"
+                        onClick={() => {
+                          onChatModeChange(mode.id);
+                          setModeOpen(false);
+                        }}
+                        className="flex w-full items-start gap-3 rounded-lg px-3 py-3 text-left hover:bg-zinc-900"
+                        role="menuitem"
+                      >
+                        <Icon size={17} className="mt-0.5 shrink-0 text-zinc-300" />
+                        <span className="min-w-0 flex-1">
+                          <span className="block text-sm font-medium text-white">
+                            {mode.label}
+                          </span>
+                          <span className="mt-0.5 block text-xs text-zinc-500">
+                            {mode.description}
+                          </span>
+                        </span>
+                        {selected && <Check size={16} className="mt-0.5 text-white" />}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </div>
 
             <ModelPicker
@@ -444,6 +514,41 @@ export function ChatInput({
           </div>
         )}
       </div>
+
+      {isHero && projectPlatforms && onProjectPlatformsChange && (
+        <div className="mx-auto mt-4 grid max-w-xl grid-cols-3 gap-2 sm:gap-3">
+          {([
+            { id: "web" as const, label: "Web", icon: Globe2 },
+            { id: "ios" as const, label: "iOS", icon: Smartphone },
+            { id: "android" as const, label: "Android", icon: Smartphone },
+          ]).map((platform) => {
+            const Icon = platform.icon;
+            const selected = projectPlatforms.includes(platform.id);
+            return (
+              <button
+                key={platform.id}
+                type="button"
+                onClick={() =>
+                  onProjectPlatformsChange(
+                    toggleProjectPlatform(projectPlatforms, platform.id),
+                  )
+                }
+                className={cn(
+                  "flex min-w-0 items-center justify-center gap-2 rounded-xl border px-3 py-3 text-sm font-medium transition-colors",
+                  selected
+                    ? "border-zinc-500 bg-zinc-800 text-white"
+                    : "border-zinc-800 bg-zinc-950/80 text-zinc-500 hover:border-zinc-700 hover:text-zinc-300",
+                )}
+                aria-pressed={selected}
+              >
+                <Icon size={17} />
+                <span>{platform.label}</span>
+                {selected && <Check size={14} className="hidden sm:block" />}
+              </button>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
