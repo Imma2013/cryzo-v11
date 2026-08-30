@@ -92,6 +92,7 @@ export async function POST(req: Request) {
   try {
     const {
       messages,
+      conversationId,
       userId,
       composioSessionId,
       chatMode,
@@ -104,6 +105,7 @@ export async function POST(req: Request) {
       authToken,
     } = (await req.json()) as {
       messages: UIMessage[];
+      conversationId?: string;
       userId: string;
       composioSessionId: string | null;
       chatMode?: "build" | "plan";
@@ -143,9 +145,29 @@ export async function POST(req: Request) {
         .map((part) => part.text)
         .join(" ") || "";
 
+    let storedProjectPlatforms: ProjectPlatform[] | null = null;
+    if (!projectPlatforms?.length && conversationId && userId) {
+      try {
+        const stored = await convex.query(
+          api.conversations.getProjectPlatformsForChat,
+          {
+            id: conversationId as any,
+            userId: userId as any,
+          },
+        );
+        if (Array.isArray(stored) && stored.length > 0) {
+          storedProjectPlatforms = stored as ProjectPlatform[];
+        }
+      } catch (error) {
+        console.warn("Unable to load stored project platform; inferring from prompt", error);
+      }
+    }
+
     const resolvedProjectPlatforms = projectPlatforms?.length
       ? normalizeProjectPlatforms(projectPlatforms)
-      : inferProjectPlatforms(lastUserText, ["web"], false);
+      : storedProjectPlatforms?.length
+        ? normalizeProjectPlatforms(storedProjectPlatforms)
+        : inferProjectPlatforms(lastUserText, ["web"], false);
 
     const recipeSlug = pickDesignRecipe(lastUserText);
     const recipeContent = recipeSlug ? loadRecipeContent(recipeSlug) : "";
