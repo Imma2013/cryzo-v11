@@ -86,6 +86,18 @@ export const get = query({
   },
 });
 
+export const getProjectPlatformsForChat = query({
+  args: {
+    id: v.id("conversations"),
+    userId: v.id("users"),
+  },
+  handler: async (ctx, args) => {
+    const conversation = await ctx.db.get(args.id);
+    if (!conversation || conversation.userId !== args.userId) return null;
+    return conversation.projectPlatforms || ["web"];
+  },
+});
+
 export const updateTitle = mutation({
   args: { id: v.id("conversations"), title: v.string() },
   handler: async (ctx, args) => {
