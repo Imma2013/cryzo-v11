@@ -13,6 +13,11 @@ import {
   saveInitialChatMessage,
   savePendingAuthChatMessage,
 } from "@/lib/chat/initial-message";
+import {
+  DEFAULT_PROJECT_PLATFORMS,
+  inferProjectPlatforms,
+  type ProjectPlatform,
+} from "@/lib/project-platform";
 
 export default function Home() {
   const router = useRouter();
@@ -20,6 +25,10 @@ export default function Home() {
   const createConversation = useMutation(api.conversations.create);
   const [input, setInput] = useState("");
   const [chatMode, setChatMode] = useState<ChatMode>("build");
+  const [projectPlatforms, setProjectPlatforms] = useState<ProjectPlatform[]>(
+    DEFAULT_PROJECT_PLATFORMS,
+  );
+  const [platformTouched, setPlatformTouched] = useState(false);
   const [isStarting, setIsStarting] = useState(false);
   const [authSettled, setAuthSettled] = useState(false);
 
@@ -54,12 +63,18 @@ export default function Home() {
     try {
       const fileParts = await filesToUIParts(files);
       const messageText = text || "Use the attached image as context.";
+      const resolvedPlatforms = inferProjectPlatforms(
+        messageText,
+        projectPlatforms,
+        platformTouched,
+      );
 
       if (!isAuthenticated || !userId) {
         savePendingAuthChatMessage({
           text: messageText,
           chatMode,
           files: fileParts,
+          projectPlatforms: resolvedPlatforms,
         });
         router.push("/login?next=/chat");
         return;
@@ -68,6 +83,7 @@ export default function Home() {
       const id = await createConversation({
         userId,
         chatMode,
+        projectPlatforms: resolvedPlatforms,
       });
 
       saveInitialChatMessage({
@@ -109,14 +125,13 @@ export default function Home() {
             <div className="mx-auto mb-8 max-w-3xl text-center">
               <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-zinc-800 bg-zinc-950/80 px-3 py-1.5 text-xs text-zinc-400">
                 <Sparkles size={14} className="text-blue-300" />
-                Create a business by chatting with AI
+                Build for web, iPhone, and Android
               </div>
               <h1 className="text-4xl font-semibold tracking-normal text-white sm:text-6xl">
                 What will you build today?
               </h1>
               <p className="mx-auto mt-4 max-w-2xl text-base leading-7 text-zinc-400 sm:text-lg">
-                Start with an idea, image, or rough plan. Cryzo turns the
-                conversation into an app workspace you can keep building from.
+                Start with an idea, image, or rough plan. Choose the platform or just describe it in your prompt.
               </p>
             </div>
 
@@ -129,8 +144,16 @@ export default function Home() {
               disabled={loading || (isAuthenticated && !userId)}
               chatMode={chatMode}
               onChatModeChange={setChatMode}
+              projectPlatforms={projectPlatforms}
+              onProjectPlatformsChange={(platforms) => {
+                setProjectPlatforms(platforms);
+                setPlatformTouched(true);
+              }}
               variant="hero"
             />
+            <p className="mx-auto mt-3 max-w-xl text-center text-[11px] leading-5 text-zinc-600">
+              iOS and Android can be selected together and share one Expo + React Native codebase.
+            </p>
           </div>
         </section>
       </div>
