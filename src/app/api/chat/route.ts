@@ -15,6 +15,11 @@ import {
   buildCryzoSystemPrompt,
   buildPlanPrompt,
 } from "@/lib/ai/server-prompt";
+import {
+  inferProjectPlatforms,
+  normalizeProjectPlatforms,
+  type ProjectPlatform,
+} from "@/lib/project-platform";
 
 const convex = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
 
@@ -72,7 +77,7 @@ function loadRecipeContent(slug: string): string {
   }
 }
 
-const CODING_REQUEST_PATTERN = /\b(build|generate|redesign|clone|website|web app|component|landing page|dashboard|storefront|frontend|ui|ux|react|vite|tailwind|css|html|typescript|javascript|code|source|fix (?:this |the )?(?:site|website|app|code|error)|debug (?:this |the )?(?:site|website|app|code|error)|responsive|mobile layout)\b/i;
+const CODING_REQUEST_PATTERN = /\b(build|generate|redesign|clone|website|web app|mobile app|native app|ios|iphone|android|expo|react native|component|landing page|dashboard|storefront|frontend|ui|ux|react|vite|tailwind|css|html|typescript|javascript|code|source|fix (?:this |the )?(?:site|website|app|code|error)|debug (?:this |the )?(?:site|website|app|code|error)|responsive|mobile layout)\b/i;
 const EXTERNAL_ACTION_PATTERN = /\b(send|email|reply|forward|post|publish|schedule|calendar|invite|slack|tweet|x post|github issue|pull request|create issue|open issue|comment on|upload to|connect|disconnect|create event|create meeting|send message)\b/i;
 
 function shouldUseComposioTools(userMessage: string) {
@@ -90,6 +95,7 @@ export async function POST(req: Request) {
       userId,
       composioSessionId,
       chatMode,
+      projectPlatforms,
       modelProvider,
       modelId,
       modelCredentialMode,
@@ -101,6 +107,7 @@ export async function POST(req: Request) {
       userId: string;
       composioSessionId: string | null;
       chatMode?: "build" | "plan";
+      projectPlatforms?: ProjectPlatform[];
       modelProvider?: string;
       modelId?: string;
       modelCredentialMode?: "cryzo" | "device" | "account";
@@ -136,10 +143,14 @@ export async function POST(req: Request) {
         .map((part) => part.text)
         .join(" ") || "";
 
+    const resolvedProjectPlatforms = projectPlatforms?.length
+      ? normalizeProjectPlatforms(projectPlatforms)
+      : inferProjectPlatforms(lastUserText, ["web"], false);
+
     const recipeSlug = pickDesignRecipe(lastUserText);
     const recipeContent = recipeSlug ? loadRecipeContent(recipeSlug) : "";
     const recipeBlock = recipeContent
-      ? `\n\n## ACTIVE DESIGN RECIPE — FOLLOW AS BINDING GUIDANCE (selected: ${recipeSlug})\n${recipeContent}\n\nCRITICAL: The recipe controls composition, typography attitude, palette behavior, section structure, imagery approach, and CTA styling. Do not drift into a generic startup template.`
+      ? `\n\n## ACTIVE DESIGN RECIPE — FOLLOW AS BINDING GUIDANCE (selected: ${recipeSlug})\n${recipeContent}\n\nCRITICAL: The recipe controls composition, typography attitude, palette behavior, section structure, imagery approach, and CTA styling. Adapt it to the active project platform rather than forcing desktop web patterns into a mobile app.`
       : "";
 
     const modelMessages = await convertToModelMessages(messages);
@@ -147,7 +158,7 @@ export async function POST(req: Request) {
     if (mode === "plan") {
       const result = streamText({
         model: resolved.model,
-        system: buildPlanPrompt(recipeBlock),
+        system: buildPlanPrompt(recipeBlock, resolvedProjectPlatforms),
         messages: modelMessages,
         stopWhen: stepCountIs(5),
       });
@@ -167,6 +178,7 @@ export async function POST(req: Request) {
     const systemPrompt = buildCryzoSystemPrompt({
       useComposioTools,
       recipeBlock,
+      projectPlatforms: resolvedProjectPlatforms,
     });
 
     let responseSessionId = composioSessionId;
