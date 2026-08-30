@@ -20,6 +20,12 @@ export const create = mutation({
   args: {
     userId: v.id("users"),
     chatMode: v.optional(v.union(v.literal("build"), v.literal("plan"))),
+    modelProvider: v.optional(v.string()),
+    modelId: v.optional(v.string()),
+    modelCredentialMode: v.optional(
+      v.union(v.literal("cryzo"), v.literal("device"), v.literal("account")),
+    ),
+    modelBaseUrl: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const authUserId = await getAuthUserId(ctx);
@@ -33,9 +39,10 @@ export const create = mutation({
       title: "New Chat",
       chatMode: args.chatMode,
       composioSessionId: null,
-      modelProvider: "cryzo",
-      modelId: "minimax/minimax-m3:free",
-      modelCredentialMode: "cryzo",
+      modelProvider: args.modelProvider || "cryzo",
+      modelId: args.modelId || "minimax/minimax-m3:free",
+      modelCredentialMode: args.modelCredentialMode || "cryzo",
+      modelBaseUrl: args.modelBaseUrl?.trim() || undefined,
       createdAt: now,
       updatedAt: now,
     });
