@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useEffect, ReactNode } from "react";
+import { createContext, useContext, ReactNode } from "react";
 import {
   useConvexAuth,
   useAuthActions,
@@ -28,10 +28,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const authToken = useAuthToken();
   const user = useQuery(api.users.currentUser);
 
-  useEffect(() => {
-    setStreamingRuntimeAuthToken(authToken ?? null);
-    return () => setStreamingRuntimeAuthToken(null);
-  }, [authToken]);
+  // The sandbox runtime is a browser-side module singleton. Keep its bearer token
+  // synchronized during render instead of waiting for a passive effect. This is
+  // important when a user signs out and immediately signs into another account:
+  // child workspace effects must never get a chance to send the previous account's
+  // token to /api/sandbox/*.
+  setStreamingRuntimeAuthToken(authToken ?? null);
+
+  const safeSignOut = async () => {
+    // Clear the runtime credential before Convex starts the sign-out transition so
+    // queued preview work cannot race with the old session.
+    setStreamingRuntimeAuthToken(null);
+    await signOut();
+  };
 
   const value: AuthContextType = {
     user: user ?? null,
@@ -39,7 +48,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     isAuthenticated,
     isLoading,
     signIn,
-    signOut,
+    signOut: safeSignOut,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
