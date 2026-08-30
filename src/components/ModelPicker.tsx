@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useAuthToken } from "@convex-dev/auth/react";
 import {
-  Check,
   CheckCircle2,
   ChevronDown,
   ExternalLink,
@@ -12,8 +11,9 @@ import {
   Loader2,
   Search,
   Server,
-  Settings2,
+  Sparkles,
   X,
+  Zap,
 } from "lucide-react";
 import {
   DEFAULT_MODEL_SELECTION,
@@ -28,8 +28,9 @@ import {
   storeSessionProviderKey,
   type CredentialMode,
   type ModelSelection,
-  type ProviderDefinition,
 } from "@/lib/ai/models";
+import { CRYZO_MANAGED_MODELS } from "@/lib/ai/managed-models";
+import { ProviderLogo } from "@/components/ProviderLogo";
 
 export type CatalogModel = {
   id: string;
@@ -40,6 +41,8 @@ export type CatalogModel = {
   context?: number | null;
   output?: number | null;
   lastUpdated?: string | null;
+  inputCost?: number | null;
+  outputCost?: number | null;
 };
 
 type CatalogResponse = {
@@ -51,7 +54,6 @@ type AccountConnection = {
   baseUrl?: string;
 };
 
-type PickerTab = "models" | "providers";
 type Feedback = {
   type: "idle" | "saving" | "saved" | "success" | "error";
   message?: string;
@@ -72,31 +74,21 @@ const PROVIDER_CONSOLES: Record<string, string> = {
   moonshotai: "https://platform.moonshot.ai/console/api-keys",
 };
 
-const PROVIDER_MARKS: Record<string, string> = {
-  cryzo: "C",
-  openrouter: "OR",
-  openai: "OA",
-  anthropic: "A",
-  google: "G",
-  xai: "x",
-  groq: "GQ",
-  deepseek: "DS",
-  mistral: "M",
-  together: "T",
-  cerebras: "CE",
-  nvidia: "NV",
-  moonshotai: "K",
-  custom: "<>\u200b",
-  ollama: "O",
-  lmstudio: "LM",
-};
+function formatContext(value?: number | null) {
+  if (!value) return null;
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(value % 1_000_000 ? 1 : 0)}M ctx`;
+  if (value >= 1_000) return `${Math.round(value / 1_000)}K ctx`;
+  return `${value} ctx`;
+}
 
-function ProviderMark({ provider }: { provider: ProviderDefinition }) {
-  return (
-    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-zinc-700 bg-zinc-900 text-[10px] font-semibold tracking-tight text-zinc-200">
-      {PROVIDER_MARKS[provider.id] || provider.name.slice(0, 2).toUpperCase()}
-    </span>
-  );
+function ModelBadge({ children, tone = "neutral" }: { children: React.ReactNode; tone?: "neutral" | "free" | "premium" | "byok" }) {
+  const classes = {
+    neutral: "border-zinc-800 bg-zinc-900 text-zinc-400",
+    free: "border-emerald-900/70 bg-emerald-950/50 text-emerald-300",
+    premium: "border-violet-900/70 bg-violet-950/50 text-violet-300",
+    byok: "border-sky-900/70 bg-sky-950/50 text-sky-300",
+  }[tone];
+  return <span className={`rounded-full border px-2 py-0.5 text-[10px] font-medium ${classes}`}>{children}</span>;
 }
 
 export function ModelPicker({
@@ -110,14 +102,9 @@ export function ModelPicker({
 }) {
   const authToken = useAuthToken();
   const [open, setOpen] = useState(false);
-  const [tab, setTab] = useState<PickerTab>("models");
   const [providerId, setProviderId] = useState(selection.providerId || "cryzo");
-  const [modelId, setModelId] = useState(
-    selection.modelId || DEFAULT_MODEL_SELECTION.modelId,
-  );
-  const [credentialMode, setCredentialMode] = useState<CredentialMode>(
-    selection.credentialMode || "cryzo",
-  );
+  const [modelId, setModelId] = useState(selection.modelId || DEFAULT_MODEL_SELECTION.modelId);
+  const [credentialMode, setCredentialMode] = useState<CredentialMode>(selection.credentialMode || "cryzo");
   const [apiKey, setApiKey] = useState("");
   const [baseURL, setBaseURL] = useState(selection.baseURL || "");
   const [persistDevice, setPersistDevice] = useState(true);
@@ -131,16 +118,13 @@ export function ModelPicker({
   const [discoveredModels, setDiscoveredModels] = useState<CatalogModel[]>([]);
 
   const provider = getProvider(providerId);
-  const accountSaved = accountConnections.some(
-    (item) => item.providerId === providerId,
-  );
+  const selectedProvider = getProvider(selection.providerId);
+  const selectedModelName = displayModelName(selection.modelId);
+  const accountSaved = accountConnections.some((item) => item.providerId === providerId);
   const providerConsole = PROVIDER_CONSOLES[providerId];
 
   useEffect(() => {
-    const handler = () => {
-      setTab("models");
-      setOpen(true);
-    };
+    const handler = () => setOpen(true);
     window.addEventListener("cryzo:open-model-picker", handler);
     return () => window.removeEventListener("cryzo:open-model-picker", handler);
   }, []);
@@ -171,14 +155,12 @@ export function ModelPicker({
 
     if (nextProvider.id === "cryzo") {
       setCredentialMode("cryzo");
-      setModelId(DEFAULT_MODEL_SELECTION.modelId);
+      if (!modelId.startsWith("cryzo/")) setModelId(DEFAULT_MODEL_SELECTION.modelId);
     } else if (nextProvider.local) {
       setCredentialMode("device");
     } else if (selection.providerId !== providerId) {
-      const alreadyAccountSaved = accountConnections.some(
-        (connection) => connection.providerId === providerId,
-      );
-      setCredentialMode(alreadyAccountSaved ? "account" : "device");
+      const saved = accountConnections.some((connection) => connection.providerId === providerId);
+      setCredentialMode(saved ? "account" : "device");
       setModelId("");
     }
   }, [providerId, accountConnections, selection.baseURL, selection.providerId]);
@@ -209,14 +191,13 @@ export function ModelPicker({
 
   const providerModels = useMemo(() => {
     if (provider.id === "cryzo") {
-      return [
-        {
-          id: DEFAULT_MODEL_SELECTION.modelId,
-          name: "MiniMax M3",
-          reasoning: true,
-          toolCall: true,
-        } satisfies CatalogModel,
-      ];
+      const query = search.trim().toLowerCase();
+      return CRYZO_MANAGED_MODELS.filter((model) =>
+        !query ||
+        model.name.toLowerCase().includes(query) ||
+        model.description.toLowerCase().includes(query) ||
+        model.providerName.toLowerCase().includes(query),
+      );
     }
 
     const items = discoveredModels.length
@@ -276,9 +257,7 @@ export function ModelPicker({
       } else if (credentialMode === "account") {
         await saveAccountCredential();
       } else {
-        if (!provider.custom && !apiKey.trim()) {
-          throw new Error("Enter an API key first");
-        }
+        if (!provider.custom && !apiKey.trim()) throw new Error("Enter an API key first");
         if (persistDevice) {
           storeDeviceProviderKey(providerId, apiKey);
           storeDeviceProviderBaseURL(providerId, baseURL);
@@ -288,7 +267,6 @@ export function ModelPicker({
         }
         setSavedDevice(Boolean(apiKey.trim()));
       }
-
       setFeedback({
         type: "saved",
         message:
@@ -299,10 +277,7 @@ export function ModelPicker({
               : "Saved for this session",
       });
     } catch (error) {
-      setFeedback({
-        type: "error",
-        message: error instanceof Error ? error.message : "Unable to save API key",
-      });
+      setFeedback({ type: "error", message: error instanceof Error ? error.message : "Unable to save API key" });
     } finally {
       setBusy(false);
     }
@@ -319,14 +294,10 @@ export function ModelPicker({
     setFeedback({ type: "saving", message: "Connecting…" });
     try {
       const response = await fetch(`${endpoint}/models`, {
-        headers: apiKey.trim()
-          ? { Authorization: `Bearer ${apiKey.trim()}` }
-          : undefined,
+        headers: apiKey.trim() ? { Authorization: `Bearer ${apiKey.trim()}` } : undefined,
       });
       const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.error?.message || `Server returned ${response.status}`);
-      }
+      if (!response.ok) throw new Error(data.error?.message || `Server returned ${response.status}`);
       const models = (Array.isArray(data.data) ? data.data : [])
         .map((item: { id?: string }) => item.id)
         .filter(Boolean)
@@ -342,9 +313,7 @@ export function ModelPicker({
     } catch (error) {
       setFeedback({
         type: "error",
-        message: `${
-          error instanceof Error ? error.message : "Connection failed"
-        }. Local servers must allow browser CORS from https://cryzo.me.`,
+        message: `${error instanceof Error ? error.message : "Connection failed"}. Local servers must allow browser CORS from https://cryzo.me.`,
       });
     } finally {
       setBusy(false);
@@ -361,19 +330,19 @@ export function ModelPicker({
     setFeedback({ type: "idle" });
     try {
       if (provider.id === "cryzo") {
-        onChange(DEFAULT_MODEL_SELECTION);
+        onChange({ providerId: "cryzo", modelId: modelId.trim(), credentialMode: "cryzo" });
         setOpen(false);
         return;
       }
 
       if (!provider.local && credentialMode === "account") {
         if (!accountSaved || apiKey.trim()) await saveAccountCredential();
-      } else if (credentialMode === "device") {
+      } else {
         const runtimeKey = readRuntimeProviderKey(providerId);
         if (!provider.local && !provider.custom && !apiKey.trim() && !runtimeKey) {
           throw new Error("Add and save an API key for this provider first");
         }
-        if (apiKey.trim()) {
+        if (apiKey.trim() || baseURL.trim()) {
           if (persistDevice) {
             storeDeviceProviderKey(providerId, apiKey);
             storeDeviceProviderBaseURL(providerId, baseURL);
@@ -381,7 +350,7 @@ export function ModelPicker({
             storeSessionProviderKey(providerId, apiKey);
             storeSessionProviderBaseURL(providerId, baseURL);
           }
-          setSavedDevice(true);
+          setSavedDevice(Boolean(apiKey.trim()) || provider.local);
         }
       }
 
@@ -393,18 +362,12 @@ export function ModelPicker({
       });
       setOpen(false);
     } catch (error) {
-      setFeedback({
-        type: "error",
-        message: error instanceof Error ? error.message : "Unable to use model",
-      });
-      setTab("providers");
+      setFeedback({ type: "error", message: error instanceof Error ? error.message : "Unable to use model" });
     } finally {
       setBusy(false);
     }
   };
 
-  const selectedProvider = getProvider(selection.providerId);
-  const selectedModelName = displayModelName(selection.modelId);
   const savedForCurrentMode =
     provider.id === "cryzo" ||
     provider.local ||
@@ -414,430 +377,296 @@ export function ModelPicker({
     <>
       <button
         type="button"
-        onClick={() => {
-          setTab("models");
-          setOpen(true);
-        }}
+        onClick={() => setOpen(true)}
         className={
           compact
             ? "inline-flex h-9 min-w-0 shrink-0 items-center gap-1.5 rounded-lg px-2 text-xs text-zinc-400 transition-colors hover:bg-zinc-900 hover:text-white"
-            : "inline-flex h-9 max-w-[190px] items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-900 px-2.5 text-xs text-zinc-300 hover:text-white"
+            : "inline-flex h-9 max-w-[220px] items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-900 px-2.5 text-xs text-zinc-300 hover:text-white"
         }
         title={`${selectedProvider.name} · ${selection.modelId}`}
       >
-        <ProviderMark provider={selectedProvider} />
-        <span className="max-w-28 truncate">{selectedModelName}</span>
+        <ProviderLogo provider={selectedProvider} size={26} />
+        <span className="max-w-32 truncate">{selectedModelName}</span>
         <ChevronDown size={13} className="shrink-0" />
       </button>
 
       {open && (
         <div className="fixed inset-0 z-[120] flex items-end justify-center bg-black/75 p-0 backdrop-blur-sm sm:items-center sm:p-4">
-          <button
-            className="absolute inset-0"
-            onClick={() => setOpen(false)}
-            aria-label="Close model picker"
-          />
+          <button className="absolute inset-0" onClick={() => setOpen(false)} aria-label="Close model picker" />
 
-          <div className="relative z-10 flex h-[92dvh] w-full max-w-3xl flex-col overflow-hidden rounded-t-2xl border border-zinc-800 bg-zinc-950 shadow-2xl shadow-black sm:h-auto sm:max-h-[86vh] sm:rounded-2xl">
-            <div className="flex items-start justify-between gap-4 border-b border-zinc-800 px-5 py-4">
-              <div className="min-w-0">
-                <h2 className="text-lg font-semibold text-white">AI models</h2>
-                <p className="mt-1 text-xs leading-5 text-zinc-500">
-                  Pick a model or connect your own provider. Keys stay separate from model browsing.
-                </p>
+          <div className="relative z-10 flex h-[94dvh] w-full max-w-5xl flex-col overflow-hidden rounded-t-2xl border border-zinc-800 bg-zinc-950 shadow-2xl sm:h-[760px] sm:rounded-2xl">
+            <header className="flex items-center justify-between border-b border-zinc-800 px-4 py-3 sm:px-5">
+              <div>
+                <h2 className="text-base font-semibold text-white">Choose your model</h2>
+                <p className="mt-0.5 text-xs text-zinc-500">Free models and BYOK never spend message credits.</p>
               </div>
-              <button
-                type="button"
-                onClick={() => setOpen(false)}
-                className="rounded-lg p-2 text-zinc-500 hover:bg-zinc-900 hover:text-white"
-                aria-label="Close"
-              >
+              <button type="button" onClick={() => setOpen(false)} className="rounded-lg p-2 text-zinc-500 hover:bg-zinc-900 hover:text-white">
                 <X size={18} />
               </button>
-            </div>
+            </header>
 
-            <div className="grid grid-cols-2 border-b border-zinc-800 px-3 pt-2">
-              <button
-                type="button"
-                onClick={() => setTab("models")}
-                className={`border-b-2 px-3 py-2.5 text-sm font-medium ${
-                  tab === "models"
-                    ? "border-white text-white"
-                    : "border-transparent text-zinc-500 hover:text-zinc-300"
-                }`}
-              >
-                Models
-              </button>
-              <button
-                type="button"
-                onClick={() => setTab("providers")}
-                className={`border-b-2 px-3 py-2.5 text-sm font-medium ${
-                  tab === "providers"
-                    ? "border-white text-white"
-                    : "border-transparent text-zinc-500 hover:text-zinc-300"
-                }`}
-              >
-                API keys & providers
-              </button>
-            </div>
-
-            <div className="border-b border-zinc-800 px-3 py-3">
-              <div className="flex gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-                {PROVIDERS.map((item) => {
-                  const accountConnected = accountConnections.some(
-                    (connection) => connection.providerId === item.id,
-                  );
-                  const deviceConnected = Boolean(readRuntimeProviderKey(item.id));
-                  const connected = item.id === "cryzo" || accountConnected || deviceConnected;
-                  return (
-                    <button
-                      key={item.id}
-                      type="button"
-                      onClick={() => setProviderId(item.id)}
-                      className={`inline-flex h-10 shrink-0 items-center gap-2 rounded-xl border px-2.5 text-xs transition-colors ${
-                        providerId === item.id
-                          ? "border-zinc-600 bg-zinc-800 text-white"
-                          : "border-zinc-800 bg-zinc-950 text-zinc-500 hover:text-zinc-300"
-                      }`}
-                    >
-                      <ProviderMark provider={item} />
-                      <span>{item.name}</span>
-                      {connected && item.id !== "cryzo" && (
-                        <Check size={13} className="text-green-400" />
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            <div className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-5">
-              {tab === "models" ? (
-                <div>
-                  <div className="mb-4 flex items-start gap-3">
-                    <ProviderMark provider={provider} />
-                    <div className="min-w-0">
-                      <div className="text-base font-medium text-white">{provider.name}</div>
-                      <p className="mt-1 text-xs leading-5 text-zinc-500">
-                        {provider.description}
-                      </p>
-                    </div>
-                  </div>
-
-                  {(provider.custom || provider.local) && (
-                    <label className="mb-4 block">
-                      <span className="mb-1.5 block text-xs font-medium text-zinc-400">
-                        Model ID
-                      </span>
-                      <input
-                        value={modelId}
-                        onChange={(event) => setModelId(event.target.value)}
-                        placeholder="model-name"
-                        className="h-11 w-full rounded-xl border border-zinc-800 bg-zinc-900 px-3 text-base text-white outline-none placeholder:text-zinc-600 focus:border-zinc-600 sm:text-sm"
-                      />
-                    </label>
-                  )}
-
-                  {!provider.custom && (
-                    <>
-                      <div className="relative mb-3">
-                        <Search
-                          size={16}
-                          className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-600"
-                        />
-                        <input
-                          value={search}
-                          onChange={(event) => setSearch(event.target.value)}
-                          placeholder={`Search ${provider.name} models…`}
-                          className="h-11 w-full rounded-xl border border-zinc-800 bg-zinc-900 pl-10 pr-3 text-base text-white outline-none placeholder:text-zinc-600 focus:border-zinc-600 sm:text-sm"
-                        />
-                      </div>
-
-                      <div className="overflow-hidden rounded-xl border border-zinc-800">
-                        {catalogLoading && provider.id !== "cryzo" ? (
-                          <div className="flex items-center justify-center gap-2 py-12 text-sm text-zinc-500">
-                            <Loader2 size={15} className="animate-spin" />
-                            Loading current models…
-                          </div>
-                        ) : providerModels.length === 0 ? (
-                          <div className="px-5 py-12 text-center text-sm leading-6 text-zinc-500">
-                            No catalog models found for this provider.
-                            {provider.local && " Connect the local server from API keys & providers."}
-                          </div>
-                        ) : (
-                          providerModels.slice(0, 120).map((model) => {
-                            const selected = modelId === model.id;
-                            return (
-                              <button
-                                key={model.id}
-                                type="button"
-                                onClick={() => setModelId(model.id)}
-                                className={`flex w-full items-center gap-3 border-b border-zinc-900 px-3 py-3 text-left last:border-b-0 ${
-                                  selected ? "bg-zinc-800" : "hover:bg-zinc-900"
-                                }`}
-                              >
-                                <ProviderMark provider={provider} />
-                                <div className="min-w-0 flex-1">
-                                  <div className="truncate text-sm font-medium text-white">
-                                    {model.name}
-                                  </div>
-                                  <div className="mt-0.5 truncate font-mono text-[11px] text-zinc-600">
-                                    {model.id}
-                                  </div>
-                                </div>
-                                <div className="hidden shrink-0 gap-1 text-[10px] text-zinc-500 sm:flex">
-                                  {model.reasoning && (
-                                    <span className="rounded bg-zinc-900 px-1.5 py-0.5">
-                                      reasoning
-                                    </span>
-                                  )}
-                                  {model.toolCall && (
-                                    <span className="rounded bg-zinc-900 px-1.5 py-0.5">
-                                      tools
-                                    </span>
-                                  )}
-                                </div>
-                                {selected && <Check size={16} className="shrink-0" />}
-                              </button>
-                            );
-                          })
+            <div className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[230px_minmax(0,1fr)]">
+              <aside className="border-b border-zinc-800 p-3 md:overflow-y-auto md:border-b-0 md:border-r">
+                <div className="mb-2 px-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-zinc-600">Providers</div>
+                <div className="flex gap-2 overflow-x-auto pb-1 md:block md:space-y-1 md:overflow-visible">
+                  {PROVIDERS.map((item) => {
+                    const active = item.id === providerId;
+                    return (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() => {
+                          setProviderId(item.id);
+                          setSearch("");
+                        }}
+                        className={`flex min-w-max items-center gap-2 rounded-xl px-2.5 py-2 text-left text-xs transition-colors md:w-full ${
+                          active ? "bg-white text-black" : "text-zinc-400 hover:bg-zinc-900 hover:text-white"
+                        }`}
+                      >
+                        <ProviderLogo provider={item} size={28} />
+                        <span className="truncate font-medium">{item.name}</span>
+                        {item.id !== "cryzo" && !item.local && (
+                          <span className={`ml-auto hidden text-[9px] md:inline ${active ? "text-zinc-500" : "text-sky-400"}`}>BYOK</span>
                         )}
-                      </div>
-                    </>
-                  )}
-
-                  {provider.id !== "cryzo" && !savedForCurrentMode && (
-                    <button
-                      type="button"
-                      onClick={() => setTab("providers")}
-                      className="mt-4 flex w-full items-center justify-between rounded-xl border border-amber-900/60 bg-amber-950/20 px-3 py-3 text-left text-xs text-amber-200"
-                    >
-                      <span>Add an API key before using this provider</span>
-                      <Settings2 size={15} />
-                    </button>
-                  )}
+                      </button>
+                    );
+                  })}
                 </div>
-              ) : (
-                <div>
-                  <div className="mb-5 flex items-start gap-3">
-                    <ProviderMark provider={provider} />
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <div className="text-base font-medium text-white">{provider.name}</div>
-                        {savedForCurrentMode && provider.id !== "cryzo" && (
-                          <span className="inline-flex items-center gap-1 rounded-full bg-green-500/10 px-2 py-1 text-[11px] font-medium text-green-400">
-                            <CheckCircle2 size={12} /> Connected
-                          </span>
-                        )}
-                      </div>
-                      <p className="mt-1 text-xs leading-5 text-zinc-500">
-                        {provider.description}
-                      </p>
+              </aside>
+
+              <main className="min-h-0 overflow-y-auto p-4 sm:p-5">
+                <div className="flex items-start gap-3">
+                  <ProviderLogo provider={provider} size={38} />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="font-semibold text-white">{provider.name}</h3>
+                      {provider.id === "cryzo" ? (
+                        <ModelBadge tone="free">No key required</ModelBadge>
+                      ) : provider.local ? (
+                        <ModelBadge>Local</ModelBadge>
+                      ) : (
+                        <ModelBadge tone="byok">BYOK · 0 Cryzo message credits</ModelBadge>
+                      )}
                     </div>
+                    <p className="mt-1 max-w-2xl text-xs leading-5 text-zinc-500">{provider.description}</p>
                   </div>
+                </div>
+
+                <div className="relative mt-5">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-600" size={15} />
+                  <input
+                    value={search}
+                    onChange={(event) => setSearch(event.target.value)}
+                    placeholder="Search models"
+                    className="h-10 w-full rounded-xl border border-zinc-800 bg-black pl-9 pr-3 text-sm text-white outline-none placeholder:text-zinc-600 focus:border-zinc-600"
+                  />
+                </div>
+
+                <section className="mt-3 space-y-2">
+                  {catalogLoading && provider.id !== "cryzo" && !provider.local && (
+                    <div className="flex items-center gap-2 rounded-xl border border-zinc-800 px-3 py-4 text-xs text-zinc-500">
+                      <Loader2 className="animate-spin" size={14} /> Loading model catalog…
+                    </div>
+                  )}
 
                   {provider.id === "cryzo" ? (
-                    <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">
-                      <div className="flex items-center gap-2 text-sm font-medium text-white">
-                        <Server size={16} /> Cryzo-managed access
-                      </div>
-                      <p className="mt-2 text-xs leading-5 text-zinc-500">
-                        No API key is required. Usage is billed through your Cryzo credits and plan.
-                      </p>
-                    </div>
+                    providerModels.map((model) => {
+                      const active = modelId === model.id;
+                      const managed = CRYZO_MANAGED_MODELS.find((item) => item.id === model.id)!;
+                      return (
+                        <button
+                          key={model.id}
+                          type="button"
+                          onClick={() => setModelId(model.id)}
+                          className={`w-full rounded-xl border p-3 text-left transition-colors ${
+                            active ? "border-zinc-500 bg-zinc-900" : "border-zinc-800 bg-black/40 hover:border-zinc-700"
+                          }`}
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="text-sm font-medium text-white">{managed.name}</span>
+                                <ModelBadge tone={managed.tier === "free" ? "free" : "premium"}>{managed.badge}</ModelBadge>
+                                {managed.tier === "premium" && <ModelBadge>Message credits</ModelBadge>}
+                              </div>
+                              <p className="mt-1 text-xs text-zinc-500">{managed.providerName} · {managed.description}</p>
+                            </div>
+                            {active && <CheckCircle2 className="shrink-0 text-white" size={17} />}
+                          </div>
+                        </button>
+                      );
+                    })
                   ) : (
-                    <div className="rounded-2xl border border-zinc-800 bg-zinc-900/35 p-4 sm:p-5">
-                      {!provider.local && (
-                        <div className="mb-4 grid grid-cols-2 gap-2">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setCredentialMode("device");
-                              setFeedback({ type: "idle" });
-                            }}
-                            className={`rounded-xl border px-3 py-2.5 text-xs font-medium ${
-                              credentialMode === "device"
-                                ? "border-zinc-500 bg-zinc-800 text-white"
-                                : "border-zinc-800 text-zinc-500"
-                            }`}
-                          >
-                            This device
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setCredentialMode("account");
-                              setFeedback({ type: "idle" });
-                            }}
-                            className={`rounded-xl border px-3 py-2.5 text-xs font-medium ${
-                              credentialMode === "account"
-                                ? "border-zinc-500 bg-zinc-800 text-white"
-                                : "border-zinc-800 text-zinc-500"
-                            }`}
-                          >
-                            Cryzo account
-                          </button>
+                    providerModels.slice(0, 100).map((model) => {
+                      const active = modelId === model.id;
+                      return (
+                        <button
+                          key={model.id}
+                          type="button"
+                          onClick={() => setModelId(model.id)}
+                          className={`w-full rounded-xl border p-3 text-left transition-colors ${
+                            active ? "border-sky-700 bg-sky-950/20" : "border-zinc-800 bg-black/40 hover:border-zinc-700"
+                          }`}
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="truncate text-sm font-medium text-white">{model.name}</span>
+                                <ModelBadge tone="byok">BYOK</ModelBadge>
+                                {model.reasoning && <ModelBadge>Reasoning</ModelBadge>}
+                                {model.toolCall && <ModelBadge>Tools</ModelBadge>}
+                                {formatContext(model.context) && <ModelBadge>{formatContext(model.context)}</ModelBadge>}
+                              </div>
+                              <p className="mt-1 truncate text-[11px] text-zinc-600">{model.id}</p>
+                            </div>
+                            {active && <CheckCircle2 className="shrink-0 text-sky-300" size={17} />}
+                          </div>
+                        </button>
+                      );
+                    })
+                  )}
+
+                  {!catalogLoading && providerModels.length === 0 && (
+                    <div className="rounded-xl border border-dashed border-zinc-800 px-4 py-7 text-center text-xs text-zinc-500">
+                      {provider.local ? "Connect to discover local models." : "No models matched your search."}
+                    </div>
+                  )}
+                </section>
+
+                {provider.id !== "cryzo" && (
+                  <section className="mt-5 rounded-2xl border border-zinc-800 bg-zinc-900/30 p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <div className="flex items-center gap-2 text-sm font-medium text-white">
+                          {provider.local ? <Laptop size={15} /> : <KeyRound size={15} />}
+                          {provider.local ? "Local connection" : "Your API key"}
                         </div>
-                      )}
-
-                      {(provider.custom || provider.local) && (
-                        <label className="mb-4 block">
-                          <span className="mb-1.5 block text-xs font-medium text-zinc-400">
-                            Base URL
-                          </span>
-                          <input
-                            value={baseURL}
-                            onChange={(event) => {
-                              setBaseURL(event.target.value);
-                              setFeedback({ type: "idle" });
-                            }}
-                            placeholder={provider.defaultBaseURL || "https://api.example.com/v1"}
-                            className="h-11 w-full rounded-xl border border-zinc-800 bg-black px-3 text-base text-white outline-none placeholder:text-zinc-600 focus:border-zinc-600 sm:text-sm"
-                          />
-                        </label>
-                      )}
-
-                      <label className="block">
-                        <span className="mb-1.5 flex items-center justify-between gap-3 text-xs font-medium text-zinc-400">
-                          <span>
-                            {provider.apiKeyLabel || "API key"}
-                            {provider.local ? " (optional)" : ""}
-                          </span>
-                          {providerConsole && (
-                            <a
-                              href={providerConsole}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="inline-flex items-center gap-1 font-normal text-zinc-500 hover:text-white"
-                            >
-                              Get API key <ExternalLink size={11} />
-                            </a>
-                          )}
-                        </span>
-                        <div className="flex gap-2">
-                          <input
-                            type="password"
-                            value={apiKey}
-                            onChange={(event) => {
-                              setApiKey(event.target.value);
-                              setFeedback({ type: "idle" });
-                            }}
-                            onKeyDown={(event) => {
-                              if (event.key === "Enter") {
-                                event.preventDefault();
-                                void saveCredential();
-                              }
-                            }}
-                            placeholder={
-                              accountSaved && credentialMode === "account"
-                                ? "Saved to your Cryzo account"
-                                : savedDevice && credentialMode === "device"
-                                  ? "Saved on this device"
-                                  : provider.apiKeyPlaceholder || "Paste API key"
-                            }
-                            autoComplete="off"
-                            className="h-11 min-w-0 flex-1 rounded-xl border border-zinc-800 bg-black px-3 text-base text-white outline-none placeholder:text-zinc-600 focus:border-zinc-600 sm:text-sm"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => void saveCredential()}
-                            disabled={
-                              busy ||
-                              (!provider.local &&
-                                !provider.custom &&
-                                !apiKey.trim() &&
-                                !(credentialMode === "account" && accountSaved))
-                            }
-                            className="inline-flex h-11 shrink-0 items-center gap-1.5 rounded-xl bg-white px-3 text-xs font-semibold text-black disabled:opacity-40"
-                          >
-                            {feedback.type === "saving" ? (
-                              <Loader2 size={14} className="animate-spin" />
-                            ) : feedback.type === "saved" || savedForCurrentMode ? (
-                              <Check size={14} />
-                            ) : (
-                              <KeyRound size={14} />
-                            )}
-                            {feedback.type === "saved" ? "Saved" : savedForCurrentMode ? "Save" : "Save"}
-                          </button>
-                        </div>
-                      </label>
-
-                      {credentialMode === "device" && (
-                        <label className="mt-3 flex items-start gap-2 text-xs leading-5 text-zinc-500">
-                          <input
-                            type="checkbox"
-                            checked={persistDevice}
-                            onChange={(event) => setPersistDevice(event.target.checked)}
-                            className="mt-1"
-                          />
-                          <span>
-                            Keep this credential on this device. Turn this off to keep it only for the current browser session.
-                          </span>
-                        </label>
-                      )}
-
-                      {credentialMode === "account" && !provider.local && (
-                        <p className="mt-3 text-xs leading-5 text-zinc-500">
-                          Account keys are AES-256-GCM encrypted before storage. Cryzo does not return the clear key to the browser.
+                        <p className="mt-1 text-xs text-zinc-500">
+                          {provider.local
+                            ? "Requests stay on the provider you run locally."
+                            : "You pay the provider directly. Cryzo message credits are not used."}
                         </p>
+                      </div>
+                      {providerConsole && (
+                        <a href={providerConsole} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs text-zinc-400 hover:text-white">
+                          Get key <ExternalLink size={11} />
+                        </a>
                       )}
+                    </div>
 
+                    {!provider.local && (
+                      <div className="mt-4 grid grid-cols-2 gap-2 rounded-xl bg-black p-1">
+                        <button
+                          type="button"
+                          onClick={() => setCredentialMode("device")}
+                          className={`rounded-lg px-3 py-2 text-xs ${credentialMode === "device" ? "bg-zinc-800 text-white" : "text-zinc-500"}`}
+                        >
+                          This device
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setCredentialMode("account")}
+                          className={`rounded-lg px-3 py-2 text-xs ${credentialMode === "account" ? "bg-zinc-800 text-white" : "text-zinc-500"}`}
+                        >
+                          Cryzo account
+                        </button>
+                      </div>
+                    )}
+
+                    <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                      <label className="block text-xs text-zinc-500">
+                        {provider.apiKeyLabel || "API key"}
+                        <input
+                          type="password"
+                          value={apiKey}
+                          onChange={(event) => setApiKey(event.target.value)}
+                          placeholder={provider.apiKeyPlaceholder || (accountSaved ? "Saved on your account" : "Paste key")}
+                          className="mt-1.5 h-10 w-full rounded-xl border border-zinc-800 bg-black px-3 text-sm text-white outline-none placeholder:text-zinc-700 focus:border-zinc-600"
+                        />
+                      </label>
+                      <label className="block text-xs text-zinc-500">
+                        Base URL
+                        <input
+                          value={baseURL}
+                          onChange={(event) => setBaseURL(event.target.value)}
+                          placeholder={provider.defaultBaseURL || "https://.../v1"}
+                          className="mt-1.5 h-10 w-full rounded-xl border border-zinc-800 bg-black px-3 text-sm text-white outline-none placeholder:text-zinc-700 focus:border-zinc-600"
+                        />
+                      </label>
+                    </div>
+
+                    {(provider.custom || provider.local) && (
+                      <label className="mt-3 block text-xs text-zinc-500">
+                        Model ID
+                        <input
+                          value={modelId}
+                          onChange={(event) => setModelId(event.target.value)}
+                          placeholder="model-name"
+                          className="mt-1.5 h-10 w-full rounded-xl border border-zinc-800 bg-black px-3 text-sm text-white outline-none placeholder:text-zinc-700 focus:border-zinc-600"
+                        />
+                      </label>
+                    )}
+
+                    {credentialMode === "device" && (
+                      <label className="mt-3 flex items-center gap-2 text-xs text-zinc-500">
+                        <input type="checkbox" checked={persistDevice} onChange={(event) => setPersistDevice(event.target.checked)} />
+                        Remember on this device
+                      </label>
+                    )}
+
+                    <div className="mt-4 flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => void saveCredential()}
+                        disabled={busy}
+                        className="inline-flex h-9 items-center gap-2 rounded-xl border border-zinc-700 px-3 text-xs font-medium text-zinc-200 hover:bg-zinc-800 disabled:opacity-50"
+                      >
+                        {busy && feedback.type === "saving" ? <Loader2 className="animate-spin" size={13} /> : <Server size={13} />}
+                        Save connection
+                      </button>
                       {provider.local && (
                         <button
                           type="button"
                           onClick={() => void discoverLocalModels()}
-                          disabled={busy || !baseURL.trim()}
-                          className="mt-4 inline-flex h-10 items-center gap-2 rounded-xl border border-zinc-700 px-3 text-xs text-zinc-200 hover:bg-zinc-900 disabled:opacity-40"
+                          disabled={busy}
+                          className="inline-flex h-9 items-center gap-2 rounded-xl bg-white px-3 text-xs font-medium text-black disabled:opacity-50"
                         >
-                          {busy ? (
-                            <Loader2 size={13} className="animate-spin" />
-                          ) : (
-                            <Laptop size={13} />
-                          )}
-                          Connect & discover models
+                          <Zap size={13} /> Connect & discover
                         </button>
                       )}
+                      {savedForCurrentMode && provider.id !== "cryzo" && (
+                        <span className="inline-flex items-center gap-1 text-[11px] text-emerald-400"><CheckCircle2 size={12} /> Connected</span>
+                      )}
                     </div>
-                  )}
-                </div>
-              )}
 
-              {feedback.message && (
-                <div
-                  className={`mt-4 flex items-start gap-2 rounded-xl border px-3 py-2.5 text-xs leading-5 ${
-                    feedback.type === "error"
-                      ? "border-red-900/70 bg-red-950/20 text-red-300"
-                      : feedback.type === "saved" || feedback.type === "success"
-                        ? "border-green-900/60 bg-green-950/20 text-green-300"
-                        : "border-zinc-800 bg-zinc-900 text-zinc-400"
-                  }`}
-                >
-                  {(feedback.type === "saved" || feedback.type === "success") && (
-                    <CheckCircle2 size={14} className="mt-0.5 shrink-0" />
-                  )}
-                  <span>{feedback.message}</span>
-                </div>
-              )}
+                    {feedback.message && (
+                      <p className={`mt-3 text-xs ${feedback.type === "error" ? "text-red-400" : feedback.type === "success" || feedback.type === "saved" ? "text-emerald-400" : "text-zinc-500"}`}>
+                        {feedback.message}
+                      </p>
+                    )}
+                  </section>
+                )}
+              </main>
             </div>
 
-            <div className="flex items-center justify-between gap-2 border-t border-zinc-800 px-4 py-3 sm:px-5">
-              <button
-                type="button"
-                onClick={() => setOpen(false)}
-                className="h-10 rounded-lg px-3 text-sm text-zinc-500 hover:text-white"
-              >
-                Close
-              </button>
+            <footer className="flex items-center justify-between gap-3 border-t border-zinc-800 bg-black/40 px-4 py-3 sm:px-5">
+              <div className="min-w-0 text-xs text-zinc-500">
+                {provider.id === "cryzo" ? (
+                  <span className="inline-flex items-center gap-1.5"><Sparkles size={13} /> {modelId === "cryzo/free-auto" ? "Free Auto · 0 message credits" : "Managed premium · usage-based message credits"}</span>
+                ) : (
+                  <span>BYOK · unlimited app creation · 0 Cryzo message credits</span>
+                )}
+              </div>
               <button
                 type="button"
                 onClick={() => void apply()}
                 disabled={busy || !modelId.trim()}
-                className="inline-flex h-10 items-center gap-2 rounded-xl bg-white px-4 text-sm font-semibold text-black disabled:opacity-40"
+                className="inline-flex h-10 shrink-0 items-center gap-2 rounded-xl bg-white px-4 text-sm font-semibold text-black disabled:opacity-40"
               >
-                {busy && <Loader2 size={14} className="animate-spin" />}
-                Use {displayModelName(modelId || "model")}
+                {busy ? <Loader2 className="animate-spin" size={14} /> : null}
+                Use model
               </button>
-            </div>
+            </footer>
           </div>
         </div>
       )}
