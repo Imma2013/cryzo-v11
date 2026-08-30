@@ -33,6 +33,9 @@ export const create = mutation({
       title: "New Chat",
       chatMode: args.chatMode,
       composioSessionId: null,
+      modelProvider: "cryzo",
+      modelId: "minimax/minimax-m3:free",
+      modelCredentialMode: "cryzo",
       createdAt: now,
       updatedAt: now,
     });
@@ -82,6 +85,30 @@ export const updateChatMode = mutation({
     await requireOwner(ctx, args.id);
     await ctx.db.patch(args.id, {
       chatMode: args.chatMode,
+      updatedAt: Date.now(),
+    });
+  },
+});
+
+export const updateModel = mutation({
+  args: {
+    id: v.id("conversations"),
+    providerId: v.string(),
+    modelId: v.string(),
+    credentialMode: v.union(
+      v.literal("cryzo"),
+      v.literal("device"),
+      v.literal("account"),
+    ),
+    baseUrl: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    await requireOwner(ctx, args.id);
+    await ctx.db.patch(args.id, {
+      modelProvider: args.providerId,
+      modelId: args.modelId,
+      modelCredentialMode: args.credentialMode,
+      modelBaseUrl: args.baseUrl?.trim() || undefined,
       updatedAt: Date.now(),
     });
   },
