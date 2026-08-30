@@ -1,19 +1,25 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { usePathname } from "next/navigation";
+import { useAuthToken } from "@convex-dev/auth/react";
 import {
   CheckCircle2,
   Database,
   Loader2,
   Save,
   Server,
+  Smartphone,
   X,
 } from "lucide-react";
 import { useAuth } from "@/providers/AuthProvider";
 import {
   readDeveloperToken,
+  readSupabaseProject,
   storeDeveloperToken,
+  storeSupabaseProject,
   type DeveloperConnection,
+  type SupabaseProjectSelection,
 } from "@/lib/developer-connections";
 
 type Toolkit = {
@@ -25,13 +31,21 @@ type Toolkit = {
   connectedAccountId?: string;
 };
 
-type DeveloperDrafts = Record<"github" | "vercel" | "supabase", string>;
+type SupabaseProject = {
+  id: string;
+  name: string;
+  region?: string;
+  status?: string;
+};
+
+type DeveloperDrafts = Record<"github" | "vercel" | "supabase" | "expo", string>;
 
 function developerDrafts(): DeveloperDrafts {
   return {
     github: readDeveloperToken("github"),
     vercel: readDeveloperToken("vercel"),
     supabase: readDeveloperToken("supabase"),
+    expo: readDeveloperToken("expo"),
   };
 }
 
@@ -43,6 +57,8 @@ export function ConnectionsModal({
   onClose: () => void;
 }) {
   const { userId } = useAuth();
+  const authToken = useAuthToken();
+  const pathname = usePathname();
   const [toolkits, setToolkits] = useState<Toolkit[]>([]);
   const [loading, setLoading] = useState(false);
   const [failedLogoSlugs, setFailedLogoSlugs] = useState<Set<string>>(
@@ -52,6 +68,10 @@ export function ConnectionsModal({
     developerDrafts(),
   );
   const [savedConnection, setSavedConnection] = useState<string | null>(null);
+  const [supabaseProjects, setSupabaseProjects] = useState<SupabaseProject[]>([]);
+  const [selectedSupabase, setSelectedSupabase] = useState<SupabaseProjectSelection | null>(
+    () => readSupabaseProject(),
+  );
   const [supabaseStatus, setSupabaseStatus] = useState<{
     type: "idle" | "loading" | "success" | "error";
     message?: string;
@@ -72,16 +92,15 @@ export function ConnectionsModal({
   useEffect(() => {
     if (!open) return;
     setDeveloperTokens(developerDrafts());
+    setSelectedSupabase(readSupabaseProject());
     void fetchToolkits();
   }, [open, userId]);
 
   useEffect(() => {
     if (!open) return;
-
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") onClose();
     };
-
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [open, onClose]);
@@ -108,16 +127,11 @@ export function ConnectionsModal({
   };
 
   const markLogoFailed = (slug: string) => {
-    setFailedLogoSlugs((current) => {
-      const next = new Set(current);
-      next.add(slug);
-      return next;
-    });
+    setFailedLogoSlugs((current) => new Set(current).add(slug));
   };
 
   const saveDeveloperConnection = (connection: DeveloperConnection) => {
-    if (connection === "netlify") return;
-    const value = developerTokens[connection];
+    const value = developerTokens[connection as keyof DeveloperDrafts] ?? "";
     storeDeveloperToken(connection, value);
     setSavedConnection(connection);
     window.setTimeout(() => setSavedConnection(null), 1600);
@@ -126,7 +140,7 @@ export function ConnectionsModal({
   const verifySupabase = async () => {
     const token = developerTokens.supabase.trim();
     if (!token) return;
-    setSupabaseStatus({ type: "loading", message: "Checking Supabase token..." });
+    setSupabaseStatus({ type: "loading", message: "Loading Supabase projects..." });
     const response = await fetch("/api/developer/supabase", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -142,11 +156,56 @@ export function ConnectionsModal({
     }
 
     storeDeveloperToken("supabase", token);
-    const count = Array.isArray(data.projects) ? data.projects.length : 0;
+    const projects = Array.isArray(data.projects) ? data.projects : [];
+    setSupabaseProjects(projects);
     setSupabaseStatus({
       type: "success",
-      message: `Connected${count ? ` · ${count} project${count === 1 ? "" : "s"}` : ""}`,
+      message: `Connected · ${projects.length} project${projects.length === 1 ? "" : "s"}`,
     });
+  };
+
+  const selectSupabaseProject = async (projectRef: string) => {
+    const token = developerTokens.supabase.trim() || readDeveloperToken("supabase");
+    if (!token || !projectRef) return;
+    setSupabaseStatus({ type: "loading", message: "Connecting project..." });
+
+    const response = await fetch("/api/developer/supabase/project", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token, projectRef }),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      setSupabaseStatus({ type: "error", message: data.error || "Unable to select project" });
+      return;
+    }
+
+    const project = data.project as SupabaseProjectSelection;
+    storeDeveloperToken("supabase", token);
+    storeSupabaseProject(project);
+    setSelectedSupabase(project);
+
+    const conversationId = pathname.match(/^\/chat\/([^/]+)$/)?.[1];
+    if (conversationId && authToken) {
+      const runtimeResponse = await fetch("/api/developer/supabase/runtime", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${authToken}`,
+        },
+        body: JSON.stringify({ conversationId, project }),
+      });
+      if (!runtimeResponse.ok) {
+        const runtimeData = await runtimeResponse.json();
+        setSupabaseStatus({
+          type: "error",
+          message: runtimeData.error || "Project selected, but preview configuration failed",
+        });
+        return;
+      }
+    }
+
+    setSupabaseStatus({ type: "success", message: `Using ${project.name}` });
   };
 
   const developerCards = useMemo(
@@ -166,11 +225,11 @@ export function ConnectionsModal({
         icon: Server,
       },
       {
-        id: "supabase" as const,
-        name: "Supabase",
-        description: "Connect Supabase Management API access for generated apps.",
-        placeholder: "sbp_...",
-        icon: Database,
+        id: "expo" as const,
+        name: "Expo / EAS",
+        description: "Build iOS and Android store files from Cryzo's mobile wrapper.",
+        placeholder: "Expo access token",
+        icon: Smartphone,
       },
     ],
     [],
@@ -191,7 +250,7 @@ export function ConnectionsModal({
           <div>
             <h2 className="text-lg font-semibold text-white">Connections</h2>
             <p className="mt-1 text-sm text-zinc-400">
-              App integrations power agent actions. Developer connections power code, hosting, and backends.
+              App integrations power agent actions. Developer connections power code, hosting, backends, and store builds.
             </p>
           </div>
           <button
@@ -218,22 +277,16 @@ export function ConnectionsModal({
                 const Icon = connection.icon;
                 const isSaved = savedConnection === connection.id;
                 return (
-                  <div
-                    key={connection.id}
-                    className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4"
-                  >
+                  <div key={connection.id} className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4">
                     <div className="flex items-start gap-3">
                       <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-zinc-900 text-zinc-200">
                         <Icon size={19} />
                       </div>
                       <div className="min-w-0 flex-1">
                         <div className="text-sm font-medium text-white">{connection.name}</div>
-                        <div className="mt-0.5 text-xs leading-5 text-zinc-500">
-                          {connection.description}
-                        </div>
+                        <div className="mt-0.5 text-xs leading-5 text-zinc-500">{connection.description}</div>
                       </div>
                     </div>
-
                     <div className="mt-3 flex gap-2">
                       <input
                         type="password"
@@ -246,45 +299,93 @@ export function ConnectionsModal({
                         }
                         placeholder={connection.placeholder}
                         autoComplete="off"
-                        className="min-w-0 flex-1 rounded-lg border border-zinc-800 bg-black px-3 py-2 text-sm text-white outline-none transition-colors placeholder:text-zinc-600 focus:border-zinc-600"
+                        className="min-w-0 flex-1 rounded-lg border border-zinc-800 bg-black px-3 py-2 text-base text-white outline-none transition-colors placeholder:text-zinc-600 focus:border-zinc-600 sm:text-sm"
                       />
                       <button
                         type="button"
-                        onClick={() =>
-                          connection.id === "supabase"
-                            ? void verifySupabase()
-                            : saveDeveloperConnection(connection.id)
-                        }
-                        disabled={
-                          !developerTokens[connection.id].trim() ||
-                          (connection.id === "supabase" && supabaseStatus.type === "loading")
-                        }
+                        onClick={() => saveDeveloperConnection(connection.id)}
+                        disabled={!developerTokens[connection.id].trim()}
                         className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-white px-3 text-xs font-medium text-black disabled:opacity-40"
                       >
-                        {connection.id === "supabase" && supabaseStatus.type === "loading" ? (
-                          <Loader2 size={14} className="animate-spin" />
-                        ) : isSaved ||
-                          (connection.id === "supabase" && supabaseStatus.type === "success") ? (
-                          <CheckCircle2 size={14} />
-                        ) : (
-                          <Save size={14} />
-                        )}
-                        {connection.id === "supabase" ? "Verify" : "Save"}
+                        {isSaved ? <CheckCircle2 size={14} /> : <Save size={14} />}
+                        Save
                       </button>
                     </div>
-
-                    {connection.id === "supabase" && supabaseStatus.message && (
-                      <p
-                        className={`mt-2 text-xs ${
-                          supabaseStatus.type === "error" ? "text-red-400" : "text-green-400"
-                        }`}
-                      >
-                        {supabaseStatus.message}
-                      </p>
-                    )}
                   </div>
                 );
               })}
+
+              <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4">
+                <div className="flex items-start gap-3">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-zinc-900 text-zinc-200">
+                    <Database size={19} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm font-medium text-white">Supabase</div>
+                    <div className="mt-0.5 text-xs leading-5 text-zinc-500">
+                      Select a real Supabase project for auth, data, migrations, and production environment variables.
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-3 flex gap-2">
+                  <input
+                    type="password"
+                    value={developerTokens.supabase}
+                    onChange={(event) =>
+                      setDeveloperTokens((current) => ({ ...current, supabase: event.target.value }))
+                    }
+                    placeholder="sbp_..."
+                    autoComplete="off"
+                    className="min-w-0 flex-1 rounded-lg border border-zinc-800 bg-black px-3 py-2 text-base text-white outline-none transition-colors placeholder:text-zinc-600 focus:border-zinc-600 sm:text-sm"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => void verifySupabase()}
+                    disabled={!developerTokens.supabase.trim() || supabaseStatus.type === "loading"}
+                    className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-white px-3 text-xs font-medium text-black disabled:opacity-40"
+                  >
+                    {supabaseStatus.type === "loading" ? (
+                      <Loader2 size={14} className="animate-spin" />
+                    ) : (
+                      <Database size={14} />
+                    )}
+                    Load projects
+                  </button>
+                </div>
+
+                {(supabaseProjects.length > 0 || selectedSupabase) && (
+                  <div className="mt-3">
+                    <label className="mb-1.5 block text-xs font-medium text-zinc-400">Project</label>
+                    <select
+                      value={selectedSupabase?.ref || ""}
+                      onChange={(event) => void selectSupabaseProject(event.target.value)}
+                      className="h-10 w-full rounded-lg border border-zinc-800 bg-black px-3 text-base text-white outline-none sm:text-sm"
+                    >
+                      <option value="">Select a project</option>
+                      {selectedSupabase && !supabaseProjects.some((project) => project.id === selectedSupabase.ref) && (
+                        <option value={selectedSupabase.ref}>{selectedSupabase.name}</option>
+                      )}
+                      {supabaseProjects.map((project) => (
+                        <option key={project.id} value={project.id}>
+                          {project.name}{project.region ? ` · ${project.region}` : ""}
+                        </option>
+                      ))}
+                    </select>
+                    {selectedSupabase && (
+                      <p className="mt-2 text-xs text-zinc-500">
+                        Runtime env: {selectedSupabase.url} · public key only
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {supabaseStatus.message && (
+                  <p className={`mt-2 text-xs ${supabaseStatus.type === "error" ? "text-red-400" : "text-green-400"}`}>
+                    {supabaseStatus.message}
+                  </p>
+                )}
+              </div>
             </div>
           </section>
 
@@ -307,12 +408,8 @@ export function ConnectionsModal({
                 {toolkits.map((t) => {
                   const logo = t.logoUrl || t.logo;
                   const showLogo = logo && !failedLogoSlugs.has(t.slug);
-
                   return (
-                    <div
-                      key={t.slug}
-                      className="flex items-center gap-4 border-b border-zinc-900 py-3 last:border-b-0"
-                    >
+                    <div key={t.slug} className="flex items-center gap-4 border-b border-zinc-900 py-3 last:border-b-0">
                       <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded bg-zinc-900">
                         {showLogo ? (
                           <img
@@ -325,14 +422,12 @@ export function ConnectionsModal({
                           <span className="text-xs text-zinc-500">{t.name.charAt(0)}</span>
                         )}
                       </div>
-
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-medium text-white">{t.name}</p>
                         <p className={`text-xs ${t.isConnected ? "text-green-400" : "text-zinc-500"}`}>
                           {t.isConnected ? "Connected" : "Not connected"}
                         </p>
                       </div>
-
                       {t.isConnected ? (
                         <button
                           type="button"
