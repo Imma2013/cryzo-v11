@@ -11,6 +11,7 @@ import { api } from "../../../../convex/_generated/api";
 import { readFileSync } from "fs";
 import { join } from "path";
 import { resolveServerModel } from "@/lib/server/model-provider";
+import { classifyCreditCost, describeCreditCharge } from "@/lib/stripe";
 import {
   buildCryzoSystemPrompt,
   buildPlanPrompt,
@@ -86,6 +87,21 @@ function shouldUseComposioTools(userMessage: string) {
   return EXTERNAL_ACTION_PATTERN.test(userMessage);
 }
 
+function messageText(message: UIMessage | undefined) {
+  return (
+    message?.parts
+      ?.filter((part) => part.type === "text")
+      .map((part) => ("text" in part ? part.text : ""))
+      .join(" ") || ""
+  );
+}
+
+function hasAttachedContent(messages: UIMessage[]) {
+  return messages.some((message) =>
+    message.parts?.some((part) => part.type !== "text"),
+  );
+}
+
 export const dynamic = "force-dynamic";
 
 export async function POST(req: Request) {
@@ -119,6 +135,8 @@ export async function POST(req: Request) {
     };
 
     const mode = chatMode === "plan" ? "plan" : "build";
+    const lastUserMsg = messages.filter((message) => message.role === "user").pop();
+    const lastUserText = messageText(lastUserMsg);
     const resolved = await resolveServerModel({
       providerId: modelProvider,
       modelId,
@@ -128,22 +146,33 @@ export async function POST(req: Request) {
       authToken,
     });
 
-    if (resolved.usesCryzoCredits && userId) {
-      const hasCredits = await convex.query(api.billing.hasCredits, {
+    const baseMessageCharge = resolved.usesCryzoCredits
+      ? classifyCreditCost({
+          text: lastUserText,
+          mode,
+          hasFiles: hasAttachedContent(messages),
+        })
+      : 0;
+    const messageCharge = Number(
+      (baseMessageCharge * resolved.creditMultiplier).toFixed(2),
+    );
+
+    if (messageCharge > 0 && userId) {
+      const hasCredits = await convex.query(api.billing.hasMessageCredits, {
         userId: userId as any,
-        amount: 1,
+        amount: messageCharge,
       });
       if (!hasCredits) {
-        return Response.json({ error: "no_credits" }, { status: 402 });
+        return Response.json(
+          {
+            error: "no_message_credits",
+            required: messageCharge,
+            modelId: resolved.modelId,
+          },
+          { status: 402 },
+        );
       }
     }
-
-    const lastUserMsg = messages.filter((message) => message.role === "user").pop();
-    const lastUserText =
-      lastUserMsg?.parts
-        ?.filter((part) => part.type === "text")
-        .map((part) => part.text)
-        .join(" ") || "";
 
     let storedProjectPlatforms: ProjectPlatform[] | null = null;
     if (!projectPlatforms?.length && conversationId && userId) {
@@ -185,6 +214,17 @@ export async function POST(req: Request) {
         stopWhen: stepCountIs(5),
       });
 
+      if (messageCharge > 0 && userId) {
+        void convex.mutation(api.billing.deductMessageCredits, {
+          userId: userId as any,
+          amount: messageCharge,
+          reason: "message",
+          description: describeCreditCharge(messageCharge),
+          providerId: resolved.providerId,
+          modelId: resolved.modelId,
+        });
+      }
+
       return result.toUIMessageStreamResponse({
         headers: {
           ...(composioSessionId
@@ -192,11 +232,26 @@ export async function POST(req: Request) {
             : {}),
           "x-cryzo-model-provider": resolved.providerId,
           "x-cryzo-model-id": resolved.modelId,
+          "x-cryzo-billing-tier": resolved.billingTier,
+          "x-cryzo-message-credits": String(messageCharge),
         },
       });
     }
 
     const useComposioTools = shouldUseComposioTools(lastUserText);
+    if (useComposioTools && userId) {
+      const hasIntegrationCredits = await convex.query(
+        api.billing.hasIntegrationCredits,
+        { userId: userId as any, amount: 1 },
+      );
+      if (!hasIntegrationCredits) {
+        return Response.json(
+          { error: "no_integration_credits", required: 1 },
+          { status: 402 },
+        );
+      }
+    }
+
     const systemPrompt = buildCryzoSystemPrompt({
       useComposioTools,
       recipeBlock,
@@ -218,6 +273,18 @@ export async function POST(req: Request) {
         tools,
         stopWhen: stepCountIs(10),
       });
+
+      // The first production meter is intentionally simple: one integration
+      // credit is charged when Cryzo provisions tool access for this request.
+      // We can evolve this to weighted per-tool execution as usage data grows.
+      if (userId) {
+        void convex.mutation(api.billing.deductIntegrationCredits, {
+          userId: userId as any,
+          amount: 1,
+          reason: "composio",
+          description: "External tool request",
+        });
+      }
     } else {
       result = streamText({
         model: resolved.model,
@@ -227,11 +294,14 @@ export async function POST(req: Request) {
       });
     }
 
-    if (resolved.usesCryzoCredits && userId) {
-      void convex.mutation(api.billing.deductCredits, {
+    if (messageCharge > 0 && userId) {
+      void convex.mutation(api.billing.deductMessageCredits, {
         userId: userId as any,
-        amount: 1,
+        amount: messageCharge,
         reason: "message",
+        description: describeCreditCharge(messageCharge),
+        providerId: resolved.providerId,
+        modelId: resolved.modelId,
       });
     }
 
@@ -242,6 +312,9 @@ export async function POST(req: Request) {
           : {}),
         "x-cryzo-model-provider": resolved.providerId,
         "x-cryzo-model-id": resolved.modelId,
+        "x-cryzo-billing-tier": resolved.billingTier,
+        "x-cryzo-message-credits": String(messageCharge),
+        "x-cryzo-integration-credits": useComposioTools ? "1" : "0",
       },
     });
   } catch (error) {
@@ -252,7 +325,8 @@ export async function POST(req: Request) {
         : message.includes("API key") ||
             message.includes("Choose") ||
             message.includes("base URL") ||
-            message.includes("Local providers")
+            message.includes("Local providers") ||
+            message.includes("is not configured")
           ? 400
           : 500;
     return Response.json({ error: message }, { status });
