@@ -1,5 +1,6 @@
 import type { ArtifactAction, FileMap } from "./types";
 import type { ProgressStage } from "./action-runner";
+import { readSupabaseRuntimeContext } from "@/lib/developer-connections";
 
 export interface StreamingRuntimeSnapshot {
   active: boolean;
@@ -131,7 +132,8 @@ function fileMapFromActions(actions: ArtifactAction[]) {
 function parseActionAttributes(raw: string) {
   const type = raw.match(/type="([^"]+)"/)?.[1] as ArtifactAction["type"] | undefined;
   const filePath = raw.match(/filePath="([^"]+)"/)?.[1];
-  return { type, filePath };
+  const operation = raw.match(/operation="([^"]+)"/)?.[1] as ArtifactAction["operation"] | undefined;
+  return { type, filePath, operation };
 }
 
 function parseCompletedActions(text: string): ArtifactAction[] {
@@ -142,9 +144,9 @@ function parseCompletedActions(text: string): ArtifactAction[] {
   let match: RegExpExecArray | null;
 
   while ((match = pattern.exec(text)) !== null) {
-    const { type, filePath } = parseActionAttributes(match[1]);
+    const { type, filePath, operation } = parseActionAttributes(match[1]);
     if (!type) continue;
-    actions.push({ type, filePath, content: match[2] });
+    actions.push({ type, filePath, operation, content: match[2] });
   }
 
   return actions;
@@ -209,11 +211,66 @@ function isInstallAction(action: ArtifactAction) {
   return action.type === "shell" && /(^|\s)npm\s+(install|i)(\s|$)/.test(action.content.trim());
 }
 
+async function executeSupabaseAction(
+  conversationId: string,
+  state: RuntimeState,
+  action: ArtifactAction,
+) {
+  const context = readSupabaseRuntimeContext();
+  if (!context) {
+    throw new Error("This project requested a Supabase action, but no Supabase project is selected in Developer Connections.");
+  }
+
+  state.progress = state.previewUrl ? "ready" : "writing";
+  appendOutput(
+    state,
+    `\nSupabase ${action.operation || "query"} → ${context.project.name}\n`,
+  );
+  emit(state);
+
+  await authenticatedPost("/api/developer/supabase/runtime", {
+    conversationId,
+    project: context.project,
+  });
+
+  const response = await fetch("/api/developer/supabase/query", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      token: context.token,
+      projectRef: context.project.ref,
+      query: action.content,
+      allowDestructive: false,
+    }),
+  });
+  const data = (await response.json()) as { success?: boolean; error?: string };
+  if (!response.ok) throw new Error(data.error || "Supabase action failed");
+
+  appendOutput(state, `Supabase ${action.operation || "query"} completed.\n`);
+  state.error = null;
+  emit(state);
+}
+
+export async function syncSupabaseRuntime(conversationId: string) {
+  const context = readSupabaseRuntimeContext();
+  if (!context) return false;
+  await authenticatedPost("/api/developer/supabase/runtime", {
+    conversationId,
+    project: context.project,
+  });
+  return true;
+}
+
 async function executeRemoteAction(
   conversationId: string,
   state: RuntimeState,
   action: ArtifactAction,
 ) {
+  if (action.type === "supabase") {
+    await executeSupabaseAction(conversationId, state, action);
+    return;
+  }
+
   let safeAction = action;
 
   if (action.type === "file") {
@@ -301,6 +358,7 @@ export async function prebootStreamingRuntime(conversationId: string) {
       state.active = true;
       applyResponse(state, response);
     }
+    await syncSupabaseRuntime(conversationId).catch(() => false);
   } catch (error) {
     state.initialized = false;
     throw error;
@@ -324,17 +382,23 @@ export async function restoreStreamingRuntime(
     const guarded = await callGuard({
       operation: "actions",
       conversationId,
-      actions,
+      actions: actions.filter((action) => action.type !== "supabase"),
     });
-    const safeActions = guarded.actions || actions;
+    const safeNonSupabase = guarded.actions || actions.filter((action) => action.type !== "supabase");
+    const safeActions = [
+      ...safeNonSupabase,
+      ...actions.filter((action) => action.type === "supabase"),
+    ];
     if (guarded.output) appendOutput(state, guarded.output);
     state.files = fileMapFromActions(safeActions);
     emit(state);
 
+    await syncSupabaseRuntime(conversationId).catch(() => false);
+
     const response = await callSandbox({
       operation: "restore",
       conversationId,
-      actions: safeActions,
+      actions: safeNonSupabase,
     });
     applyResponse(state, response);
 
@@ -359,6 +423,7 @@ export async function restartStreamingRuntime(conversationId: string) {
   emit(state);
 
   try {
+    await syncSupabaseRuntime(conversationId).catch(() => false);
     const validation = await callGuard({
       operation: "project",
       conversationId,
@@ -392,6 +457,7 @@ export async function refreshStreamingRuntimeLogs(conversationId: string) {
 
 export async function buildStreamingRuntime(conversationId: string) {
   const state = getState(conversationId);
+  await syncSupabaseRuntime(conversationId).catch(() => false);
   const validation = await callGuard({
     operation: "project",
     conversationId,
