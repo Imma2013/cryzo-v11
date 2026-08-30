@@ -20,6 +20,12 @@ export default defineSchema({
     title: v.string(),
     chatMode: v.optional(v.union(v.literal("build"), v.literal("plan"))),
     composioSessionId: v.union(v.string(), v.null()),
+    modelProvider: v.optional(v.string()),
+    modelId: v.optional(v.string()),
+    modelCredentialMode: v.optional(
+      v.union(v.literal("cryzo"), v.literal("device"), v.literal("account")),
+    ),
+    modelBaseUrl: v.optional(v.string()),
     createdAt: v.number(),
     updatedAt: v.number(),
   }).index("by_user", ["userId", "updatedAt"]),
@@ -89,6 +95,17 @@ export default defineSchema({
   })
     .index("by_user_conversation", ["userId", "conversationId", "updatedAt"])
     .index("by_build_id", ["buildId"]),
+
+  providerSecrets: defineTable({
+    userId: v.id("users"),
+    providerId: v.string(),
+    ciphertext: v.string(),
+    iv: v.string(),
+    tag: v.string(),
+    baseUrl: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index("by_user_provider", ["userId", "providerId"]),
 
   subscriptions: defineTable({
     userId: v.id("users"),
