@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useAuthToken } from "@convex-dev/auth/react";
 import {
   CheckCircle2,
@@ -81,14 +81,24 @@ function formatContext(value?: number | null) {
   return `${value} ctx`;
 }
 
-function ModelBadge({ children, tone = "neutral" }: { children: React.ReactNode; tone?: "neutral" | "free" | "premium" | "byok" }) {
+function ModelBadge({
+  children,
+  tone = "neutral",
+}: {
+  children: ReactNode;
+  tone?: "neutral" | "free" | "premium" | "byok";
+}) {
   const classes = {
     neutral: "border-zinc-800 bg-zinc-900 text-zinc-400",
     free: "border-emerald-900/70 bg-emerald-950/50 text-emerald-300",
     premium: "border-violet-900/70 bg-violet-950/50 text-violet-300",
     byok: "border-sky-900/70 bg-sky-950/50 text-sky-300",
   }[tone];
-  return <span className={`rounded-full border px-2 py-0.5 text-[10px] font-medium ${classes}`}>{children}</span>;
+  return (
+    <span className={`rounded-full border px-2 py-0.5 text-[10px] font-medium ${classes}`}>
+      {children}
+    </span>
+  );
 }
 
 export function ModelPicker({
@@ -189,18 +199,25 @@ export function ModelPicker({
       .catch(() => {});
   }, [open, authToken]);
 
-  const providerModels = useMemo(() => {
+  const providerModels = useMemo<CatalogModel[]>(() => {
     if (provider.id === "cryzo") {
       const query = search.trim().toLowerCase();
-      return CRYZO_MANAGED_MODELS.filter((model) =>
-        !query ||
-        model.name.toLowerCase().includes(query) ||
-        model.description.toLowerCase().includes(query) ||
-        model.providerName.toLowerCase().includes(query),
-      );
+      return CRYZO_MANAGED_MODELS.filter(
+        (model) =>
+          !query ||
+          model.name.toLowerCase().includes(query) ||
+          model.description.toLowerCase().includes(query) ||
+          model.providerName.toLowerCase().includes(query),
+      ).map((model) => ({
+        id: model.id,
+        name: model.name,
+        reasoning: model.reasoning,
+        toolCall: model.toolCall,
+        attachments: model.multimodal,
+      }));
     }
 
-    const items = discoveredModels.length
+    const items: CatalogModel[] = discoveredModels.length
       ? discoveredModels
       : catalog.providers?.[provider.id]?.models || [];
     const query = search.trim().toLowerCase();
@@ -350,7 +367,7 @@ export function ModelPicker({
             storeSessionProviderKey(providerId, apiKey);
             storeSessionProviderBaseURL(providerId, baseURL);
           }
-          setSavedDevice(Boolean(apiKey.trim()) || provider.local);
+          setSavedDevice(Boolean(apiKey.trim()) || Boolean(provider.local));
         }
       }
 
@@ -472,7 +489,8 @@ export function ModelPicker({
                   {provider.id === "cryzo" ? (
                     providerModels.map((model) => {
                       const active = modelId === model.id;
-                      const managed = CRYZO_MANAGED_MODELS.find((item) => item.id === model.id)!;
+                      const managed = CRYZO_MANAGED_MODELS.find((item) => item.id === model.id);
+                      if (!managed) return null;
                       return (
                         <button
                           key={model.id}
