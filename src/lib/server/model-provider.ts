@@ -1,5 +1,6 @@
 import { createOpenAI } from "@ai-sdk/openai";
 import { getProvider } from "@/lib/ai/models";
+import { getManagedModel } from "@/lib/ai/managed-models";
 import { resolveAccountProviderSecret } from "@/lib/server/provider-secrets";
 
 export type ServerModelRequest = {
@@ -26,6 +27,51 @@ const PROVIDER_BASE_URLS: Record<string, string> = {
   moonshotai: "https://api.moonshot.ai/v1",
 };
 
+function cryzoHeaders(provider: "openrouter" | "nvidia") {
+  return provider === "openrouter"
+    ? {
+        "HTTP-Referer": "https://www.cryzo.me",
+        "X-Title": "Cryzo",
+      }
+    : undefined;
+}
+
+function resolveManagedCryzoModel(requestedModel?: string) {
+  const managed = getManagedModel(requestedModel);
+  const apiKey =
+    managed.upstreamProvider === "openrouter"
+      ? process.env.OPENROUTER_API_KEY?.trim()
+      : process.env.NVIDIA_API_KEY?.trim();
+
+  if (!apiKey) {
+    const envName =
+      managed.upstreamProvider === "openrouter"
+        ? "OPENROUTER_API_KEY"
+        : "NVIDIA_API_KEY";
+    throw new Error(`${envName} is not configured`);
+  }
+
+  const baseURL =
+    managed.upstreamProvider === "openrouter"
+      ? "https://openrouter.ai/api/v1"
+      : "https://integrate.api.nvidia.com/v1";
+  const provider = createOpenAI({
+    baseURL,
+    apiKey,
+    headers: cryzoHeaders(managed.upstreamProvider),
+  });
+
+  return {
+    model: provider.chat(managed.upstreamModel),
+    providerId: "cryzo",
+    modelId: managed.id,
+    upstreamModelId: managed.upstreamModel,
+    billingTier: managed.tier,
+    usesCryzoCredits: managed.tier === "premium",
+    creditMultiplier: managed.creditMultiplier,
+  } as const;
+}
+
 export async function resolveServerModel(request: ServerModelRequest) {
   const providerId = request.providerId?.trim() || "cryzo";
   const requestedModel = request.modelId?.trim();
@@ -35,22 +81,7 @@ export async function resolveServerModel(request: ServerModelRequest) {
   }
 
   if (providerId === "cryzo") {
-    const apiKey = process.env.OPENROUTER_API_KEY?.trim();
-    if (!apiKey) throw new Error("OPENROUTER_API_KEY is not configured");
-    const provider = createOpenAI({
-      baseURL: "https://openrouter.ai/api/v1",
-      apiKey,
-      headers: {
-        "HTTP-Referer": "https://www.cryzo.me",
-        "X-Title": "Cryzo",
-      },
-    });
-    return {
-      model: provider.chat(requestedModel || "minimax/minimax-m3:free"),
-      providerId,
-      modelId: requestedModel || "minimax/minimax-m3:free",
-      usesCryzoCredits: true,
-    };
+    return resolveManagedCryzoModel(requestedModel);
   }
 
   const definition = getProvider(providerId);
@@ -102,6 +133,9 @@ export async function resolveServerModel(request: ServerModelRequest) {
     model: provider.chat(requestedModel),
     providerId,
     modelId: requestedModel,
+    upstreamModelId: requestedModel,
+    billingTier: "byok" as const,
     usesCryzoCredits: false,
+    creditMultiplier: 0,
   };
 }
