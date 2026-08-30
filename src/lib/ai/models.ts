@@ -172,6 +172,15 @@ export function readDeviceProviderKey(providerId: string) {
   return localStorage.getItem(storageKey(providerId, "api-key")) || "";
 }
 
+export function readSessionProviderKey(providerId: string) {
+  if (typeof window === "undefined") return "";
+  return sessionStorage.getItem(storageKey(providerId, "api-key")) || "";
+}
+
+export function readRuntimeProviderKey(providerId: string) {
+  return readSessionProviderKey(providerId) || readDeviceProviderKey(providerId);
+}
+
 export function storeDeviceProviderKey(providerId: string, value: string) {
   if (typeof window === "undefined") return;
   const key = storageKey(providerId, "api-key");
@@ -180,9 +189,31 @@ export function storeDeviceProviderKey(providerId: string, value: string) {
   else localStorage.removeItem(key);
 }
 
+export function storeSessionProviderKey(providerId: string, value: string) {
+  if (typeof window === "undefined") return;
+  const key = storageKey(providerId, "api-key");
+  const trimmed = value.trim();
+  if (trimmed) sessionStorage.setItem(key, trimmed);
+  else sessionStorage.removeItem(key);
+}
+
+export function clearSessionProviderKey(providerId: string) {
+  if (typeof window === "undefined") return;
+  sessionStorage.removeItem(storageKey(providerId, "api-key"));
+}
+
 export function readDeviceProviderBaseURL(providerId: string) {
   if (typeof window === "undefined") return "";
   return localStorage.getItem(storageKey(providerId, "base-url")) || "";
+}
+
+export function readSessionProviderBaseURL(providerId: string) {
+  if (typeof window === "undefined") return "";
+  return sessionStorage.getItem(storageKey(providerId, "base-url")) || "";
+}
+
+export function readRuntimeProviderBaseURL(providerId: string) {
+  return readSessionProviderBaseURL(providerId) || readDeviceProviderBaseURL(providerId);
 }
 
 export function storeDeviceProviderBaseURL(providerId: string, value: string) {
@@ -191,6 +222,14 @@ export function storeDeviceProviderBaseURL(providerId: string, value: string) {
   const trimmed = value.trim();
   if (trimmed) localStorage.setItem(key, trimmed);
   else localStorage.removeItem(key);
+}
+
+export function storeSessionProviderBaseURL(providerId: string, value: string) {
+  if (typeof window === "undefined") return;
+  const key = storageKey(providerId, "base-url");
+  const trimmed = value.trim();
+  if (trimmed) sessionStorage.setItem(key, trimmed);
+  else sessionStorage.removeItem(key);
 }
 
 export function displayModelName(modelId: string) {
