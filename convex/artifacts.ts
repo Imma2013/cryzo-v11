@@ -32,10 +32,16 @@ export const create = mutation({
     title: v.string(),
     actions: v.array(
       v.object({
-        type: v.union(v.literal("file"), v.literal("shell"), v.literal("start")),
+        type: v.union(
+          v.literal("file"),
+          v.literal("shell"),
+          v.literal("start"),
+          v.literal("supabase"),
+        ),
         filePath: v.optional(v.string()),
+        operation: v.optional(v.union(v.literal("migration"), v.literal("query"))),
         content: v.string(),
-      })
+      }),
     ),
   },
   handler: async (ctx, args) => {
@@ -43,9 +49,7 @@ export const create = mutation({
 
     const existing = await ctx.db
       .query("artifacts")
-      .withIndex("by_conversation", (q) =>
-        q.eq("conversationId", args.conversationId)
-      )
+      .withIndex("by_conversation", (q) => q.eq("conversationId", args.conversationId))
       .filter((q) => q.eq(q.field("artifactId"), args.artifactId))
       .first();
 
@@ -69,9 +73,7 @@ export const listByConversation = query({
 
     return await ctx.db
       .query("artifacts")
-      .withIndex("by_conversation", (q) =>
-        q.eq("conversationId", args.conversationId)
-      )
+      .withIndex("by_conversation", (q) => q.eq("conversationId", args.conversationId))
       .order("asc")
       .collect();
   },
