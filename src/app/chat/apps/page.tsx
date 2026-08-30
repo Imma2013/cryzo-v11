@@ -1,30 +1,100 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Loader2, Search } from "lucide-react";
+import { useAuthToken } from "@convex-dev/auth/react";
+import {
+  CheckCircle2,
+  Database,
+  Github,
+  Loader2,
+  Rocket,
+  Save,
+  Search,
+  Server,
+  Triangle,
+} from "lucide-react";
 import { useAuth } from "@/providers/AuthProvider";
 import {
   INITIAL_APP_CONNECTIONS,
   type AppConnection,
 } from "@/lib/composio-apps";
+import {
+  readDeveloperToken,
+  readSupabaseProject,
+  storeDeveloperToken,
+  storeSupabaseProject,
+  type DeveloperConnection,
+  type SupabaseProjectSelection,
+} from "@/lib/developer-connections";
 
 type Toolkit = AppConnection;
+type SupabaseProject = {
+  id: string;
+  name: string;
+  region?: string;
+  status?: string;
+};
+
+type DeveloperId = "github" | "vercel" | "netlify" | "supabase";
 
 const PENDING_TOOLKIT_KEY = "cryzo:pending-composio-toolkit";
+const DEVELOPER_APPS: Array<{
+  id: Exclude<DeveloperId, "supabase">;
+  name: string;
+  description: string;
+  placeholder: string;
+  icon: typeof Github;
+}> = [
+  {
+    id: "github",
+    name: "GitHub",
+    description: "Sync generated source code to repositories.",
+    placeholder: "github_pat_... or ghp_...",
+    icon: Github,
+  },
+  {
+    id: "vercel",
+    name: "Vercel",
+    description: "Deploy projects to your own Vercel account.",
+    placeholder: "Vercel access token",
+    icon: Triangle,
+  },
+  {
+    id: "netlify",
+    name: "Netlify",
+    description: "Build and deploy generated apps to your Netlify account.",
+    placeholder: "Netlify access token",
+    icon: Rocket,
+  },
+];
 
 export default function AppsPage() {
   const { userId, isLoading } = useAuth();
+  const authToken = useAuthToken();
   const [toolkits, setToolkits] = useState<Toolkit[]>(INITIAL_APP_CONNECTIONS);
   const [checkedConnections, setCheckedConnections] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [busyToolkit, setBusyToolkit] = useState<string | null>(null);
   const [pendingToolkit, setPendingToolkit] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const [developerTokens, setDeveloperTokens] = useState<Record<DeveloperId, string>>({
+    github: "",
+    vercel: "",
+    netlify: "",
+    supabase: "",
+  });
+  const [savedDeveloper, setSavedDeveloper] = useState<string | null>(null);
+  const [supabaseProjects, setSupabaseProjects] = useState<SupabaseProject[]>([]);
+  const [selectedSupabase, setSelectedSupabase] = useState<SupabaseProjectSelection | null>(null);
+  const [supabaseStatus, setSupabaseStatus] = useState<{
+    type: "idle" | "loading" | "success" | "error";
+    message?: string;
+  }>({ type: "idle" });
 
   const filtered = useMemo(() => {
     if (!search.trim()) return toolkits;
     const q = search.toLowerCase();
-    return toolkits.filter((t) => t.name.toLowerCase().includes(q));
+    return toolkits.filter((toolkit) => toolkit.name.toLowerCase().includes(q));
   }, [toolkits, search]);
 
   const fetchConnections = useCallback(async (forceRefresh = false) => {
@@ -51,6 +121,23 @@ export default function AppsPage() {
       setRefreshing(false);
     }
   }, [userId]);
+
+  useEffect(() => {
+    setDeveloperTokens({
+      github: readDeveloperToken("github"),
+      vercel: readDeveloperToken("vercel"),
+      netlify: readDeveloperToken("netlify"),
+      supabase: readDeveloperToken("supabase"),
+    });
+    setSelectedSupabase(readSupabaseProject());
+
+    const id = window.location.hash.replace(/^#/, "");
+    if (id) {
+      window.setTimeout(() => {
+        document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "center" });
+      }, 150);
+    }
+  }, []);
 
   useEffect(() => {
     if (
@@ -145,97 +232,279 @@ export default function AppsPage() {
     setBusyToolkit(null);
   }
 
+  function saveDeveloper(connection: DeveloperConnection) {
+    storeDeveloperToken(connection, developerTokens[connection as DeveloperId] || "");
+    setSavedDeveloper(connection);
+    window.setTimeout(() => setSavedDeveloper(null), 1400);
+  }
+
+  async function verifySupabase() {
+    const token = developerTokens.supabase.trim();
+    if (!token) return;
+    setSupabaseStatus({ type: "loading", message: "Loading Supabase projects..." });
+    try {
+      const response = await fetch("/api/developer/supabase", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Supabase connection failed");
+      storeDeveloperToken("supabase", token);
+      const projects = Array.isArray(data.projects) ? data.projects : [];
+      setSupabaseProjects(projects);
+      setSupabaseStatus({
+        type: "success",
+        message: `Connected · ${projects.length} project${projects.length === 1 ? "" : "s"}`,
+      });
+    } catch (error) {
+      setSupabaseStatus({
+        type: "error",
+        message: error instanceof Error ? error.message : "Supabase connection failed",
+      });
+    }
+  }
+
+  async function selectSupabaseProject(projectRef: string) {
+    const token = developerTokens.supabase.trim() || readDeveloperToken("supabase");
+    if (!token || !projectRef) return;
+    setSupabaseStatus({ type: "loading", message: "Connecting project..." });
+    try {
+      const response = await fetch("/api/developer/supabase/project", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token, projectRef }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Unable to select project");
+      const project = data.project as SupabaseProjectSelection;
+      storeDeveloperToken("supabase", token);
+      storeSupabaseProject(project);
+      setSelectedSupabase(project);
+      setSupabaseStatus({ type: "success", message: `Using ${project.name}` });
+    } catch (error) {
+      setSupabaseStatus({
+        type: "error",
+        message: error instanceof Error ? error.message : "Unable to select project",
+      });
+    }
+  }
+
   return (
-    <div className="flex h-full flex-col overflow-y-auto bg-black p-6">
-      <div className="mx-auto w-full max-w-4xl">
-        <h1 className="text-2xl font-bold text-white">App Connections</h1>
+    <div className="flex h-full flex-col overflow-y-auto bg-black px-4 py-5 sm:p-6">
+      <div className="mx-auto w-full max-w-5xl pb-12">
+        <h1 className="text-2xl font-bold text-white">Apps</h1>
         <p className="mt-1 text-sm text-zinc-400">
-          Connect your apps to give your agent access.
+          Connect developer infrastructure and apps your Cryzo agent can use.
         </p>
 
-        {toolkits.length > 0 && (
-          <div className="relative mt-4">
-            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search apps..."
-              className="w-full rounded-lg border border-zinc-800 bg-zinc-900 py-2.5 pl-9 pr-4 text-sm text-white placeholder-zinc-500 focus:border-zinc-600 focus:outline-none"
-            />
+        <section className="mt-7">
+          <div className="mb-3">
+            <h2 className="text-base font-semibold text-white">Developer Apps</h2>
+            <p className="mt-1 text-xs leading-5 text-zinc-500">
+              Access-token services for source control, hosting, and your app backend.
+            </p>
           </div>
-        )}
 
-        {filtered.length === 0 ? (
-          <p className="py-20 text-center text-sm text-zinc-500">
-            {search ? "No apps match your search." : "No apps available."}
-          </p>
-        ) : (
-          <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {filtered.map((t) => {
-              const isBusy = busyToolkit === t.slug;
-              const isChecking = !checkedConnections || (isBusy && !t.isConnected);
-
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+            {DEVELOPER_APPS.map((app) => {
+              const Icon = app.icon;
+              const value = developerTokens[app.id];
+              const connected = Boolean(readDeveloperToken(app.id));
               return (
-              <div
-                key={t.slug}
-                className="flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-950 p-4"
-              >
-                <div className="flex items-center gap-3">
-                  {t.logo ? (
-                    <img
-                      src={t.logo}
-                      alt={t.name}
-                      className="h-8 w-8 rounded"
-                    />
-                  ) : (
-                    <div className="flex h-8 w-8 items-center justify-center rounded bg-zinc-800 text-xs font-medium text-zinc-400">
-                      {t.name.charAt(0)}
+                <div id={app.id} key={app.id} className="scroll-mt-24 rounded-xl border border-zinc-800 bg-zinc-950 p-4">
+                  <div className="flex items-start gap-3">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-zinc-900 text-zinc-200">
+                      <Icon size={19} />
                     </div>
-                  )}
-                  <div>
-                    <p className="text-sm font-medium text-white">{t.name}</p>
-                    <p
-                      className={`text-xs ${
-                        t.isConnected ? "text-green-400" : "text-zinc-500"
-                      }`}
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <p className="text-sm font-medium text-white">{app.name}</p>
+                        {connected && <span className="text-[11px] text-green-400">Connected</span>}
+                      </div>
+                      <p className="mt-0.5 text-xs leading-5 text-zinc-500">{app.description}</p>
+                    </div>
+                  </div>
+                  <div className="mt-3 flex gap-2">
+                    <input
+                      type="password"
+                      value={value}
+                      onChange={(event) =>
+                        setDeveloperTokens((current) => ({ ...current, [app.id]: event.target.value }))
+                      }
+                      placeholder={app.placeholder}
+                      autoComplete="off"
+                      className="min-w-0 flex-1 rounded-lg border border-zinc-800 bg-black px-3 py-2 text-base text-white outline-none placeholder:text-zinc-600 focus:border-zinc-600 sm:text-sm"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => saveDeveloper(app.id)}
+                      disabled={!value.trim()}
+                      className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-white px-3 text-xs font-medium text-black disabled:opacity-40"
                     >
-                      {t.isConnected
-                        ? "Connected"
-                        : isChecking
-                          ? "Checking..."
-                          : "Not connected"}
-                    </p>
+                      {savedDeveloper === app.id ? <CheckCircle2 size={14} /> : <Save size={14} />}
+                      Save
+                    </button>
                   </div>
                 </div>
-                {t.isConnected ? (
-                  <button
-                    onClick={() => disconnect(t.connectedAccountId!, t.slug)}
-                    disabled={isBusy || !userId}
-                    className="rounded border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 transition-colors hover:border-red-800 hover:text-red-400 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {isBusy ? "Disconnecting" : "Disconnect"}
-                  </button>
-                ) : (
-                  <button
-                    onClick={() => connect(t.slug)}
-                    disabled={isBusy || !userId}
-                    className="rounded bg-white px-3 py-1.5 text-xs font-medium text-black transition-colors hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {isBusy ? "Checking" : "Connect"}
-                  </button>
-                )}
-              </div>
               );
             })}
+
+            <div id="supabase" className="scroll-mt-24 rounded-xl border border-zinc-800 bg-zinc-950 p-4">
+              <div className="flex items-start gap-3">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-zinc-900 text-zinc-200">
+                  <Database size={19} />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <p className="text-sm font-medium text-white">Supabase</p>
+                    {selectedSupabase && <span className="text-[11px] text-green-400">Connected</span>}
+                  </div>
+                  <p className="mt-0.5 text-xs leading-5 text-zinc-500">
+                    Select a Supabase project for auth, data, migrations and production environment variables.
+                  </p>
+                </div>
+              </div>
+
+              <div className="mt-3 flex gap-2">
+                <input
+                  type="password"
+                  value={developerTokens.supabase}
+                  onChange={(event) =>
+                    setDeveloperTokens((current) => ({ ...current, supabase: event.target.value }))
+                  }
+                  placeholder="sbp_..."
+                  autoComplete="off"
+                  className="min-w-0 flex-1 rounded-lg border border-zinc-800 bg-black px-3 py-2 text-base text-white outline-none placeholder:text-zinc-600 focus:border-zinc-600 sm:text-sm"
+                />
+                <button
+                  type="button"
+                  onClick={() => void verifySupabase()}
+                  disabled={!developerTokens.supabase.trim() || supabaseStatus.type === "loading"}
+                  className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-white px-3 text-xs font-medium text-black disabled:opacity-40"
+                >
+                  {supabaseStatus.type === "loading" ? <Loader2 size={14} className="animate-spin" /> : <Database size={14} />}
+                  Projects
+                </button>
+              </div>
+
+              {(supabaseProjects.length > 0 || selectedSupabase) && (
+                <div className="mt-3">
+                  <label className="mb-1.5 block text-xs font-medium text-zinc-400">Project</label>
+                  <select
+                    value={selectedSupabase?.ref || ""}
+                    onChange={(event) => void selectSupabaseProject(event.target.value)}
+                    className="h-10 w-full rounded-lg border border-zinc-800 bg-black px-3 text-base text-white outline-none sm:text-sm"
+                  >
+                    <option value="">Select a project</option>
+                    {selectedSupabase && !supabaseProjects.some((project) => project.id === selectedSupabase.ref) && (
+                      <option value={selectedSupabase.ref}>{selectedSupabase.name}</option>
+                    )}
+                    {supabaseProjects.map((project) => (
+                      <option key={project.id} value={project.id}>
+                        {project.name}{project.region ? ` · ${project.region}` : ""}
+                      </option>
+                    ))}
+                  </select>
+                  {selectedSupabase && (
+                    <p className="mt-2 text-xs text-zinc-500">Selected: {selectedSupabase.name} · public app key only goes into generated apps.</p>
+                  )}
+                </div>
+              )}
+
+              {supabaseStatus.message && (
+                <p className={`mt-2 text-xs ${supabaseStatus.type === "error" ? "text-red-400" : "text-green-400"}`}>
+                  {supabaseStatus.message}
+                </p>
+              )}
+            </div>
           </div>
-        )}
-        {refreshing && (
-          <div className="mt-3 flex items-center justify-center gap-2 text-xs text-zinc-600">
-            <Loader2 size={12} className="animate-spin" />
-            <span>Refreshing connection status...</span>
+        </section>
+
+        <div className="my-8 border-t border-zinc-900" />
+
+        <section>
+          <div className="mb-3">
+            <h2 className="text-base font-semibold text-white">Apps</h2>
+            <p className="mt-1 text-xs leading-5 text-zinc-500">
+              Composio-powered services Cryzo can act on when you ask.
+            </p>
           </div>
-        )}
+
+          {toolkits.length > 0 && (
+            <div className="relative mt-4">
+              <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
+              <input
+                type="text"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Search apps..."
+                className="w-full rounded-lg border border-zinc-800 bg-zinc-900 py-2.5 pl-9 pr-4 text-base text-white placeholder-zinc-500 focus:border-zinc-600 focus:outline-none sm:text-sm"
+              />
+            </div>
+          )}
+
+          {filtered.length === 0 ? (
+            <p className="py-20 text-center text-sm text-zinc-500">
+              {search ? "No apps match your search." : "No apps available."}
+            </p>
+          ) : (
+            <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {filtered.map((toolkit) => {
+                const isBusy = busyToolkit === toolkit.slug;
+                const isChecking = !checkedConnections || (isBusy && !toolkit.isConnected);
+
+                return (
+                  <div
+                    key={toolkit.slug}
+                    className="flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-950 p-4"
+                  >
+                    <div className="flex min-w-0 items-center gap-3">
+                      {toolkit.logo ? (
+                        <img src={toolkit.logo} alt={toolkit.name} className="h-8 w-8 rounded" />
+                      ) : (
+                        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded bg-zinc-800 text-xs font-medium text-zinc-400">
+                          {toolkit.name.charAt(0)}
+                        </div>
+                      )}
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium text-white">{toolkit.name}</p>
+                        <p className={`text-xs ${toolkit.isConnected ? "text-green-400" : "text-zinc-500"}`}>
+                          {toolkit.isConnected ? "Connected" : isChecking ? "Checking..." : "Not connected"}
+                        </p>
+                      </div>
+                    </div>
+                    {toolkit.isConnected ? (
+                      <button
+                        onClick={() => disconnect(toolkit.connectedAccountId!, toolkit.slug)}
+                        disabled={isBusy || !userId}
+                        className="ml-2 rounded border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 transition-colors hover:border-red-800 hover:text-red-400 disabled:opacity-60"
+                      >
+                        {isBusy ? "Disconnecting" : "Disconnect"}
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => connect(toolkit.slug)}
+                        disabled={isBusy || !userId}
+                        className="ml-2 rounded bg-white px-3 py-1.5 text-xs font-medium text-black transition-colors hover:bg-zinc-200 disabled:opacity-60"
+                      >
+                        {isBusy ? "Checking" : "Connect"}
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          {refreshing && (
+            <div className="mt-3 flex items-center justify-center gap-2 text-xs text-zinc-600">
+              <Loader2 size={12} className="animate-spin" />
+              <span>Refreshing connection status...</span>
+            </div>
+          )}
+        </section>
+
+        {!authToken && <div className="sr-only">Loading session</div>}
       </div>
     </div>
   );
