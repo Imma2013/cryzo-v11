@@ -2,6 +2,7 @@
 
 import type { FileUIPart } from "ai";
 import type { ChatMode } from "@/components/ChatInput";
+import type { ProjectPlatform } from "@/lib/project-platform";
 
 export type InitialChatMessage = {
   conversationId: string;
@@ -10,7 +11,9 @@ export type InitialChatMessage = {
   files: FileUIPart[];
 };
 
-export type PendingAuthChatMessage = Omit<InitialChatMessage, "conversationId">;
+export type PendingAuthChatMessage = Omit<InitialChatMessage, "conversationId"> & {
+  projectPlatforms?: ProjectPlatform[];
+};
 
 let pendingInitialChatMessage: InitialChatMessage | null = null;
 let pendingAuthChatMessage: PendingAuthChatMessage | null = null;
