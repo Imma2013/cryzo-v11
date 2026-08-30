@@ -28,18 +28,27 @@ export async function POST(req: Request) {
   }
 
   const planConfig = PLANS[subscription.plan];
-  if (!planConfig.topupPriceId) {
-    return Response.json({ error: "Stripe top-up price is not configured" }, { status: 500 });
-  }
-
   const origin = new URL(req.url).origin;
   const stripe = getStripe();
   const quantity = credits / planConfig.topupCredits;
+  const lineItem = planConfig.topupPriceId
+    ? { price: planConfig.topupPriceId, quantity }
+    : {
+        price_data: {
+          currency: "usd",
+          unit_amount: planConfig.topupPrice,
+          product_data: {
+            name: `${planConfig.topupCredits} Cryzo message credits`,
+            description: "12-month message-credit top-up for Cryzo-managed premium AI",
+          },
+        },
+        quantity,
+      };
 
   const session = await stripe.checkout.sessions.create({
     mode: "payment",
     customer: subscription.stripeCustomerId,
-    line_items: [{ price: planConfig.topupPriceId, quantity }],
+    line_items: [lineItem],
     success_url: `${origin}/chat/billing?topup=true`,
     cancel_url: `${origin}/chat/billing`,
     metadata: {
