@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { Id } from "../../convex/_generated/dataModel";
+import { useAuth } from "@/providers/AuthProvider";
 import type { StreamingRuntimeSnapshot } from "@/lib/workspace/streaming-runtime";
 import {
   getStreamingRuntimeSnapshot,
@@ -14,6 +15,7 @@ import {
 
 export function useWorkspace(conversationId: Id<"conversations">) {
   const runtimeId = String(conversationId);
+  const { isAuthenticated, isLoading: authLoading } = useAuth();
   const [runtime, setRuntime] = useState<StreamingRuntimeSnapshot>(() =>
     getStreamingRuntimeSnapshot(runtimeId),
   );
@@ -36,13 +38,17 @@ export function useWorkspace(conversationId: Id<"conversations">) {
 
   // Hard refresh / old conversation restore. Convex remains the durable source
   // of project actions; execution now happens in a named persistent Vercel Sandbox.
+  // Do not restore until the current Convex session is fully authenticated. On a
+  // fast account switch, this prevents a new conversation from racing a stale
+  // browser auth token into the sandbox ownership check.
   useEffect(() => {
+    if (authLoading || !isAuthenticated) return;
     if (!artifacts?.length) return;
     if (isStreamingRuntimeActive(runtimeId)) return;
 
     const actions = artifacts.flatMap((artifact) => artifact.actions);
     void restoreStreamingRuntime(runtimeId, actions);
-  }, [artifacts, runtimeId]);
+  }, [artifacts, authLoading, isAuthenticated, runtimeId]);
 
   const firstFile = useMemo(
     () =>
@@ -57,7 +63,10 @@ export function useWorkspace(conversationId: Id<"conversations">) {
   }, [firstFile, runtime.files, selectedFile]);
 
   const isBooting =
-    runtime.active && runtime.progress !== "ready" && runtime.progress !== "error";
+    isAuthenticated &&
+    runtime.active &&
+    runtime.progress !== "ready" &&
+    runtime.progress !== "error";
 
   return {
     files: runtime.files,
