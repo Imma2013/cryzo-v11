@@ -81,6 +81,20 @@ export default defineSchema({
     ])
     .index("by_provider_slug", ["provider", "slug"]),
 
+  appBackends: defineTable({
+    userId: v.id("users"),
+    conversationId: v.id("conversations"),
+    provider: v.literal("convex"),
+    projectId: v.number(),
+    projectName: v.string(),
+    deploymentName: v.string(),
+    deploymentUrl: v.string(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_user_conversation", ["userId", "conversationId"])
+    .index("by_project_id", ["projectId"]),
+
   mobileBuilds: defineTable({
     userId: v.id("users"),
     conversationId: v.id("conversations"),
@@ -118,7 +132,6 @@ export default defineSchema({
       v.literal("builder"),
       v.literal("pro"),
       v.literal("elite"),
-      // Legacy values are retained so existing workspaces migrate without downtime.
       v.literal("pro_plus"),
       v.literal("business"),
     ),
@@ -131,28 +144,20 @@ export default defineSchema({
       v.literal("past_due"),
     ),
     currentPeriodEnd: v.number(),
-
-    // Legacy single-credit fields. New code mirrors message-credit state into these
-    // fields so older clients/webhooks keep working during the rollout.
     monthlyCredits: v.number(),
     creditsUsed: v.number(),
     rolloverCredits: v.number(),
     rolloverExpiresAt: v.optional(v.number()),
     topUpCredits: v.optional(v.number()),
     topUpExpiresAt: v.optional(v.number()),
-
-    // Message credits meter AI usage for Cryzo-managed premium models only.
     messageMonthlyCredits: v.optional(v.number()),
     messageCreditsUsed: v.optional(v.number()),
     messageRolloverCredits: v.optional(v.number()),
     messageRolloverExpiresAt: v.optional(v.number()),
     messageTopUpCredits: v.optional(v.number()),
     messageTopUpExpiresAt: v.optional(v.number()),
-
-    // Integration credits meter Composio/runtime tool actions separately.
     integrationMonthlyCredits: v.optional(v.number()),
     integrationCreditsUsed: v.optional(v.number()),
-
     dailyCreditsUsed: v.optional(v.number()),
     dailyResetAt: v.optional(v.number()),
     freeMonthlyCreditsUsed: v.optional(v.number()),
