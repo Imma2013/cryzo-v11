@@ -1,36 +1,51 @@
 import type Stripe from "stripe";
-import { getStripe, isPaidPlan, resolvePlanFromPriceId } from "@/lib/stripe";
+import {
+  getStripe,
+  isPaidPlan,
+  resolveBillingCycleFromPriceId,
+  resolvePlanFromPriceId,
+  type BillingCycle,
+  type PaidPlan,
+} from "@/lib/stripe";
 import { ConvexHttpClient } from "convex/browser";
 import { api } from "../../../../../convex/_generated/api";
 
 const convex = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
 
 function mapStripeStatus(status: Stripe.Subscription.Status) {
-  if (status === "active" || status === "trialing") return "active";
-  if (status === "past_due") return "past_due";
-  return "canceled";
+  if (status === "active" || status === "trialing") return "active" as const;
+  if (status === "past_due") return "past_due" as const;
+  return "canceled" as const;
 }
 
 function subscriptionPeriodEnd(subscription: Stripe.Subscription) {
   return ((subscription as any).current_period_end ?? 0) * 1000;
 }
 
+function subscriptionPriceId(subscription: Stripe.Subscription) {
+  return subscription.items.data[0]?.price?.id;
+}
+
 function subscriptionPlan(subscription: Stripe.Subscription) {
-  const priceId = subscription.items.data[0]?.price?.id;
-  return resolvePlanFromPriceId(priceId);
+  return resolvePlanFromPriceId(subscriptionPriceId(subscription));
+}
+
+function subscriptionBillingCycle(subscription: Stripe.Subscription) {
+  return resolveBillingCycleFromPriceId(subscriptionPriceId(subscription));
 }
 
 export async function POST(req: Request) {
   const body = await req.text();
-  const sig = req.headers.get("stripe-signature")!;
+  const sig = req.headers.get("stripe-signature");
   const stripe = getStripe();
+  if (!sig) return Response.json({ error: "Missing signature" }, { status: 400 });
 
   let event: Stripe.Event;
   try {
     event = stripe.webhooks.constructEvent(
       body,
       sig,
-      process.env.STRIPE_WEBHOOK_SECRET!
+      process.env.STRIPE_WEBHOOK_SECRET!,
     );
   } catch {
     return Response.json({ error: "Invalid signature" }, { status: 400 });
@@ -46,32 +61,31 @@ export async function POST(req: Request) {
   switch (event.type) {
     case "checkout.session.completed": {
       const session = event.data.object as Stripe.Checkout.Session;
-      const { userId, plan, type, credits } = session.metadata || {};
+      const { userId, plan, type, credits, billingCycle } = session.metadata || {};
 
       if (type === "topup" && userId && credits) {
         await convex.mutation(api.billing.grantCredits, {
           userId: userId as any,
           amount: Number(credits),
           reason: "topup",
-          description: `${credits} top-up credits`,
+          description: `${credits} message-credit top-up`,
           stripeEventId: event.id,
         });
         break;
       }
 
-      if (
-        session.subscription &&
-        userId &&
-        plan &&
-        isPaidPlan(plan)
-      ) {
+      if (session.subscription && userId && plan && isPaidPlan(plan)) {
         const subscription = await stripe.subscriptions.retrieve(
-          session.subscription as string
+          session.subscription as string,
         );
+        const detectedCycle =
+          subscriptionBillingCycle(subscription) ||
+          (billingCycle === "yearly" ? "yearly" : "monthly");
 
         await convex.mutation(api.billing.createSubscription, {
           userId: userId as any,
           plan,
+          billingCycle: detectedCycle,
           stripeCustomerId: session.customer as string,
           stripeSubscriptionId: subscription.id,
           currentPeriodEnd: subscriptionPeriodEnd(subscription),
@@ -107,9 +121,11 @@ export async function POST(req: Request) {
     case "customer.subscription.updated": {
       const subscription = event.data.object as Stripe.Subscription;
       const plan = subscriptionPlan(subscription);
+      const billingCycle = subscriptionBillingCycle(subscription);
       const updateArgs: {
         stripeSubscriptionId: string;
-        plan?: "pro" | "pro_plus";
+        plan?: PaidPlan;
+        billingCycle?: BillingCycle;
         status: "active" | "canceled" | "past_due";
         currentPeriodEnd: number;
       } = {
@@ -118,6 +134,7 @@ export async function POST(req: Request) {
         currentPeriodEnd: subscriptionPeriodEnd(subscription),
       };
       if (plan) updateArgs.plan = plan;
+      if (billingCycle) updateArgs.billingCycle = billingCycle;
       await convex.mutation(api.billing.updateSubscriptionByStripe, updateArgs);
       break;
     }
