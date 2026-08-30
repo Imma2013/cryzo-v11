@@ -676,7 +676,7 @@ function DeployPublishModal({
                       label="Google Play service-account JSON"
                       value={androidServiceAccountJson}
                       onChange={setAndroidServiceAccountJson}
-                      placeholder="{ \"type\": \"service_account\", ... }"
+                      placeholder={'{"type":"service_account", ...}'}
                       accept="application/json,.json"
                       uploadLabel="Load JSON key"
                     />
