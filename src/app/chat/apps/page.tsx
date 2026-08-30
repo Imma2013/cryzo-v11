@@ -5,6 +5,7 @@ import { useAuthToken } from "@convex-dev/auth/react";
 import {
   CheckCircle2,
   Database,
+  ExternalLink,
   Loader2,
   Rocket,
   Save,
@@ -50,6 +51,8 @@ const DEVELOPER_APPS = [
     name: "GitHub",
     description: "Sync generated source code to repositories.",
     placeholder: "github_pat_... or ghp_...",
+    tokenUrl: "https://github.com/settings/personal-access-tokens/new",
+    tokenLabel: "Get access token",
     icon: GitHubMark,
   },
   {
@@ -57,6 +60,8 @@ const DEVELOPER_APPS = [
     name: "Vercel",
     description: "Deploy projects to your own Vercel account.",
     placeholder: "Vercel access token",
+    tokenUrl: "https://vercel.com/account/settings/tokens",
+    tokenLabel: "Get access token",
     icon: Triangle,
   },
   {
@@ -64,6 +69,8 @@ const DEVELOPER_APPS = [
     name: "Netlify",
     description: "Build and deploy generated apps to your Netlify account.",
     placeholder: "Netlify access token",
+    tokenUrl: "https://app.netlify.com/user/applications#personal-access-tokens",
+    tokenLabel: "Get access token",
     icon: Rocket,
   },
 ] as const;
@@ -235,7 +242,7 @@ export default function AppsPage() {
   function saveDeveloper(connection: DeveloperConnection) {
     storeDeveloperToken(connection, developerTokens[connection as DeveloperId] || "");
     setSavedDeveloper(connection);
-    window.setTimeout(() => setSavedDeveloper(null), 1400);
+    window.setTimeout(() => setSavedDeveloper(null), 1800);
   }
 
   async function verifySupabase() {
@@ -311,28 +318,59 @@ export default function AppsPage() {
               const Icon = app.icon;
               const value = developerTokens[app.id];
               const connected = Boolean(readDeveloperToken(app.id));
+              const justSaved = savedDeveloper === app.id;
               return (
-                <div id={app.id} key={app.id} className="scroll-mt-24 rounded-xl border border-zinc-800 bg-zinc-950 p-4">
+                <div
+                  id={app.id}
+                  key={app.id}
+                  className="scroll-mt-24 rounded-xl border border-zinc-800 bg-zinc-950 p-4"
+                >
                   <div className="flex items-start gap-3">
                     <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-zinc-900 text-zinc-200">
                       <Icon size={19} />
                     </div>
                     <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
                         <p className="text-sm font-medium text-white">{app.name}</p>
-                        {connected && <span className="text-[11px] text-green-400">Connected</span>}
+                        {connected && (
+                          <span className="inline-flex items-center gap-1 text-[11px] text-green-400">
+                            <CheckCircle2 size={12} /> Connected
+                          </span>
+                        )}
                       </div>
-                      <p className="mt-0.5 text-xs leading-5 text-zinc-500">{app.description}</p>
+                      <p className="mt-0.5 text-xs leading-5 text-zinc-500">
+                        {app.description}
+                      </p>
+                      <a
+                        href={app.tokenUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="mt-1.5 inline-flex items-center gap-1 text-xs text-zinc-400 transition-colors hover:text-white"
+                      >
+                        {app.tokenLabel} <ExternalLink size={11} />
+                      </a>
                     </div>
                   </div>
                   <div className="mt-3 flex gap-2">
                     <input
                       type="password"
                       value={value}
-                      onChange={(event) =>
-                        setDeveloperTokens((current) => ({ ...current, [app.id]: event.target.value }))
+                      onChange={(event) => {
+                        setDeveloperTokens((current) => ({
+                          ...current,
+                          [app.id]: event.target.value,
+                        }));
+                        if (savedDeveloper === app.id) setSavedDeveloper(null);
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" && value.trim()) {
+                          event.preventDefault();
+                          saveDeveloper(app.id);
+                        }
+                      }}
+                      placeholder={
+                        connected && !value ? "Saved on this device" : app.placeholder
                       }
-                      placeholder={app.placeholder}
                       autoComplete="off"
                       className="min-w-0 flex-1 rounded-lg border border-zinc-800 bg-black px-3 py-2 text-base text-white outline-none placeholder:text-zinc-600 focus:border-zinc-600 sm:text-sm"
                     />
@@ -342,27 +380,47 @@ export default function AppsPage() {
                       disabled={!value.trim()}
                       className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-white px-3 text-xs font-medium text-black disabled:opacity-40"
                     >
-                      {savedDeveloper === app.id ? <CheckCircle2 size={14} /> : <Save size={14} />}
-                      Save
+                      {justSaved || connected ? <CheckCircle2 size={14} /> : <Save size={14} />}
+                      {justSaved ? "Saved" : "Save"}
                     </button>
                   </div>
+                  {justSaved && (
+                    <p className="mt-2 text-xs text-green-400">
+                      Saved on this device. Cryzo will use this token for {app.name} actions.
+                    </p>
+                  )}
                 </div>
               );
             })}
 
-            <div id="supabase" className="scroll-mt-24 rounded-xl border border-zinc-800 bg-zinc-950 p-4">
+            <div
+              id="supabase"
+              className="scroll-mt-24 rounded-xl border border-zinc-800 bg-zinc-950 p-4"
+            >
               <div className="flex items-start gap-3">
                 <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-zinc-900 text-zinc-200">
                   <Database size={19} />
                 </div>
                 <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <p className="text-sm font-medium text-white">Supabase</p>
-                    {selectedSupabase && <span className="text-[11px] text-green-400">Connected</span>}
+                    {selectedSupabase && (
+                      <span className="inline-flex items-center gap-1 text-[11px] text-green-400">
+                        <CheckCircle2 size={12} /> Connected
+                      </span>
+                    )}
                   </div>
                   <p className="mt-0.5 text-xs leading-5 text-zinc-500">
                     Select a Supabase project for auth, data, migrations and production environment variables.
                   </p>
+                  <a
+                    href="https://supabase.com/dashboard/account/tokens"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="mt-1.5 inline-flex items-center gap-1 text-xs text-zinc-400 transition-colors hover:text-white"
+                  >
+                    Get access token <ExternalLink size={11} />
+                  </a>
                 </div>
               </div>
 
@@ -370,9 +428,21 @@ export default function AppsPage() {
                 <input
                   type="password"
                   value={developerTokens.supabase}
-                  onChange={(event) =>
-                    setDeveloperTokens((current) => ({ ...current, supabase: event.target.value }))
-                  }
+                  onChange={(event) => {
+                    setDeveloperTokens((current) => ({
+                      ...current,
+                      supabase: event.target.value,
+                    }));
+                    if (supabaseStatus.type !== "idle") {
+                      setSupabaseStatus({ type: "idle" });
+                    }
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" && developerTokens.supabase.trim()) {
+                      event.preventDefault();
+                      void verifySupabase();
+                    }
+                  }}
                   placeholder="sbp_..."
                   autoComplete="off"
                   className="min-w-0 flex-1 rounded-lg border border-zinc-800 bg-black px-3 py-2 text-base text-white outline-none placeholder:text-zinc-600 focus:border-zinc-600 sm:text-sm"
@@ -380,40 +450,65 @@ export default function AppsPage() {
                 <button
                   type="button"
                   onClick={() => void verifySupabase()}
-                  disabled={!developerTokens.supabase.trim() || supabaseStatus.type === "loading"}
+                  disabled={
+                    !developerTokens.supabase.trim() ||
+                    supabaseStatus.type === "loading"
+                  }
                   className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-white px-3 text-xs font-medium text-black disabled:opacity-40"
                 >
-                  {supabaseStatus.type === "loading" ? <Loader2 size={14} className="animate-spin" /> : <Database size={14} />}
-                  Projects
+                  {supabaseStatus.type === "loading" ? (
+                    <Loader2 size={14} className="animate-spin" />
+                  ) : supabaseStatus.type === "success" ? (
+                    <CheckCircle2 size={14} />
+                  ) : (
+                    <Database size={14} />
+                  )}
+                  {supabaseStatus.type === "success" ? "Connected" : "Projects"}
                 </button>
               </div>
 
               {(supabaseProjects.length > 0 || selectedSupabase) && (
                 <div className="mt-3">
-                  <label className="mb-1.5 block text-xs font-medium text-zinc-400">Project</label>
+                  <label className="mb-1.5 block text-xs font-medium text-zinc-400">
+                    Project
+                  </label>
                   <select
                     value={selectedSupabase?.ref || ""}
                     onChange={(event) => void selectSupabaseProject(event.target.value)}
                     className="h-10 w-full rounded-lg border border-zinc-800 bg-black px-3 text-base text-white outline-none sm:text-sm"
                   >
                     <option value="">Select a project</option>
-                    {selectedSupabase && !supabaseProjects.some((project) => project.id === selectedSupabase.ref) && (
-                      <option value={selectedSupabase.ref}>{selectedSupabase.name}</option>
-                    )}
+                    {selectedSupabase &&
+                      !supabaseProjects.some(
+                        (project) => project.id === selectedSupabase.ref,
+                      ) && (
+                        <option value={selectedSupabase.ref}>
+                          {selectedSupabase.name}
+                        </option>
+                      )}
                     {supabaseProjects.map((project) => (
                       <option key={project.id} value={project.id}>
-                        {project.name}{project.region ? ` · ${project.region}` : ""}
+                        {project.name}
+                        {project.region ? ` · ${project.region}` : ""}
                       </option>
                     ))}
                   </select>
                   {selectedSupabase && (
-                    <p className="mt-2 text-xs text-zinc-500">Selected: {selectedSupabase.name} · public app key only goes into generated apps.</p>
+                    <p className="mt-2 text-xs text-zinc-500">
+                      Selected: {selectedSupabase.name} · public app key only goes into generated apps.
+                    </p>
                   )}
                 </div>
               )}
 
               {supabaseStatus.message && (
-                <p className={`mt-2 text-xs ${supabaseStatus.type === "error" ? "text-red-400" : "text-green-400"}`}>
+                <p
+                  className={`mt-2 text-xs ${
+                    supabaseStatus.type === "error"
+                      ? "text-red-400"
+                      : "text-green-400"
+                  }`}
+                >
                   {supabaseStatus.message}
                 </p>
               )}
@@ -433,7 +528,10 @@ export default function AppsPage() {
 
           {toolkits.length > 0 && (
             <div className="relative mt-4">
-              <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
+              <Search
+                size={16}
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500"
+              />
               <input
                 type="text"
                 value={search}
@@ -452,7 +550,8 @@ export default function AppsPage() {
             <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {filtered.map((toolkit) => {
                 const isBusy = busyToolkit === toolkit.slug;
-                const isChecking = !checkedConnections || (isBusy && !toolkit.isConnected);
+                const isChecking =
+                  !checkedConnections || (isBusy && !toolkit.isConnected);
 
                 return (
                   <div
@@ -461,22 +560,40 @@ export default function AppsPage() {
                   >
                     <div className="flex min-w-0 items-center gap-3">
                       {toolkit.logo ? (
-                        <img src={toolkit.logo} alt={toolkit.name} className="h-8 w-8 rounded" />
+                        <img
+                          src={toolkit.logo}
+                          alt={toolkit.name}
+                          className="h-8 w-8 rounded"
+                        />
                       ) : (
                         <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded bg-zinc-800 text-xs font-medium text-zinc-400">
                           {toolkit.name.charAt(0)}
                         </div>
                       )}
                       <div className="min-w-0">
-                        <p className="truncate text-sm font-medium text-white">{toolkit.name}</p>
-                        <p className={`text-xs ${toolkit.isConnected ? "text-green-400" : "text-zinc-500"}`}>
-                          {toolkit.isConnected ? "Connected" : isChecking ? "Checking..." : "Not connected"}
+                        <p className="truncate text-sm font-medium text-white">
+                          {toolkit.name}
+                        </p>
+                        <p
+                          className={`text-xs ${
+                            toolkit.isConnected
+                              ? "text-green-400"
+                              : "text-zinc-500"
+                          }`}
+                        >
+                          {toolkit.isConnected
+                            ? "Connected"
+                            : isChecking
+                              ? "Checking..."
+                              : "Not connected"}
                         </p>
                       </div>
                     </div>
                     {toolkit.isConnected ? (
                       <button
-                        onClick={() => disconnect(toolkit.connectedAccountId!, toolkit.slug)}
+                        onClick={() =>
+                          disconnect(toolkit.connectedAccountId!, toolkit.slug)
+                        }
                         disabled={isBusy || !userId}
                         className="ml-2 rounded border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 transition-colors hover:border-red-800 hover:text-red-400 disabled:opacity-60"
                       >
