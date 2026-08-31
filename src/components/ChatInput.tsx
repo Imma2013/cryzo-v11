@@ -66,6 +66,12 @@ type BrowserSpeechRecognition = {
 
 type BrowserSpeechRecognitionConstructor = new () => BrowserSpeechRecognition;
 
+type ChatPrefillDetail = {
+  prompt?: string;
+  notice?: string;
+  forceBuildMode?: boolean;
+};
+
 declare global {
   interface Window {
     SpeechRecognition?: BrowserSpeechRecognitionConstructor;
@@ -150,11 +156,13 @@ export function ChatInput({
   const attachmentsRef = useRef<ImageAttachment[]>([]);
   const valueRef = useRef(value);
   const modeMenuRef = useRef<HTMLDivElement>(null);
+  const prefillTimerRef = useRef<number | null>(null);
   const [attachments, setAttachments] = useState<ImageAttachment[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [isListening, setIsListening] = useState(false);
   const [modeOpen, setModeOpen] = useState(false);
+  const [prefillNotice, setPrefillNotice] = useState<string | null>(null);
   const speechSupported =
     typeof window !== "undefined" &&
     !!(window.SpeechRecognition || window.webkitSpeechRecognition);
@@ -176,6 +184,30 @@ export function ChatInput({
   }, [value]);
 
   useEffect(() => {
+    const handlePrefill = (event: Event) => {
+      const detail = (event as CustomEvent<ChatPrefillDetail>).detail;
+      const prompt = detail?.prompt?.trim();
+      if (!prompt) return;
+
+      onChange(prompt);
+      if (detail.forceBuildMode && chatMode !== "build") {
+        onChatModeChange("build");
+      }
+      setPrefillNotice(detail.notice || "Prompt added to chat");
+
+      if (prefillTimerRef.current) window.clearTimeout(prefillTimerRef.current);
+      prefillTimerRef.current = window.setTimeout(() => setPrefillNotice(null), 4500);
+      window.setTimeout(() => {
+        textareaRef.current?.focus();
+        textareaRef.current?.setSelectionRange(prompt.length, prompt.length);
+      }, 0);
+    };
+
+    window.addEventListener("cryzo:prefill-chat", handlePrefill as EventListener);
+    return () => window.removeEventListener("cryzo:prefill-chat", handlePrefill as EventListener);
+  }, [chatMode, onChange, onChatModeChange]);
+
+  useEffect(() => {
     const closeModeMenu = (event: PointerEvent) => {
       if (!modeMenuRef.current?.contains(event.target as Node)) {
         setModeOpen(false);
@@ -188,6 +220,7 @@ export function ChatInput({
   useEffect(() => {
     return () => {
       recognitionRef.current?.abort();
+      if (prefillTimerRef.current) window.clearTimeout(prefillTimerRef.current);
       attachmentsRef.current.forEach((attachment) =>
         URL.revokeObjectURL(attachment.previewUrl),
       );
@@ -242,6 +275,7 @@ export function ChatInput({
     await onSubmit(files);
     clearAttachments();
     setAttachmentError(null);
+    setPrefillNotice(null);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -368,6 +402,12 @@ export function ChatInput({
         {attachmentError && (
           <div className="border-b border-zinc-900 px-3 py-2 text-xs text-amber-300">
             {attachmentError}
+          </div>
+        )}
+
+        {prefillNotice && (
+          <div className="border-b border-zinc-900 bg-emerald-950/20 px-3 py-2 text-xs text-emerald-300">
+            {prefillNotice}. Review and send when ready.
           </div>
         )}
 
