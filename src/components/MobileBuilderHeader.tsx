@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import {
   Activity,
   ArrowLeft,
@@ -35,10 +35,10 @@ function SheetRow({
   trailing,
   indented = false,
 }: {
-  icon: React.ReactNode;
+  icon: ReactNode;
   label: string;
   onClick?: () => void;
-  trailing?: React.ReactNode;
+  trailing?: ReactNode;
   indented?: boolean;
 }) {
   return (
@@ -115,6 +115,14 @@ export function MobileBuilderHeader({
         );
       }, 120);
     }
+  };
+
+  const openPublish = () => {
+    close();
+    onPreview?.();
+    window.setTimeout(() => {
+      window.dispatchEvent(new Event("cryzo:open-publish"));
+    }, 140);
   };
 
   const shareProject = async () => {
@@ -219,7 +227,7 @@ export function MobileBuilderHeader({
             <div className="overflow-y-auto px-5 pb-[calc(1.5rem+env(safe-area-inset-bottom))] pt-2">
               <div className="space-y-1">
                 <SheetRow icon={<Share2 size={23} />} label="Share" onClick={() => void shareProject()} />
-                <SheetRow icon={<Rocket size={23} />} label="Publish" onClick={() => openPreviewArea()} />
+                <SheetRow icon={<Rocket size={23} />} label="Publish" onClick={openPublish} />
                 <SheetRow icon={<Settings size={23} />} label="Settings" onClick={() => go("/chat/apps")} />
                 <SheetRow icon={<Code2 size={23} />} label="Code" onClick={() => openPreviewArea("code")} />
                 <SheetRow icon={<FileText size={23} />} label="Files" onClick={() => openPreviewArea("files")} />
