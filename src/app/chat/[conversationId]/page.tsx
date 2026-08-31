@@ -54,6 +54,12 @@ export default function ConversationPage({
   }, []);
 
   useEffect(() => {
+    const showChat = () => setMobileView("chat");
+    window.addEventListener("cryzo:show-chat", showChat);
+    return () => window.removeEventListener("cryzo:show-chat", showChat);
+  }, []);
+
+  useEffect(() => {
     setWorkspaceOpen(false);
     setMobileView("chat");
     setSelectedElement(null);
