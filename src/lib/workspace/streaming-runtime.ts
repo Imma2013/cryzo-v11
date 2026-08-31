@@ -336,7 +336,7 @@ export async function saveStreamingRuntimeFile(
     throw new Error(`File validation returned no writable action for ${filePath}`);
   }
 
-  const safeAction = validation.action;
+  const safeAction = validation.action as ArtifactAction & { filePath: string };
   if (validation.output) appendOutput(state, validation.output);
   updateFileMap(state, safeAction);
   state.progress = state.previewUrl ? "ready" : "writing";
