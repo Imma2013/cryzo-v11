@@ -313,6 +313,69 @@ async function executeRemoteAction(
   }
 }
 
+export async function saveStreamingRuntimeFile(
+  conversationId: string,
+  filePath: string,
+  content: string,
+) {
+  const state = getState(conversationId);
+  state.active = true;
+  state.error = null;
+
+  const requested: ArtifactAction = {
+    type: "file",
+    filePath,
+    content,
+  };
+  const validation = await callGuard({
+    operation: "file",
+    conversationId,
+    action: requested,
+  });
+  if (!validation.action || validation.action.type !== "file" || !validation.action.filePath) {
+    throw new Error(`File validation returned no writable action for ${filePath}`);
+  }
+
+  const safeAction = validation.action;
+  if (validation.output) appendOutput(state, validation.output);
+  updateFileMap(state, safeAction);
+  state.progress = state.previewUrl ? "ready" : "writing";
+  emit(state);
+
+  const response = await callSandbox({
+    operation: "action",
+    conversationId,
+    action: safeAction,
+  });
+  applyResponse(state, response);
+
+  const needsInstall = /(^|\/)package\.json$/i.test(safeAction.filePath);
+  const needsRestart = needsInstall || /(^|\/)(vite\.config\.(ts|js|mts|mjs|cts|cjs)|index\.html)$/i.test(safeAction.filePath);
+
+  if (needsInstall) {
+    state.progress = "installing";
+    emit(state);
+    const install = await callSandbox({
+      operation: "action",
+      conversationId,
+      action: { type: "shell", content: "npm install" },
+    });
+    applyResponse(state, install);
+  }
+
+  if (needsRestart) {
+    state.progress = "starting";
+    emit(state);
+    const restarted = await callSandbox({ operation: "restart", conversationId });
+    applyResponse(state, restarted);
+  }
+
+  return {
+    filePath: safeAction.filePath,
+    content: safeAction.content,
+  };
+}
+
 export function processStreamingArtifactText(
   conversationId: string,
   messageId: string,
