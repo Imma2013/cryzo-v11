@@ -12,6 +12,7 @@ import { readFileSync } from "fs";
 import { join } from "path";
 import { resolveServerModel } from "@/lib/server/model-provider";
 import { classifyCreditCost, describeCreditCharge } from "@/lib/stripe";
+import { composioToolCreditCost } from "@/lib/billing/integration-costs";
 import {
   buildCryzoSystemPrompt,
   buildPlanPrompt,
@@ -100,6 +101,34 @@ function hasAttachedContent(messages: UIMessage[]) {
   return messages.some((message) =>
     message.parts?.some((part) => part.type !== "text"),
   );
+}
+
+type CloudConfig = {
+  name?: string;
+  entities?: Array<{
+    name?: string;
+    fields?: unknown;
+    access?: "private" | "public-read" | "public";
+  }>;
+};
+
+function parseCloudConfig(text: string): CloudConfig | null {
+  const match = text.match(
+    /<cryzoAction\s+type=["']file["']\s+filePath=["']cryzo\/cloud\.json["']>([\s\S]*?)<\/cryzoAction>/i,
+  );
+  if (!match?.[1]) return null;
+  try {
+    return JSON.parse(match[1].trim()) as CloudConfig;
+  } catch {
+    return null;
+  }
+}
+
+function authedConvexClient(authToken?: string) {
+  if (!authToken || !process.env.NEXT_PUBLIC_CONVEX_URL) return null;
+  const client = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL);
+  client.setAuth(authToken);
+  return client;
 }
 
 export const dynamic = "force-dynamic";
@@ -198,6 +227,49 @@ export async function POST(req: Request) {
         ? normalizeProjectPlatforms(storedProjectPlatforms)
         : inferProjectPlatforms(lastUserText, ["web"], false);
 
+    // Like Base44, every Cryzo app has a managed backend namespace available on
+    // every plan. The ID is public; end-user sessions and entity policies guard
+    // access to the actual data.
+    let cryzoCloudAppId: string | undefined;
+    const authenticatedConvex = authedConvexClient(authToken);
+    if (mode === "build" && conversationId && authenticatedConvex) {
+      try {
+        const cloudApp = await authenticatedConvex.mutation(
+          api.cloudAdmin.ensureForConversation,
+          {
+            conversationId: conversationId as any,
+            name: `Cryzo app ${conversationId.slice(-6)}`,
+          },
+        );
+        cryzoCloudAppId = String(cloudApp.appId);
+      } catch (error) {
+        console.warn("Unable to initialize Cryzo Cloud namespace", error);
+      }
+    }
+
+    const syncGeneratedCloudConfig = async (text: string) => {
+      if (!conversationId || !authenticatedConvex) return;
+      const config = parseCloudConfig(text);
+      if (!config?.entities?.length) return;
+      const entities = config.entities
+        .filter((entity) => entity.name?.trim())
+        .map((entity) => ({
+          name: entity.name!.trim(),
+          fields: entity.fields,
+          access: entity.access,
+        }));
+      if (!entities.length) return;
+      try {
+        await authenticatedConvex.mutation(api.cloudAdmin.configureFromPublish, {
+          conversationId: conversationId as any,
+          name: config.name?.trim() || `Cryzo app ${conversationId.slice(-6)}`,
+          entities,
+        });
+      } catch (error) {
+        console.warn("Unable to apply generated Cryzo Cloud schema", error);
+      }
+    };
+
     const recipeSlug = pickDesignRecipe(lastUserText);
     const recipeContent = recipeSlug ? loadRecipeContent(recipeSlug) : "";
     const recipeBlock = recipeContent
@@ -256,6 +328,7 @@ export async function POST(req: Request) {
       useComposioTools,
       recipeBlock,
       projectPlatforms: resolvedProjectPlatforms,
+      cryzoCloudAppId,
     });
 
     let responseSessionId = composioSessionId;
@@ -272,25 +345,37 @@ export async function POST(req: Request) {
         messages: modelMessages,
         tools,
         stopWhen: stepCountIs(10),
+        onStepFinish: async (step) => {
+          if (!userId) return;
+          const calls = Array.isArray((step as any).toolCalls)
+            ? ((step as any).toolCalls as Array<{ toolName?: string }>)
+            : [];
+          for (const call of calls) {
+            const amount = composioToolCreditCost(call.toolName);
+            await convex.mutation(api.billing.deductIntegrationCredits, {
+              userId: userId as any,
+              amount,
+              reason: "composio",
+              description: call.toolName
+                ? `Executed ${call.toolName}`
+                : "Executed external tool",
+              toolName: call.toolName,
+            });
+          }
+        },
+        onFinish: async ({ text }) => {
+          await syncGeneratedCloudConfig(text || "");
+        },
       });
-
-      // The first production meter is intentionally simple: one integration
-      // credit is charged when Cryzo provisions tool access for this request.
-      // We can evolve this to weighted per-tool execution as usage data grows.
-      if (userId) {
-        void convex.mutation(api.billing.deductIntegrationCredits, {
-          userId: userId as any,
-          amount: 1,
-          reason: "composio",
-          description: "External tool request",
-        });
-      }
     } else {
       result = streamText({
         model: resolved.model,
         system: systemPrompt,
         messages: modelMessages,
         stopWhen: stepCountIs(10),
+        onFinish: async ({ text }) => {
+          await syncGeneratedCloudConfig(text || "");
+        },
       });
     }
 
@@ -314,7 +399,8 @@ export async function POST(req: Request) {
         "x-cryzo-model-id": resolved.modelId,
         "x-cryzo-billing-tier": resolved.billingTier,
         "x-cryzo-message-credits": String(messageCharge),
-        "x-cryzo-integration-credits": useComposioTools ? "1" : "0",
+        "x-cryzo-integration-credits": useComposioTools ? "metered" : "0",
+        ...(cryzoCloudAppId ? { "x-cryzo-cloud-app-id": cryzoCloudAppId } : {}),
       },
     });
   } catch (error) {
