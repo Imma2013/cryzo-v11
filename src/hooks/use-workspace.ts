@@ -65,7 +65,7 @@ export function useWorkspace(conversationId: Id<"conversations">) {
     await saveManualFile({
       conversationId,
       artifactId,
-      filePath: saved.filePath,
+      filePath: saved.filePath || filePath,
       content: saved.content,
     });
     return saved;
