@@ -6,7 +6,6 @@ import {
   canUseManagedCustomDomains,
   entitlementSnapshot,
 } from "@/lib/billing/entitlements";
-import { ensureAppConvexBackend } from "@/lib/convex/app-platform";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -170,30 +169,18 @@ async function upsertProjectEnvironment({
   teamId,
   projectId,
   supabase,
-  convexUrl,
 }: {
   token: string;
   teamId: string;
   projectId: string;
   supabase?: SupabaseEnv | null;
-  convexUrl?: string | null;
 }) {
-  const rawVariables: Array<{ key: string; value: string }> = [];
-  if (supabase?.url && supabase?.publicKey) {
-    rawVariables.push(
-      { key: "VITE_SUPABASE_URL", value: supabase.url },
-      { key: "VITE_SUPABASE_ANON_KEY", value: supabase.publicKey },
-      { key: "VITE_SUPABASE_PUBLISHABLE_KEY", value: supabase.publicKey },
-    );
-  }
-  if (convexUrl) {
-    rawVariables.push(
-      { key: "VITE_CONVEX_URL", value: convexUrl },
-      { key: "NEXT_PUBLIC_CONVEX_URL", value: convexUrl },
-    );
-  }
-  if (rawVariables.length === 0) return;
-  const variables = rawVariables.map((item) => ({ ...item, type: "plain", target: ["production", "preview"] }));
+  if (!supabase?.url || !supabase?.publicKey) return;
+  const variables = [
+    { key: "VITE_SUPABASE_URL", value: supabase.url },
+    { key: "VITE_SUPABASE_ANON_KEY", value: supabase.publicKey },
+    { key: "VITE_SUPABASE_PUBLISHABLE_KEY", value: supabase.publicKey },
+  ].map((item) => ({ ...item, type: "plain", target: ["production", "preview"] }));
   const response = await vercelFetch(token, teamId, `/v10/projects/${encodeURIComponent(projectId)}/env?upsert=true`, {
     method: "POST",
     body: JSON.stringify(variables),
@@ -313,7 +300,11 @@ export async function GET(req: Request) {
     const { token, conversation } = await requireConversation(req, conversationId);
     const subscription = await fetchQuery(api.billing.getSubscription, { userId: conversation.userId }, { token });
     let target = await fetchQuery(api.hosting.getCryzoTarget, { conversationId: conversationId as Id<"conversations"> }, { token });
-    const backend = await fetchQuery((api as any).appBackends.getByConversation, { conversationId: conversationId as Id<"conversations"> }, { token }).catch(() => null);
+    const cloudBackend = await fetchQuery(
+      api.cloudAdmin.getApp,
+      { conversationId: conversationId as Id<"conversations"> },
+      { token },
+    ).catch(() => null);
     const { platformToken, teamId, hostingDomain } = getPlatformConfig();
     let hostingHealth: Record<string, unknown> | null = null;
     let domainStatus: DomainResult | null = null;
@@ -332,7 +323,18 @@ export async function GET(req: Request) {
       const config = await getDomainConfig(platformToken, teamId, hostname, projectIdOrName);
       hostingHealth = config ? { dnsReady: !config.misconfigured, misconfigured: Boolean(config.misconfigured), configuredBy: config.configuredBy || null, dns: dnsInstructionFromConfig(config, hostingDomain) } : { dnsReady: false, misconfigured: true, dns: null };
     }
-    return Response.json({ target, backend, configured: Boolean(platformToken), managedConvexConfigured: Boolean(process.env.CRYZO_CONVEX_TEAM_TOKEN && process.env.CRYZO_CONVEX_TEAM_ID), hostingDomain, desiredUrl: target?.slug ? `https://${target.slug}.${hostingDomain}` : null, hostingHealth, domainStatus, plan: subscription.plan, brandingRequired: !canRemoveManagedBranding(subscription.plan), entitlements: entitlementSnapshot(subscription.plan) });
+    return Response.json({
+      target,
+      cloudBackend,
+      configured: Boolean(platformToken),
+      hostingDomain,
+      desiredUrl: target?.slug ? `https://${target.slug}.${hostingDomain}` : null,
+      hostingHealth,
+      domainStatus,
+      plan: subscription.plan,
+      brandingRequired: !canRemoveManagedBranding(subscription.plan),
+      entitlements: entitlementSnapshot(subscription.plan),
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to load hosting status";
     return Response.json({ error: message }, { status: message === "Unauthorized" ? 401 : 500 });
@@ -350,6 +352,15 @@ export async function POST(req: Request) {
     const { platformToken, teamId, hostingDomain } = getPlatformConfig();
     if (!platformToken) return Response.json({ error: "Cryzo Hosting needs CRYZO_VERCEL_TOKEN on the Cryzo server.", code: "CRYZO_HOSTING_NOT_CONFIGURED" }, { status: 503 });
 
+    const cloudBackend = await fetchMutation(
+      api.cloudAdmin.ensureForConversation,
+      {
+        conversationId: body.conversationId as Id<"conversations">,
+        name: body.projectName,
+      },
+      { token: authToken },
+    );
+
     const existing = await fetchQuery(api.hosting.getCryzoTarget, { conversationId: body.conversationId as Id<"conversations"> }, { token: authToken });
     if (existing?.slug && body.requestedSlug && sanitizeSlug(body.requestedSlug) !== existing.slug && !canUseManagedCustomDomains(subscription.plan)) {
       return Response.json({ error: "Changing a managed Cryzo domain requires Starter or above. You can still export or deploy to your own Vercel account for free.", code: "MANAGED_DOMAIN_REQUIRES_STARTER", requiredPlan: "starter" }, { status: 402 });
@@ -359,14 +370,10 @@ export async function POST(req: Request) {
     const projectName = existing?.targetId ? `cryzo-${slug}-${body.conversationId.slice(-6).toLowerCase()}` : sanitizeSlug(`cryzo-${slug}-${body.conversationId.slice(-6)}`);
     const project = await ensureVercelProject({ token: platformToken, teamId, projectName, existingProjectId: existing?.targetId });
 
-    const convexBackend = await ensureAppConvexBackend({
-      conversationId: body.conversationId,
-      projectName: body.projectName,
-      files: body.files,
-      authToken,
-    });
-
-    await upsertProjectEnvironment({ token: platformToken, teamId, projectId: project.id, supabase: body.supabase, convexUrl: convexBackend?.deploymentUrl });
+    // Cryzo Cloud is hosted by Cryzo itself, Base44-style, so generated apps do
+    // not receive a private Convex deployment or Convex deploy key. BYO
+    // Supabase remains supported when explicitly selected by the user.
+    await upsertProjectEnvironment({ token: platformToken, teamId, projectId: project.id, supabase: body.supabase });
 
     const deployFiles = canUnbrand ? body.files : withManagedCryzoBranding(body.files);
     const deployment = await createDeployment({ token: platformToken, teamId, projectId: project.id, projectName: project.name || projectName, files: deployFiles });
@@ -391,7 +398,7 @@ export async function POST(req: Request) {
       fallbackUrl,
       brandingRequired: !canUnbrand,
       plan: subscription.plan,
-      convexBackend: convexBackend ? { projectId: convexBackend.projectId, projectName: convexBackend.projectName, deploymentName: convexBackend.deploymentName, deploymentUrl: convexBackend.deploymentUrl } : null,
+      cloudBackend,
       subdomainAssigned: domain.assigned,
       domainVerified: domain.verified,
       domainMisconfigured: domain.misconfigured,
