@@ -81,6 +81,8 @@ export default defineSchema({
     ])
     .index("by_provider_slug", ["provider", "slug"]),
 
+  // Legacy/BYO Convex deployment records. Cryzo Cloud itself now uses the
+  // shared multi-tenant runtime below instead of one Convex project per app.
   appBackends: defineTable({
     userId: v.id("users"),
     conversationId: v.id("conversations"),
@@ -94,6 +96,83 @@ export default defineSchema({
   })
     .index("by_user_conversation", ["userId", "conversationId"])
     .index("by_project_id", ["projectId"]),
+
+  // Base44-style shared Cryzo Cloud runtime. Every generated app gets a logical
+  // app namespace while the managed runtime remains multi-tenant.
+  cloudApps: defineTable({
+    ownerUserId: v.id("users"),
+    conversationId: v.id("conversations"),
+    name: v.string(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_owner_conversation", ["ownerUserId", "conversationId"])
+    .index("by_conversation", ["conversationId"]),
+
+  cloudEntitySchemas: defineTable({
+    appId: v.id("cloudApps"),
+    name: v.string(),
+    fields: v.optional(v.any()),
+    access: v.union(
+      v.literal("private"),
+      v.literal("public-read"),
+      v.literal("public"),
+    ),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index("by_app_name", ["appId", "name"]),
+
+  cloudAppUsers: defineTable({
+    appId: v.id("cloudApps"),
+    email: v.string(),
+    name: v.optional(v.string()),
+    role: v.union(v.literal("user"), v.literal("admin")),
+    passwordHash: v.string(),
+    passwordSalt: v.string(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_app_email", ["appId", "email"])
+    .index("by_app", ["appId", "createdAt"]),
+
+  cloudSessions: defineTable({
+    appId: v.id("cloudApps"),
+    appUserId: v.id("cloudAppUsers"),
+    token: v.string(),
+    expiresAt: v.number(),
+    createdAt: v.number(),
+  })
+    .index("by_token", ["token"])
+    .index("by_app_user", ["appId", "appUserId"]),
+
+  cloudRecords: defineTable({
+    appId: v.id("cloudApps"),
+    entityName: v.string(),
+    ownerAppUserId: v.optional(v.id("cloudAppUsers")),
+    data: v.any(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_app_entity", ["appId", "entityName", "createdAt"])
+    .index("by_app_entity_owner", ["appId", "entityName", "ownerAppUserId", "createdAt"]),
+
+  cloudUsageEvents: defineTable({
+    appId: v.id("cloudApps"),
+    ownerUserId: v.id("users"),
+    category: v.union(
+      v.literal("database"),
+      v.literal("auth"),
+      v.literal("storage"),
+      v.literal("function"),
+      v.literal("integration"),
+    ),
+    operation: v.string(),
+    credits: v.number(),
+    detail: v.optional(v.string()),
+    createdAt: v.number(),
+  })
+    .index("by_app", ["appId", "createdAt"])
+    .index("by_owner", ["ownerUserId", "createdAt"]),
 
   mobileBuilds: defineTable({
     userId: v.id("users"),
