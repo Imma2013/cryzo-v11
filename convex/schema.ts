@@ -260,6 +260,8 @@ export default defineSchema({
     providerId: v.optional(v.string()),
     modelId: v.optional(v.string()),
     toolName: v.optional(v.string()),
+    stripeEventId: v.optional(v.string()),
+    messageId: v.optional(v.id("messages")),
     createdAt: v.number(),
   }).index("by_user", ["userId", "createdAt"]),
 
