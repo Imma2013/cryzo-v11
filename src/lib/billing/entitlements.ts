@@ -61,7 +61,8 @@ export function entitlementSnapshot(plan?: string | null) {
     cryzoCloudDatabase: true,
     cryzoCloudAuth: true,
     cryzoCloudUsers: true,
-    cryzoCloudRealtime: true,
+    // Do not advertise this until the metered realtime subscription lease ships.
+    cryzoCloudRealtime: false,
     managedBrandingRemoval: canRemoveManagedBranding(normalized),
     managedCustomDomains: canUseManagedCustomDomains(normalized),
     managedMobileBuilds: canUseManagedMobileBuilds(normalized),
