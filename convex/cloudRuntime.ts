@@ -3,6 +3,8 @@ import { v } from "convex/values";
 import { api, internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 
+const publicApi = api as any;
+const internalApi = internal as any;
 const DATABASE_OPERATION_CREDITS = 1;
 
 const operationValidator = v.union(
@@ -175,19 +177,19 @@ export const database = action({
     sessionToken: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const app = await ctx.runQuery(internal.cloudRuntime.getAppInternal, {
+    const app = await ctx.runQuery(internalApi.cloudRuntime.getAppInternal, {
       appId: args.appId,
     });
     if (!app) throw new Error("Cryzo Cloud app not found");
 
-    const schema = await ctx.runQuery(internal.cloudRuntime.getSchemaInternal, {
+    const schema = await ctx.runQuery(internalApi.cloudRuntime.getSchemaInternal, {
       appId: args.appId,
       entityName: args.entityName,
     });
     if (!schema) throw new Error(`Unknown entity: ${args.entityName}`);
 
     const session = await ctx.runQuery(
-      internal.cloudRuntime.getSessionContextInternal,
+      internalApi.cloudRuntime.getSessionContextInternal,
       { appId: args.appId, sessionToken: args.sessionToken },
     );
     const isRead = args.operation === "list" || args.operation === "get";
@@ -198,7 +200,7 @@ export const database = action({
       throw new Error("Authentication required");
     }
 
-    const hasCredits = await ctx.runQuery(api.billing.hasIntegrationCredits, {
+    const hasCredits = await ctx.runQuery(publicApi.billing.hasIntegrationCredits, {
       userId: app.ownerUserId,
       amount: DATABASE_OPERATION_CREDITS,
     });
@@ -206,7 +208,7 @@ export const database = action({
 
     let result: any;
     if (args.operation === "list") {
-      const rows = await ctx.runQuery(internal.cloudRuntime.listRecordsInternal, {
+      const rows = await ctx.runQuery(internalApi.cloudRuntime.listRecordsInternal, {
         appId: args.appId,
         entityName: args.entityName,
         ownerAppUserId: session?.user.id,
@@ -215,7 +217,7 @@ export const database = action({
       result = rows.map(publicRecord);
     } else if (args.operation === "get") {
       if (!args.recordId) throw new Error("recordId is required");
-      const record = await ctx.runQuery(internal.cloudRuntime.getRecordInternal, {
+      const record = await ctx.runQuery(internalApi.cloudRuntime.getRecordInternal, {
         recordId: args.recordId,
       });
       if (!record || record.appId !== args.appId || record.entityName !== args.entityName) {
@@ -227,7 +229,7 @@ export const database = action({
       result = publicRecord(record);
     } else if (args.operation === "create") {
       if (args.data === undefined) throw new Error("data is required");
-      const record = await ctx.runMutation(internal.cloudRuntime.createRecordInternal, {
+      const record = await ctx.runMutation(internalApi.cloudRuntime.createRecordInternal, {
         appId: args.appId,
         entityName: args.entityName,
         ownerAppUserId: session?.user.id,
@@ -238,40 +240,40 @@ export const database = action({
       if (!args.recordId || args.data === undefined) {
         throw new Error("recordId and data are required");
       }
-      const existing = await ctx.runQuery(internal.cloudRuntime.getRecordInternal, {
+      const existing = await ctx.runQuery(internalApi.cloudRuntime.getRecordInternal, {
         recordId: args.recordId,
       });
       if (!existing || existing.appId !== args.appId || existing.entityName !== args.entityName) {
         throw new Error("Record not found");
       }
       if (!canTouchRecord(existing, session as any)) throw new Error("Forbidden");
-      const record = await ctx.runMutation(internal.cloudRuntime.updateRecordInternal, {
+      const record = await ctx.runMutation(internalApi.cloudRuntime.updateRecordInternal, {
         recordId: args.recordId,
         data: { ...existing.data, ...args.data },
       });
       result = publicRecord(record);
     } else {
       if (!args.recordId) throw new Error("recordId is required");
-      const existing = await ctx.runQuery(internal.cloudRuntime.getRecordInternal, {
+      const existing = await ctx.runQuery(internalApi.cloudRuntime.getRecordInternal, {
         recordId: args.recordId,
       });
       if (!existing || existing.appId !== args.appId || existing.entityName !== args.entityName) {
         throw new Error("Record not found");
       }
       if (!canTouchRecord(existing, session as any)) throw new Error("Forbidden");
-      result = await ctx.runMutation(internal.cloudRuntime.deleteRecordInternal, {
+      result = await ctx.runMutation(internalApi.cloudRuntime.deleteRecordInternal, {
         recordId: args.recordId,
       });
     }
 
-    await ctx.runMutation(api.billing.deductIntegrationCredits, {
+    await ctx.runMutation(publicApi.billing.deductIntegrationCredits, {
       userId: app.ownerUserId,
       amount: DATABASE_OPERATION_CREDITS,
       reason: "cloud_database",
       description: `${args.entityName}.${args.operation}`,
       toolName: `cloud.database.${args.operation}`,
     });
-    await ctx.runMutation(internal.cloudRuntime.logUsageInternal, {
+    await ctx.runMutation(internalApi.cloudRuntime.logUsageInternal, {
       appId: args.appId,
       ownerUserId: app.ownerUserId,
       category: "database",
