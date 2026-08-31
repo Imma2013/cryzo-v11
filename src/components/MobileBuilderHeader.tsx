@@ -10,7 +10,7 @@ import {
   CreditCard,
   Database,
   FileText,
-  Github,
+  GitBranch,
   History,
   Layers3,
   Loader2,
@@ -222,7 +222,7 @@ export function MobileBuilderHeader({
                 <div className="px-3 pb-1 pt-4 text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-600">
                   Developer apps
                 </div>
-                <SheetRow icon={<Github size={22} />} label="GitHub" onClick={() => go("/chat/apps#github")} />
+                <SheetRow icon={<GitBranch size={22} />} label="GitHub" onClick={() => go("/chat/apps#github")} />
                 <SheetRow icon={<Database size={22} />} label="Supabase" onClick={() => go("/chat/apps#supabase")} />
                 <SheetRow icon={<Triangle size={21} />} label="Vercel" onClick={() => go("/chat/apps#vercel")} />
                 <SheetRow icon={<Rocket size={22} />} label="Netlify" onClick={() => go("/chat/apps#netlify")} />
