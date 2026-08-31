@@ -1,3 +1,5 @@
+"use client";
+
 import type { ProviderDefinition } from "@/lib/ai/models";
 import { getManagedModel } from "@/lib/ai/managed-models";
 
@@ -66,9 +68,6 @@ function modelLabId(provider: ProviderDefinition, modelId: string) {
     return getManagedModel(modelId).logoProviderId;
   }
 
-  // OpenRouter model IDs normally begin with the model lab, e.g.
-  // openai/gpt-5, anthropic/claude, qwen/qwen3. This gives each model row the
-  // actual lab mark instead of showing the OpenRouter logo for everything.
   if (provider.id === "openrouter" && modelId.includes("/")) {
     const prefix = modelId.split("/")[0].trim().toLowerCase();
     const aliases: Record<string, string> = {
