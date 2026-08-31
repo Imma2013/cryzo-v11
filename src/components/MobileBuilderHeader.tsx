@@ -121,8 +121,11 @@ export function MobileBuilderHeader({
     close();
     onPreview?.();
     window.setTimeout(() => {
-      window.dispatchEvent(new Event("cryzo:open-publish"));
-    }, 140);
+      const button = Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find(
+        (candidate) => candidate.textContent?.trim() === "Publish" && !candidate.disabled,
+      );
+      button?.click();
+    }, 180);
   };
 
   const shareProject = async () => {
