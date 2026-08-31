@@ -106,6 +106,19 @@ export const ensureForConversation = mutation({
   },
 });
 
+export const getApp = query({
+  args: { conversationId: v.id("conversations") },
+  handler: async (ctx, args) => {
+    const { userId } = await requireOwnedConversation(ctx, args.conversationId);
+    return await ctx.db
+      .query("cloudApps")
+      .withIndex("by_owner_conversation", (q) =>
+        q.eq("ownerUserId", userId).eq("conversationId", args.conversationId),
+      )
+      .unique();
+  },
+});
+
 export const getOverview = query({
   args: { conversationId: v.id("conversations") },
   handler: async (ctx, args) => {
