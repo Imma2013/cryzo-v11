@@ -16,6 +16,14 @@ function hashPassword(password: string, salt: string) {
   return scryptSync(password, salt, 64).toString("base64");
 }
 
+function normalizeOrigin(value: string) {
+  const parsed = new URL(value);
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+    throw new Error("Invalid application origin");
+  }
+  return parsed.origin;
+}
+
 function publicUser(user: any) {
   return {
     id: user._id,
@@ -189,6 +197,28 @@ export const googleOAuthClientId = action({
     const clientId = process.env.AUTH_GOOGLE_ID;
     if (!clientId) throw new Error("Google authentication is not configured on Cryzo");
     return { clientId };
+  },
+});
+
+export const validateGoogleReturnOrigin = action({
+  args: {
+    appId: v.id("cloudApps"),
+    origin: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const origin = normalizeOrigin(args.origin);
+    const app = await ctx.runQuery(internalApi.cloudRuntime.getAppInternal, {
+      appId: args.appId,
+    });
+    if (!app) throw new Error("Cryzo Cloud app not found");
+    if (!enabledProviders(app).includes("google")) {
+      throw new Error("Google authentication is not enabled for this app");
+    }
+    const allowedOrigins = await ctx.runQuery(
+      internalApi.cloudRuntime.getPublishedOriginsInternal,
+      { appId: args.appId },
+    );
+    return { allowed: allowedOrigins.includes(origin) };
   },
 });
 
