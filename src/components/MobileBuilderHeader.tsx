@@ -4,13 +4,13 @@ import { useEffect, useState, type ReactNode } from "react";
 import {
   Activity,
   ArrowLeft,
-  Bot,
   ChevronDown,
   ChevronUp,
   Cloud,
-  Code2,
   CreditCard,
+  Database,
   FileText,
+  Github,
   History,
   Layers3,
   Loader2,
@@ -19,10 +19,10 @@ import {
   Play,
   Plug,
   Rocket,
-  Settings,
   Share2,
   Shield,
   Sparkles,
+  Triangle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -105,27 +105,14 @@ export function MobileBuilderHeader({
     window.dispatchEvent(new Event("cryzo:open-model-picker"));
   };
 
-  const openPreviewArea = (panel?: "code" | "files") => {
-    close();
-    onPreview?.();
-    if (panel) {
-      window.setTimeout(() => {
-        window.dispatchEvent(
-          new CustomEvent("cryzo:workspace-panel", { detail: { panel } }),
-        );
-      }, 120);
-    }
-  };
-
-  const openPublish = () => {
+  const openFiles = () => {
     close();
     onPreview?.();
     window.setTimeout(() => {
-      const button = Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find(
-        (candidate) => candidate.textContent?.trim() === "Publish" && !candidate.disabled,
+      window.dispatchEvent(
+        new CustomEvent("cryzo:workspace-panel", { detail: { panel: "files" } }),
       );
-      button?.click();
-    }, 180);
+    }, 120);
   };
 
   const shareProject = async () => {
@@ -230,11 +217,17 @@ export function MobileBuilderHeader({
             <div className="overflow-y-auto px-5 pb-[calc(1.5rem+env(safe-area-inset-bottom))] pt-2">
               <div className="space-y-1">
                 <SheetRow icon={<Share2 size={23} />} label="Share" onClick={() => void shareProject()} />
-                <SheetRow icon={<Rocket size={23} />} label="Publish" onClick={openPublish} />
-                <SheetRow icon={<Settings size={23} />} label="Settings" onClick={() => go("/chat/apps")} />
-                <SheetRow icon={<Code2 size={23} />} label="Code" onClick={() => openPreviewArea("code")} />
-                <SheetRow icon={<FileText size={23} />} label="Files" onClick={() => openPreviewArea("files")} />
+                <SheetRow icon={<FileText size={23} />} label="Files" onClick={openFiles} />
 
+                <div className="px-3 pb-1 pt-4 text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-600">
+                  Developer apps
+                </div>
+                <SheetRow icon={<Github size={22} />} label="GitHub" onClick={() => go("/chat/apps#github")} />
+                <SheetRow icon={<Database size={22} />} label="Supabase" onClick={() => go("/chat/apps#supabase")} />
+                <SheetRow icon={<Triangle size={21} />} label="Vercel" onClick={() => go("/chat/apps#vercel")} />
+                <SheetRow icon={<Rocket size={22} />} label="Netlify" onClick={() => go("/chat/apps#netlify")} />
+
+                <div className="my-2 border-t border-zinc-800" />
                 <SheetRow
                   icon={<Layers3 size={23} />}
                   label="More"
@@ -246,8 +239,7 @@ export function MobileBuilderHeader({
                   <div className="ml-7 border-l border-zinc-800 pl-2">
                     <SheetRow icon={<Activity size={22} />} label="Analytics" indented onClick={() => go(`${cloudUrl}&tab=usage`)} />
                     <SheetRow icon={<Cloud size={22} />} label="Cloud" indented onClick={() => go(cloudUrl)} />
-                    <SheetRow icon={<Sparkles size={22} />} label="AI" indented onClick={openModels} />
-                    <SheetRow icon={<Bot size={22} />} label="Agent integrations" indented onClick={() => go("/chat/apps#integrations")} />
+                    <SheetRow icon={<Sparkles size={22} />} label="AI Models" indented onClick={openModels} />
                     <SheetRow icon={<CreditCard size={22} />} label="Payments" indented onClick={() => go("/chat/apps#stripe")} />
                     <SheetRow icon={<Plug size={22} />} label="Connectors" indented onClick={() => go("/chat/apps#connections")} />
                     <SheetRow icon={<Shield size={22} />} label="Security" indented onClick={() => go(`${cloudUrl}&tab=security`)} />
