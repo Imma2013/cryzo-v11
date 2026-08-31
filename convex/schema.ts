@@ -263,7 +263,9 @@ export default defineSchema({
     stripeEventId: v.optional(v.string()),
     messageId: v.optional(v.id("messages")),
     createdAt: v.number(),
-  }).index("by_user", ["userId", "createdAt"]),
+  })
+    .index("by_user", ["userId", "createdAt"])
+    .index("by_stripe_event", ["stripeEventId"]),
 
   stripeEvents: defineTable({
     eventId: v.string(),
