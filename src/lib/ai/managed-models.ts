@@ -4,6 +4,7 @@ export type ManagedModelDefinition = {
   id: string;
   name: string;
   providerName: string;
+  logoProviderId: string;
   upstreamProvider: "openrouter" | "nvidia";
   upstreamModel: string;
   tier: ManagedModelTier;
@@ -15,19 +16,12 @@ export type ManagedModelDefinition = {
   badge?: string;
 };
 
-/**
- * Cryzo-managed models are intentionally a tiny curated layer.
- * - Free Auto delegates to OpenRouter's rotating free router, so Cryzo can keep
- *   a useful free coding option without hard-coding a model that disappears.
- * - MiniMax M3 and Kimi K3 are managed premium choices routed through NVIDIA
- *   NIM. They consume Cryzo message credits even while NVIDIA trial access is
- *   inexpensive/free because Cryzo is providing the managed key and runtime.
- */
 export const CRYZO_MANAGED_MODELS: ManagedModelDefinition[] = [
   {
     id: "cryzo/free-auto",
     name: "Free Auto",
-    providerName: "Cryzo",
+    providerName: "OpenRouter",
+    logoProviderId: "openrouter",
     upstreamProvider: "openrouter",
     upstreamModel: "openrouter/free",
     tier: "free",
@@ -41,6 +35,7 @@ export const CRYZO_MANAGED_MODELS: ManagedModelDefinition[] = [
     id: "cryzo/minimax-m3",
     name: "MiniMax M3",
     providerName: "MiniMax",
+    logoProviderId: "minimax",
     upstreamProvider: "nvidia",
     upstreamModel: "minimaxai/minimax-m3",
     tier: "premium",
@@ -55,6 +50,7 @@ export const CRYZO_MANAGED_MODELS: ManagedModelDefinition[] = [
     id: "cryzo/kimi-k3",
     name: "Kimi K3",
     providerName: "Moonshot AI",
+    logoProviderId: "moonshotai",
     upstreamProvider: "nvidia",
     upstreamModel: "moonshotai/kimi-k3",
     tier: "premium",
