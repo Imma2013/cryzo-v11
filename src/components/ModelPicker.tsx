@@ -30,7 +30,7 @@ import {
   type ModelSelection,
 } from "@/lib/ai/models";
 import { CRYZO_MANAGED_MODELS } from "@/lib/ai/managed-models";
-import { ProviderLogo } from "@/components/ProviderLogo";
+import { ModelLogo, ProviderLogo } from "@/components/ProviderLogo";
 
 export type CatalogModel = {
   id: string;
@@ -402,7 +402,7 @@ export function ModelPicker({
         }
         title={`${selectedProvider.name} · ${selection.modelId}`}
       >
-        <ProviderLogo provider={selectedProvider} size={26} />
+        <ModelLogo provider={selectedProvider} modelId={selection.modelId} size={26} />
         <span className="max-w-32 truncate">{selectedModelName}</span>
         <ChevronDown size={13} className="shrink-0" />
       </button>
@@ -501,13 +501,16 @@ export function ModelPicker({
                           }`}
                         >
                           <div className="flex items-start justify-between gap-3">
-                            <div>
-                              <div className="flex flex-wrap items-center gap-2">
-                                <span className="text-sm font-medium text-white">{managed.name}</span>
-                                <ModelBadge tone={managed.tier === "free" ? "free" : "premium"}>{managed.badge}</ModelBadge>
-                                {managed.tier === "premium" && <ModelBadge>Message credits</ModelBadge>}
+                            <div className="flex min-w-0 items-start gap-3">
+                              <ModelLogo provider={provider} modelId={model.id} size={34} />
+                              <div className="min-w-0">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span className="text-sm font-medium text-white">{managed.name}</span>
+                                  <ModelBadge tone={managed.tier === "free" ? "free" : "premium"}>{managed.badge}</ModelBadge>
+                                  {managed.tier === "premium" && <ModelBadge>Message credits</ModelBadge>}
+                                </div>
+                                <p className="mt-1 text-xs text-zinc-500">{managed.providerName} · {managed.description}</p>
                               </div>
-                              <p className="mt-1 text-xs text-zinc-500">{managed.providerName} · {managed.description}</p>
                             </div>
                             {active && <CheckCircle2 className="shrink-0 text-white" size={17} />}
                           </div>
@@ -527,15 +530,18 @@ export function ModelPicker({
                           }`}
                         >
                           <div className="flex items-start justify-between gap-3">
-                            <div className="min-w-0">
-                              <div className="flex flex-wrap items-center gap-2">
-                                <span className="truncate text-sm font-medium text-white">{model.name}</span>
-                                <ModelBadge tone="byok">BYOK</ModelBadge>
-                                {model.reasoning && <ModelBadge>Reasoning</ModelBadge>}
-                                {model.toolCall && <ModelBadge>Tools</ModelBadge>}
-                                {formatContext(model.context) && <ModelBadge>{formatContext(model.context)}</ModelBadge>}
+                            <div className="flex min-w-0 items-start gap-3">
+                              <ModelLogo provider={provider} modelId={model.id} size={34} />
+                              <div className="min-w-0">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span className="truncate text-sm font-medium text-white">{model.name}</span>
+                                  <ModelBadge tone="byok">BYOK</ModelBadge>
+                                  {model.reasoning && <ModelBadge>Reasoning</ModelBadge>}
+                                  {model.toolCall && <ModelBadge>Tools</ModelBadge>}
+                                  {formatContext(model.context) && <ModelBadge>{formatContext(model.context)}</ModelBadge>}
+                                </div>
+                                <p className="mt-1 truncate text-[11px] text-zinc-600">{model.id}</p>
                               </div>
-                              <p className="mt-1 truncate text-[11px] text-zinc-600">{model.id}</p>
                             </div>
                             {active && <CheckCircle2 className="shrink-0 text-sky-300" size={17} />}
                           </div>
