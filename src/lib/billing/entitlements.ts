@@ -24,25 +24,27 @@ export function canRemoveManagedBranding(plan?: string | null) {
   return atLeast(plan, "starter");
 }
 
+// Like Base44, a real custom domain is an upgrade feature. Cryzo-owned
+// subdomains can still be published and renamed on every plan.
 export function canUseManagedCustomDomains(plan?: string | null) {
-  return atLeast(plan, "starter");
-}
-
-export function canUseManagedMobileBuilds(plan?: string | null) {
   return atLeast(plan, "builder");
 }
 
-export function canUseManagedStoreSubmission(plan?: string | null) {
-  return atLeast(plan, "builder");
+// App creation is unlimited. Cryzo does not put the EAS build/submission
+// buttons behind a subscription tier; users still provide their own store and
+// Expo credentials and pay Apple/Google fees directly.
+export function canUseManagedMobileBuilds(_plan?: string | null) {
+  return true;
 }
 
-// Base44-style core backend: database/auth/users are available on every plan.
+export function canUseManagedStoreSubmission(_plan?: string | null) {
+  return true;
+}
+
 export function canUseManagedBackendProvisioning(_plan?: string | null) {
   return true;
 }
 
-// Arbitrary server-side code, secrets, webhooks and scheduled backend work are
-// the advanced backend layer and begin on Builder.
 export function canUseCustomBackendFunctions(plan?: string | null) {
   return atLeast(plan, "builder");
 }
@@ -61,12 +63,11 @@ export function entitlementSnapshot(plan?: string | null) {
     cryzoCloudDatabase: true,
     cryzoCloudAuth: true,
     cryzoCloudUsers: true,
-    // Do not advertise this until the metered realtime subscription lease ships.
     cryzoCloudRealtime: false,
     managedBrandingRemoval: canRemoveManagedBranding(normalized),
     managedCustomDomains: canUseManagedCustomDomains(normalized),
-    managedMobileBuilds: canUseManagedMobileBuilds(normalized),
-    managedStoreSubmission: canUseManagedStoreSubmission(normalized),
+    managedMobileBuilds: true,
+    managedStoreSubmission: true,
     managedBackendProvisioning: true,
     customBackendFunctions: canUseCustomBackendFunctions(normalized),
   };
