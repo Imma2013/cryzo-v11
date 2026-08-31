@@ -24,13 +24,14 @@ export function canRemoveManagedBranding(plan?: string | null) {
   return atLeast(plan, "starter");
 }
 
-// Cryzo app capabilities stay open across plans. Users may publish, rename a
-// Cryzo URL, attach domains, build store files, and submit without a Cryzo plan
-// gate. Provider/registrar/store fees remain external costs.
-export function canUseManagedCustomDomains(_plan?: string | null) {
-  return true;
+// Built-in Cryzo URLs can be created/renamed for free. A real external custom
+// domain follows the Base44-style upgrade boundary and starts on Builder.
+export function canUseManagedCustomDomains(plan?: string | null) {
+  return atLeast(plan, "builder");
 }
 
+// App creation and store delivery are not Cryzo subscription gates. Users
+// provide their own Expo/store credentials and pay Apple/Google fees directly.
 export function canUseManagedMobileBuilds(_plan?: string | null) {
   return true;
 }
@@ -63,7 +64,7 @@ export function entitlementSnapshot(plan?: string | null) {
     cryzoCloudUsers: true,
     cryzoCloudRealtime: false,
     managedBrandingRemoval: canRemoveManagedBranding(normalized),
-    managedCustomDomains: true,
+    managedCustomDomains: canUseManagedCustomDomains(normalized),
     managedMobileBuilds: true,
     managedStoreSubmission: true,
     managedBackendProvisioning: true,
