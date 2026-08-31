@@ -20,6 +20,35 @@ export const getAppInternal = internalQuery({
   handler: async (ctx, args) => await ctx.db.get(args.appId),
 });
 
+export const getPublishedOriginsInternal = internalQuery({
+  args: { appId: v.id("cloudApps") },
+  handler: async (ctx, args) => {
+    const app = await ctx.db.get(args.appId);
+    if (!app) return [];
+    const target = await ctx.db
+      .query("publishTargets")
+      .withIndex("by_user_conversation_provider", (q) =>
+        q
+          .eq("userId", app.ownerUserId)
+          .eq("conversationId", app.conversationId)
+          .eq("provider", "cryzo"),
+      )
+      .unique();
+    if (!target) return [];
+    const values = [target.url, target.customDomain ? `https://${target.customDomain}` : undefined]
+      .filter((value): value is string => Boolean(value));
+    const origins: string[] = [];
+    for (const value of values) {
+      try {
+        origins.push(new URL(value).origin);
+      } catch {
+        // Ignore stale or malformed historical target URLs.
+      }
+    }
+    return Array.from(new Set(origins));
+  },
+});
+
 export const getSchemaInternal = internalQuery({
   args: { appId: v.id("cloudApps"), entityName: v.string() },
   handler: async (ctx, args) =>
