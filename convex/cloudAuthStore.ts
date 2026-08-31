@@ -29,6 +29,58 @@ export const createUserInternal = internalMutation({
       role: "user",
       passwordHash: args.passwordHash,
       passwordSalt: args.passwordSalt,
+      authProvider: "password",
+      createdAt: now,
+      updatedAt: now,
+    });
+    return await ctx.db.get(id);
+  },
+});
+
+export const upsertGoogleUserInternal = internalMutation({
+  args: {
+    appId: v.id("cloudApps"),
+    email: v.string(),
+    name: v.optional(v.string()),
+    providerSubject: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const email = args.email.toLowerCase();
+    const now = Date.now();
+    const bySubject = await ctx.db
+      .query("cloudAppUsers")
+      .withIndex("by_app_provider_subject", (q) =>
+        q.eq("appId", args.appId).eq("authProvider", "google").eq("providerSubject", args.providerSubject),
+      )
+      .unique();
+    if (bySubject) {
+      if (args.name && args.name !== bySubject.name) {
+        await ctx.db.patch(bySubject._id, { name: args.name, updatedAt: now });
+      }
+      return await ctx.db.get(bySubject._id);
+    }
+
+    const byEmail = await ctx.db
+      .query("cloudAppUsers")
+      .withIndex("by_app_email", (q) => q.eq("appId", args.appId).eq("email", email))
+      .unique();
+    if (byEmail) {
+      await ctx.db.patch(byEmail._id, {
+        authProvider: "google",
+        providerSubject: args.providerSubject,
+        ...(args.name ? { name: args.name } : {}),
+        updatedAt: now,
+      });
+      return await ctx.db.get(byEmail._id);
+    }
+
+    const id = await ctx.db.insert("cloudAppUsers", {
+      appId: args.appId,
+      email,
+      name: args.name,
+      role: "user",
+      authProvider: "google",
+      providerSubject: args.providerSubject,
       createdAt: now,
       updatedAt: now,
     });
