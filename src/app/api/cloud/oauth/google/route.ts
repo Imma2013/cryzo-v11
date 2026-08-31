@@ -92,6 +92,13 @@ export async function GET(req: Request) {
         return htmlResponse("Missing appId or returnOrigin.", 400);
       }
       const returnOrigin = normalizeReturnOrigin(returnOriginRaw);
+      const originCheck = await client.action(api.cloudAuth.validateGoogleReturnOrigin, {
+        appId: appId as any,
+        origin: returnOrigin,
+      });
+      if (!originCheck.allowed) {
+        return htmlResponse("Publish this Cryzo app before using managed Google sign-in from this domain.", 403);
+      }
       const { clientId } = await client.action(api.cloudAuth.googleOAuthClientId, {});
       const state = encodeState({ appId, returnOrigin, createdAt: Date.now() }, secret);
       const authorize = new URL("https://accounts.google.com/o/oauth2/v2/auth");
@@ -114,6 +121,14 @@ export async function GET(req: Request) {
       });
     }
     if (!code) return htmlResponse("Missing Google authorization code.", 400);
+
+    const originCheck = await client.action(api.cloudAuth.validateGoogleReturnOrigin, {
+      appId: state.appId as any,
+      origin: state.returnOrigin,
+    });
+    if (!originCheck.allowed) {
+      return htmlResponse("This application origin is no longer authorized for Google sign-in.", 403);
+    }
 
     const result = await client.action(api.cloudAuth.exchangeGoogleCode, {
       appId: state.appId as any,
