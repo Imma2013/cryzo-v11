@@ -46,9 +46,9 @@ function logoFrame({
         <img
           src={modelsDevLogoUrl(id)}
           alt=""
-          width={Math.max(14, size - 9)}
-          height={Math.max(14, size - 9)}
-          className="relative z-10 block object-contain [filter:brightness(0)_invert(1)]"
+          width={Math.max(14, size - 8)}
+          height={Math.max(14, size - 8)}
+          className="relative z-10 block object-contain"
           onError={(event) => {
             event.currentTarget.style.display = "none";
           }}
