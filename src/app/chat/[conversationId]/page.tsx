@@ -105,6 +105,7 @@ export default function ConversationPage({
             view="chat"
             canPreview={workspaceStarted}
             isBuilding={isBuilding}
+            conversationId={conversationId}
             onPreview={() => setMobileView("preview")}
             onBackToChat={() => setMobileView("chat")}
           />
