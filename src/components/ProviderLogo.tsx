@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useMemo, useState } from "react";
 import type { ProviderDefinition } from "@/lib/ai/models";
 import { getManagedModel } from "@/lib/ai/managed-models";
 
@@ -20,8 +21,90 @@ const FALLBACK_MARKS: Record<string, string> = {
   deepseek: "DS",
 };
 
+const LOBE_ALIASES: Record<string, string> = {
+  anthropic: "claude",
+  claude: "claude",
+  google: "gemini",
+  googlegemini: "gemini",
+  gemini: "gemini",
+  xai: "xai",
+  "x-ai": "xai",
+  mistralai: "mistral",
+  mistral: "mistral",
+  togetherai: "together",
+  together: "together",
+  moonshotai: "kimi",
+  moonshot: "kimi",
+  kimi: "kimi",
+  minimaxai: "minimax",
+  minimax: "minimax",
+  "meta-llama": "meta",
+  meta: "meta",
+  qwen: "qwen",
+  deepseek: "deepseek",
+  microsoft: "microsoft",
+  cohere: "cohere",
+  nvidia: "nvidia",
+  cerebras: "cerebras",
+  groq: "groq",
+  openai: "openai",
+  openrouter: "openrouter",
+  ollama: "ollama",
+  lmstudio: "lmstudio",
+  zai: "zhipu",
+  "z-ai": "zhipu",
+  zhipu: "zhipu",
+  "01-ai": "yi",
+  zerooneai: "yi",
+};
+
+const LOBE_CDN = "https://unpkg.com/@lobehub/icons-static-svg@1.94.0/icons";
+
 function modelsDevLogoUrl(id: string) {
   return `https://models.dev/logos/${encodeURIComponent(id)}.svg`;
+}
+
+function lobeSlug(id: string) {
+  const normalized = id.trim().toLowerCase();
+  return LOBE_ALIASES[normalized] || normalized;
+}
+
+function logoCandidates(id?: string) {
+  if (!id) return [];
+  const slug = lobeSlug(id);
+  return [
+    `${LOBE_CDN}/${encodeURIComponent(slug)}-color.svg`,
+    `${LOBE_CDN}/${encodeURIComponent(slug)}.svg`,
+    modelsDevLogoUrl(id),
+  ];
+}
+
+function BrandImage({
+  id,
+  size,
+}: {
+  id?: string;
+  size: number;
+}) {
+  const candidates = useMemo(() => logoCandidates(id), [id]);
+  const candidateKey = candidates.join("|");
+  const [index, setIndex] = useState(0);
+
+  useEffect(() => setIndex(0), [candidateKey]);
+
+  const src = candidates[index];
+  if (!src) return null;
+
+  return (
+    <img
+      src={src}
+      alt=""
+      width={Math.max(16, size - 6)}
+      height={Math.max(16, size - 6)}
+      className="relative z-10 block max-h-full max-w-full object-contain"
+      onError={() => setIndex((current) => current + 1)}
+    />
+  );
 }
 
 function logoFrame({
@@ -35,25 +118,14 @@ function logoFrame({
 }) {
   return (
     <span
-      className="relative flex shrink-0 items-center justify-center overflow-hidden rounded-lg border border-zinc-700 bg-zinc-900 text-[10px] font-semibold tracking-tight text-zinc-200"
+      className="relative flex shrink-0 items-center justify-center overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950 text-[10px] font-semibold tracking-tight text-zinc-400"
       style={{ width: size, height: size }}
       aria-hidden="true"
     >
       <span className="absolute inset-0 flex items-center justify-center">
         {fallback}
       </span>
-      {id ? (
-        <img
-          src={modelsDevLogoUrl(id)}
-          alt=""
-          width={Math.max(14, size - 8)}
-          height={Math.max(14, size - 8)}
-          className="relative z-10 block object-contain"
-          onError={(event) => {
-            event.currentTarget.style.display = "none";
-          }}
-        />
-      ) : null}
+      <BrandImage id={id} size={size} />
     </span>
   );
 }
@@ -71,12 +143,25 @@ function modelLabId(provider: ProviderDefinition, modelId: string) {
   if (provider.id === "openrouter" && modelId.includes("/")) {
     const prefix = modelId.split("/")[0].trim().toLowerCase();
     const aliases: Record<string, string> = {
-      "z-ai": "zai",
-      google: "google",
+      "z-ai": "zhipu",
+      zai: "zhipu",
+      google: "gemini",
       meta: "meta",
       "meta-llama": "meta",
-      moonshotai: "moonshotai",
+      anthropic: "claude",
+      openai: "openai",
+      mistralai: "mistral",
+      microsoft: "microsoft",
+      cohere: "cohere",
+      qwen: "qwen",
+      deepseek: "deepseek",
+      moonshotai: "kimi",
       minimax: "minimax",
+      minimaxai: "minimax",
+      nvidia: "nvidia",
+      "x-ai": "xai",
+      xai: "xai",
+      "01-ai": "yi",
     };
     return aliases[prefix] || prefix;
   }
