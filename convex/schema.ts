@@ -272,4 +272,10 @@ export default defineSchema({
     type: v.string(),
     processedAt: v.number(),
   }).index("by_event_id", ["eventId"]),
+
+  processedStripeEvents: defineTable({
+    eventId: v.string(),
+    eventType: v.string(),
+    createdAt: v.number(),
+  }).index("by_event", ["eventId"]),
 });
