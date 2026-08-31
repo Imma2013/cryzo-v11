@@ -81,8 +81,6 @@ export default defineSchema({
     ])
     .index("by_provider_slug", ["provider", "slug"]),
 
-  // Legacy/BYO Convex deployment records. Cryzo Cloud itself now uses the
-  // shared multi-tenant runtime below instead of one Convex project per app.
   appBackends: defineTable({
     userId: v.id("users"),
     conversationId: v.id("conversations"),
@@ -97,12 +95,13 @@ export default defineSchema({
     .index("by_user_conversation", ["userId", "conversationId"])
     .index("by_project_id", ["projectId"]),
 
-  // Base44-style shared Cryzo Cloud runtime. Every generated app gets a logical
-  // app namespace while the managed runtime remains multi-tenant.
   cloudApps: defineTable({
     ownerUserId: v.id("users"),
     conversationId: v.id("conversations"),
     name: v.string(),
+    authProviders: v.optional(
+      v.array(v.union(v.literal("password"), v.literal("google"))),
+    ),
     createdAt: v.number(),
     updatedAt: v.number(),
   })
@@ -127,12 +126,15 @@ export default defineSchema({
     email: v.string(),
     name: v.optional(v.string()),
     role: v.union(v.literal("user"), v.literal("admin")),
-    passwordHash: v.string(),
-    passwordSalt: v.string(),
+    passwordHash: v.optional(v.string()),
+    passwordSalt: v.optional(v.string()),
+    authProvider: v.optional(v.union(v.literal("password"), v.literal("google"))),
+    providerSubject: v.optional(v.string()),
     createdAt: v.number(),
     updatedAt: v.number(),
   })
     .index("by_app_email", ["appId", "email"])
+    .index("by_app_provider_subject", ["appId", "authProvider", "providerSubject"])
     .index("by_app", ["appId", "createdAt"]),
 
   cloudSessions: defineTable({
@@ -258,16 +260,12 @@ export default defineSchema({
     providerId: v.optional(v.string()),
     modelId: v.optional(v.string()),
     toolName: v.optional(v.string()),
-    stripeEventId: v.optional(v.string()),
-    messageId: v.optional(v.id("messages")),
     createdAt: v.number(),
-  })
-    .index("by_user", ["userId", "createdAt"])
-    .index("by_stripe_event", ["stripeEventId"]),
+  }).index("by_user", ["userId", "createdAt"]),
 
-  processedStripeEvents: defineTable({
+  stripeEvents: defineTable({
     eventId: v.string(),
-    eventType: v.string(),
-    createdAt: v.number(),
-  }).index("by_event", ["eventId"]),
+    type: v.string(),
+    processedAt: v.number(),
+  }).index("by_event_id", ["eventId"]),
 });
