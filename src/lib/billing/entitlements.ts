@@ -24,15 +24,13 @@ export function canRemoveManagedBranding(plan?: string | null) {
   return atLeast(plan, "starter");
 }
 
-// Like Base44, a real custom domain is an upgrade feature. Cryzo-owned
-// subdomains can still be published and renamed on every plan.
-export function canUseManagedCustomDomains(plan?: string | null) {
-  return atLeast(plan, "builder");
+// Cryzo app capabilities stay open across plans. Users may publish, rename a
+// Cryzo URL, attach domains, build store files, and submit without a Cryzo plan
+// gate. Provider/registrar/store fees remain external costs.
+export function canUseManagedCustomDomains(_plan?: string | null) {
+  return true;
 }
 
-// App creation is unlimited. Cryzo does not put the EAS build/submission
-// buttons behind a subscription tier; users still provide their own store and
-// Expo credentials and pay Apple/Google fees directly.
 export function canUseManagedMobileBuilds(_plan?: string | null) {
   return true;
 }
@@ -65,7 +63,7 @@ export function entitlementSnapshot(plan?: string | null) {
     cryzoCloudUsers: true,
     cryzoCloudRealtime: false,
     managedBrandingRemoval: canRemoveManagedBranding(normalized),
-    managedCustomDomains: canUseManagedCustomDomains(normalized),
+    managedCustomDomains: true,
     managedMobileBuilds: true,
     managedStoreSubmission: true,
     managedBackendProvisioning: true,
