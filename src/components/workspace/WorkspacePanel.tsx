@@ -8,6 +8,7 @@ import {
   Code2,
   ExternalLink,
   Eye,
+  FileText,
   Loader2,
   Mic,
   MoreHorizontal,
@@ -26,6 +27,7 @@ import { PublishControls } from "./PublishControls";
 import { Id } from "../../../convex/_generated/dataModel";
 
 type ViewMode = "preview" | "code";
+type MobilePanel = "preview" | "code" | "files";
 
 export type WorkspaceStatus = {
   isBooting: boolean;
@@ -47,6 +49,7 @@ export function WorkspacePanel({
   mobile?: boolean;
 }) {
   const [viewMode, setViewMode] = useState<ViewMode>("preview");
+  const [mobilePanel, setMobilePanel] = useState<MobilePanel>("preview");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [refreshToken, setRefreshToken] = useState(0);
   const [showErrorLogs, setShowErrorLogs] = useState(false);
@@ -74,6 +77,18 @@ export function WorkspacePanel({
   useEffect(() => {
     if (!error) setShowErrorLogs(false);
   }, [error]);
+
+  useEffect(() => {
+    if (!mobile) return;
+    const handlePanel = (event: Event) => {
+      const requested = (event as CustomEvent<{ panel?: MobilePanel }>).detail?.panel;
+      if (requested === "preview" || requested === "code" || requested === "files") {
+        setMobilePanel(requested);
+      }
+    };
+    window.addEventListener("cryzo:workspace-panel", handlePanel);
+    return () => window.removeEventListener("cryzo:workspace-panel", handlePanel);
+  }, [mobile]);
 
   const selectedContent = selectedFile ? files[selectedFile]?.content || "" : "";
   const errorSummary = error?.split("\n")[0] || "The preview server could not start.";
@@ -161,21 +176,78 @@ export function WorkspacePanel({
       }, 120);
     };
 
+    const mobileWorkspaceContent =
+      mobilePanel === "files" ? (
+        <div className="flex h-full min-h-0 flex-col bg-zinc-950 text-white">
+          <div className="flex h-12 shrink-0 items-center justify-between border-b border-zinc-800 px-4">
+            <div className="flex items-center gap-2 text-sm font-semibold">
+              <FileText size={16} /> Files
+            </div>
+            <button
+              type="button"
+              onClick={() => setMobilePanel("preview")}
+              className="rounded-lg px-2.5 py-1.5 text-xs text-zinc-400 hover:bg-zinc-900 hover:text-white"
+            >
+              Preview
+            </button>
+          </div>
+          <div className="min-h-0 flex-1 overflow-hidden">
+            <FileTree
+              files={files}
+              selectedFile={selectedFile}
+              onSelect={(path) => {
+                setSelectedFile(path);
+                setMobilePanel("code");
+              }}
+            />
+          </div>
+        </div>
+      ) : mobilePanel === "code" ? (
+        <div className="flex h-full min-h-0 flex-col bg-zinc-950 text-white">
+          <div className="flex h-12 shrink-0 items-center gap-2 border-b border-zinc-800 px-3">
+            <button
+              type="button"
+              onClick={() => setMobilePanel("files")}
+              className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2 text-xs text-zinc-400 hover:bg-zinc-900 hover:text-white"
+            >
+              <ArrowLeft size={14} /> Files
+            </button>
+            <span className="min-w-0 flex-1 truncate text-xs text-zinc-500">
+              {selectedFile || "Select a file"}
+            </span>
+            <button
+              type="button"
+              onClick={() => setMobilePanel("preview")}
+              className="rounded-lg px-2.5 py-1.5 text-xs text-zinc-400 hover:bg-zinc-900 hover:text-white"
+            >
+              Preview
+            </button>
+          </div>
+          <div className="min-h-0 flex-1 overflow-hidden">
+            {selectedFile ? (
+              <CodeEditor filePath={selectedFile} content={selectedContent} />
+            ) : (
+              <div className="flex h-full items-center justify-center text-xs text-zinc-600">
+                Choose a file to view its code.
+              </div>
+            )}
+          </div>
+        </div>
+      ) : isBooting || !previewUrl || error ? (
+        loadingContent
+      ) : (
+        <LivePreview
+          url={previewUrl}
+          isBooting={isBooting}
+          progress={progress}
+          mobile
+          refreshToken={refreshToken}
+        />
+      );
+
     return (
       <div className="flex h-full min-h-0 flex-col overflow-hidden bg-zinc-950">
-        <div className="min-h-0 flex-1 overflow-hidden">
-          {isBooting || !previewUrl || error ? (
-            loadingContent
-          ) : (
-            <LivePreview
-              url={previewUrl}
-              isBooting={isBooting}
-              progress={progress}
-              mobile
-              refreshToken={refreshToken}
-            />
-          )}
-        </div>
+        <div className="min-h-0 flex-1 overflow-hidden">{mobileWorkspaceContent}</div>
 
         <div className="relative z-40 shrink-0 border-t border-zinc-200 bg-[#fafafa] px-4 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-3 text-black">
           {mobileMenuOpen && (
@@ -184,6 +256,7 @@ export function WorkspacePanel({
                 type="button"
                 onClick={() => {
                   setRefreshToken((value) => value + 1);
+                  setMobilePanel("preview");
                   setMobileMenuOpen(false);
                 }}
                 disabled={!previewUrl}
