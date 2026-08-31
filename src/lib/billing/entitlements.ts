@@ -12,7 +12,6 @@ export function normalizeCryzoPlan(plan?: string | null): CryzoPlan {
   if (plan === "starter" || plan === "builder" || plan === "pro" || plan === "elite") {
     return plan;
   }
-  // Legacy values from the previous Cryzo pricing model.
   if (plan === "pro_plus" || plan === "business") return "builder";
   return "free";
 }
@@ -37,8 +36,15 @@ export function canUseManagedStoreSubmission(plan?: string | null) {
   return atLeast(plan, "builder");
 }
 
-export function canUseManagedBackendProvisioning(plan?: string | null) {
-  return atLeast(plan, "starter");
+// Base44-style core backend: database/auth/users are available on every plan.
+export function canUseManagedBackendProvisioning(_plan?: string | null) {
+  return true;
+}
+
+// Arbitrary server-side code, secrets, webhooks and scheduled backend work are
+// the advanced backend layer and begin on Builder.
+export function canUseCustomBackendFunctions(plan?: string | null) {
+  return atLeast(plan, "builder");
 }
 
 export function entitlementSnapshot(plan?: string | null) {
@@ -52,10 +58,15 @@ export function entitlementSnapshot(plan?: string | null) {
     githubSync: true,
     diyDeployments: true,
     storeReadinessScan: true,
+    cryzoCloudDatabase: true,
+    cryzoCloudAuth: true,
+    cryzoCloudUsers: true,
+    cryzoCloudRealtime: true,
     managedBrandingRemoval: canRemoveManagedBranding(normalized),
     managedCustomDomains: canUseManagedCustomDomains(normalized),
     managedMobileBuilds: canUseManagedMobileBuilds(normalized),
     managedStoreSubmission: canUseManagedStoreSubmission(normalized),
-    managedBackendProvisioning: canUseManagedBackendProvisioning(normalized),
+    managedBackendProvisioning: true,
+    customBackendFunctions: canUseCustomBackendFunctions(normalized),
   };
 }
