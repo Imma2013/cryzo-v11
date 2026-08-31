@@ -65,6 +65,43 @@ export const create = mutation({
   },
 });
 
+export const saveManualFile = mutation({
+  args: {
+    conversationId: v.id("conversations"),
+    artifactId: v.string(),
+    filePath: v.string(),
+    content: v.string(),
+  },
+  handler: async (ctx, args) => {
+    await requireOwnedConversation(ctx, args.conversationId);
+    const path = args.filePath.trim();
+    if (!path || path.includes("..") || path.startsWith("/")) {
+      throw new Error("Invalid project file path");
+    }
+
+    const existing = await ctx.db
+      .query("artifacts")
+      .withIndex("by_conversation", (q) => q.eq("conversationId", args.conversationId))
+      .filter((q) => q.eq(q.field("artifactId"), args.artifactId))
+      .first();
+    if (existing) return existing._id;
+
+    return await ctx.db.insert("artifacts", {
+      conversationId: args.conversationId,
+      artifactId: args.artifactId,
+      title: `Manual edit: ${path}`,
+      actions: [
+        {
+          type: "file" as const,
+          filePath: path,
+          content: args.content,
+        },
+      ],
+      createdAt: Date.now(),
+    });
+  },
+});
+
 export const listByConversation = query({
   args: { conversationId: v.id("conversations") },
   handler: async (ctx, args) => {
