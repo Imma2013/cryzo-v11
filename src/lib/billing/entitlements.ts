@@ -24,9 +24,15 @@ export function canRemoveManagedBranding(plan?: string | null) {
   return atLeast(plan, "starter");
 }
 
-// Built-in Cryzo URLs can be created/renamed for free. A real external custom
-// domain follows the Base44-style upgrade boundary and starts on Builder.
-export function canUseManagedCustomDomains(plan?: string | null) {
+// This legacy entitlement is used by the built-in Cryzo URL rename path. Keep
+// it open on every plan: my-app.<Cryzo hosting domain> is not a custom domain.
+export function canUseManagedCustomDomains(_plan?: string | null) {
+  return true;
+}
+
+// A real externally registered domain (example.com) follows the Base44-style
+// upgrade boundary and starts on Builder.
+export function canUseExternalCustomDomains(plan?: string | null) {
   return atLeast(plan, "builder");
 }
 
@@ -64,7 +70,8 @@ export function entitlementSnapshot(plan?: string | null) {
     cryzoCloudUsers: true,
     cryzoCloudRealtime: false,
     managedBrandingRemoval: canRemoveManagedBranding(normalized),
-    managedCustomDomains: canUseManagedCustomDomains(normalized),
+    managedCryzoUrlRename: true,
+    managedCustomDomains: canUseExternalCustomDomains(normalized),
     managedMobileBuilds: true,
     managedStoreSubmission: true,
     managedBackendProvisioning: true,
