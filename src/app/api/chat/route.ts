@@ -79,12 +79,10 @@ function loadRecipeContent(slug: string): string {
   }
 }
 
-const CODING_REQUEST_PATTERN = /\b(build|generate|redesign|clone|website|web app|mobile app|native app|ios|iphone|android|expo|react native|component|landing page|dashboard|storefront|frontend|ui|ux|react|vite|tailwind|css|html|typescript|javascript|code|source|fix (?:this |the )?(?:site|website|app|code|error)|debug (?:this |the )?(?:site|website|app|code|error)|responsive|mobile layout)\b/i;
-const EXTERNAL_ACTION_PATTERN = /\b(send|email|reply|forward|post|publish|schedule|calendar|invite|slack|tweet|x post|github issue|pull request|create issue|open issue|comment on|upload to|connect|disconnect|create event|create meeting|send message)\b/i;
+const EXTERNAL_ACTION_PATTERN = /\b(send|email|reply|forward|post|publish|schedule|calendar|invite|slack|tweet|x post|github issue|pull request|create issue|open issue|comment on|upload to|connect|disconnect|create event|create meeting|send message|setup|set up|configure|authorize|stripe|gmail|payment)\b/i;
 
 function shouldUseComposioTools(userMessage: string) {
   if (userMessage.includes("[User selected element:")) return false;
-  if (CODING_REQUEST_PATTERN.test(userMessage)) return false;
   return EXTERNAL_ACTION_PATTERN.test(userMessage);
 }
 
@@ -105,6 +103,7 @@ function hasAttachedContent(messages: UIMessage[]) {
 
 type CloudConfig = {
   name?: string;
+  auth?: { providers?: string[] };
   entities?: Array<{
     name?: string;
     fields?: unknown;
@@ -129,6 +128,38 @@ function authedConvexClient(authToken?: string) {
   const client = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL);
   client.setAuth(authToken);
   return client;
+}
+
+function buildCurrentProjectContext(artifacts: any[]) {
+  const latest = new Map<string, string>();
+  for (const artifact of artifacts || []) {
+    for (const action of artifact?.actions || []) {
+      if (action?.type === "file" && action.filePath && typeof action.content === "string") {
+        latest.set(action.filePath, action.content);
+      }
+    }
+  }
+
+  const ignored = /(^|\/)(node_modules|dist|build|\.git)(\/|$)|(^|\/)(package-lock\.json|pnpm-lock\.yaml|yarn\.lock)$|(^|\/)\.env/i;
+  const entries = [...latest.entries()]
+    .filter(([path]) => !ignored.test(path))
+    .sort(([a], [b]) => a.localeCompare(b));
+  if (!entries.length) return "";
+
+  const limit = 90000;
+  let used = 0;
+  const blocks: string[] = [];
+  for (const [path, content] of entries) {
+    const header = `\n--- ${path} ---\n`;
+    if (used + header.length >= limit) break;
+    const remaining = limit - used - header.length;
+    const body = content.length > remaining ? content.slice(0, remaining) : content;
+    blocks.push(`${header}${body}`);
+    used += header.length + body.length;
+    if (body.length < content.length) break;
+  }
+
+  return `\n\n## CURRENT PROJECT SOURCE — AUTHORITATIVE\nThese are the latest saved project files, including manual edits made in Cryzo Files. Treat them as the source of truth. Preserve manual edits unless the user asks to change them. When editing, output complete replacements only for files that actually need changes.\n${blocks.join("\n")}`;
 }
 
 export const dynamic = "force-dynamic";
@@ -227,11 +258,20 @@ export async function POST(req: Request) {
         ? normalizeProjectPlatforms(storedProjectPlatforms)
         : inferProjectPlatforms(lastUserText, ["web"], false);
 
-    // Like Base44, every Cryzo app has a managed backend namespace available on
-    // every plan. The ID is public; end-user sessions and entity policies guard
-    // access to the actual data.
     let cryzoCloudAppId: string | undefined;
+    let currentProjectContext = "";
     const authenticatedConvex = authedConvexClient(authToken);
+    if (conversationId && authenticatedConvex) {
+      try {
+        const artifacts = await authenticatedConvex.query(api.artifacts.listByConversation, {
+          conversationId: conversationId as any,
+        });
+        currentProjectContext = buildCurrentProjectContext(artifacts as any[]);
+      } catch (error) {
+        console.warn("Unable to load current project source for model context", error);
+      }
+    }
+
     if (mode === "build" && conversationId && authenticatedConvex) {
       try {
         const cloudApp = await authenticatedConvex.mutation(
@@ -250,23 +290,23 @@ export async function POST(req: Request) {
     const syncGeneratedCloudConfig = async (text: string) => {
       if (!conversationId || !authenticatedConvex) return;
       const config = parseCloudConfig(text);
-      if (!config?.entities?.length) return;
-      const entities = config.entities
+      if (!config) return;
+      const entities = (config.entities || [])
         .filter((entity) => entity.name?.trim())
         .map((entity) => ({
           name: entity.name!.trim(),
           fields: entity.fields,
           access: entity.access,
         }));
-      if (!entities.length) return;
       try {
         await authenticatedConvex.mutation(api.cloudAdmin.configureFromPublish, {
           conversationId: conversationId as any,
           name: config.name?.trim() || `Cryzo app ${conversationId.slice(-6)}`,
           entities,
-        });
+          authProviders: (config.auth?.providers || []).filter(Boolean),
+        } as any);
       } catch (error) {
-        console.warn("Unable to apply generated Cryzo Cloud schema", error);
+        console.warn("Unable to apply generated Cryzo Cloud config", error);
       }
     };
 
@@ -281,7 +321,7 @@ export async function POST(req: Request) {
     if (mode === "plan") {
       const result = streamText({
         model: resolved.model,
-        system: buildPlanPrompt(recipeBlock, resolvedProjectPlatforms),
+        system: buildPlanPrompt(recipeBlock, resolvedProjectPlatforms) + currentProjectContext,
         messages: modelMessages,
         stopWhen: stepCountIs(5),
       });
@@ -329,7 +369,7 @@ export async function POST(req: Request) {
       recipeBlock,
       projectPlatforms: resolvedProjectPlatforms,
       cryzoCloudAppId,
-    });
+    }) + currentProjectContext;
 
     let responseSessionId = composioSessionId;
     let result;
