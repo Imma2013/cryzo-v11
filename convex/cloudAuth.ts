@@ -5,6 +5,7 @@ import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 
+const internalApi = internal as any;
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
 function normalizeEmail(value: string) {
@@ -33,7 +34,7 @@ export const signUp = action({
     name: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const app = await ctx.runQuery(internal.cloudRuntime.getAppInternal, {
+    const app = await ctx.runQuery(internalApi.cloudRuntime.getAppInternal, {
       appId: args.appId,
     });
     if (!app) throw new Error("Cryzo Cloud app not found");
@@ -41,7 +42,7 @@ export const signUp = action({
     if (!email.includes("@")) throw new Error("Enter a valid email address");
     if (args.password.length < 8) throw new Error("Password must be at least 8 characters");
 
-    const existing = await ctx.runQuery(internal.cloudAuthStore.getUserByEmailInternal, {
+    const existing = await ctx.runQuery(internalApi.cloudAuthStore.getUserByEmailInternal, {
       appId: args.appId,
       email,
     });
@@ -49,7 +50,7 @@ export const signUp = action({
 
     const salt = randomBytes(16).toString("base64");
     const passwordHash = hashPassword(args.password, salt);
-    const user = await ctx.runMutation(internal.cloudAuthStore.createUserInternal, {
+    const user = await ctx.runMutation(internalApi.cloudAuthStore.createUserInternal, {
       appId: args.appId,
       email,
       name: args.name?.trim() || undefined,
@@ -60,13 +61,13 @@ export const signUp = action({
 
     const token = randomBytes(32).toString("base64url");
     const expiresAt = Date.now() + SESSION_TTL_MS;
-    await ctx.runMutation(internal.cloudAuthStore.createSessionInternal, {
+    await ctx.runMutation(internalApi.cloudAuthStore.createSessionInternal, {
       appId: args.appId,
       appUserId: user._id,
       token,
       expiresAt,
     });
-    await ctx.runMutation(internal.cloudRuntime.logUsageInternal, {
+    await ctx.runMutation(internalApi.cloudRuntime.logUsageInternal, {
       appId: args.appId,
       ownerUserId: app.ownerUserId,
       category: "auth",
@@ -86,12 +87,12 @@ export const signIn = action({
     password: v.string(),
   },
   handler: async (ctx, args) => {
-    const app = await ctx.runQuery(internal.cloudRuntime.getAppInternal, {
+    const app = await ctx.runQuery(internalApi.cloudRuntime.getAppInternal, {
       appId: args.appId,
     });
     if (!app) throw new Error("Cryzo Cloud app not found");
     const email = normalizeEmail(args.email);
-    const user = await ctx.runQuery(internal.cloudAuthStore.getUserByEmailInternal, {
+    const user = await ctx.runQuery(internalApi.cloudAuthStore.getUserByEmailInternal, {
       appId: args.appId,
       email,
     });
@@ -105,13 +106,13 @@ export const signIn = action({
 
     const token = randomBytes(32).toString("base64url");
     const expiresAt = Date.now() + SESSION_TTL_MS;
-    await ctx.runMutation(internal.cloudAuthStore.createSessionInternal, {
+    await ctx.runMutation(internalApi.cloudAuthStore.createSessionInternal, {
       appId: args.appId,
       appUserId: user._id,
       token,
       expiresAt,
     });
-    await ctx.runMutation(internal.cloudRuntime.logUsageInternal, {
+    await ctx.runMutation(internalApi.cloudRuntime.logUsageInternal, {
       appId: args.appId,
       ownerUserId: app.ownerUserId,
       category: "auth",
@@ -128,7 +129,7 @@ export const me = action({
   args: { appId: v.id("cloudApps"), token: v.string() },
   handler: async (ctx, args) => {
     const session = await ctx.runQuery(
-      internal.cloudRuntime.getSessionContextInternal,
+      internalApi.cloudRuntime.getSessionContextInternal,
       { appId: args.appId, sessionToken: args.token },
     );
     return session?.user ?? null;
@@ -138,7 +139,7 @@ export const me = action({
 export const signOut = action({
   args: { appId: v.id("cloudApps"), token: v.string() },
   handler: async (ctx, args) => {
-    await ctx.runMutation(internal.cloudAuthStore.deleteSessionInternal, {
+    await ctx.runMutation(internalApi.cloudAuthStore.deleteSessionInternal, {
       appId: args.appId,
       token: args.token,
     });
