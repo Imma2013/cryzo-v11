@@ -81,8 +81,8 @@ export function buildCryzoSystemPrompt({
   const mobile = !targets.includes("web");
   const targetBlock = buildProjectTargetBlock(targets);
   const toolUsageBlock = useComposioTools
-    ? `## Tool Usage\nWhen the user explicitly asks you to perform an external action (send email, create a GitHub issue, post a Slack message, schedule something, etc.), use the available Composio tools. If a tool requires authentication, provide the authorization link.`
-    : `## Tool Usage\nThis is a coding/build request. No external tools are available or needed. Do NOT emit native provider tool-call markup, tool XML, thinking tags, or transport tokens. Only use Cryzo artifact markup for code.`;
+    ? `## Tool Usage\nComposio tools are available during this build. If the user asks to connect, configure, or act through an external account such as Stripe, Gmail, GitHub, Slack, or another connector, use the appropriate Composio tool and complete the account authorization flow. You may both use tools AND generate/edit the application in the same request. A connection/setup request is not a reason to skip the code changes. Never copy provider access tokens, OAuth secrets, or connected-account credentials into generated client code.`
+    : `## Tool Usage\nNo external account action was requested for this turn. Do NOT emit native provider tool-call markup, tool XML, thinking tags, or transport tokens. Only use Cryzo artifact markup for code.`;
 
   const supabaseEnvBlock = mobile
     ? `For Expo mobile code, read client configuration from process.env.EXPO_PUBLIC_SUPABASE_URL and process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY. Never hardcode private keys.`
@@ -95,12 +95,13 @@ ${cryzoCloudAppId}
 
 Use Cryzo Cloud by DEFAULT whenever the user asks for login, signup, users, profiles, persistent data, database records, CRUD, saved state, roles, or app data. Do NOT ask the user to connect Supabase or Convex unless they explicitly request one of those providers.
 
-Cryzo Cloud core database + authentication are available on every Cryzo plan. Auth operations do not consume integration credits. Each logical managed database operation is metered by Cryzo server-side; generated code must never implement its own credit logic.
+Cryzo Cloud core database + authentication are available on every Cryzo plan. Auth operations do not consume integration credits. Each logical managed database operation is metered by Cryzo server-side; generated code must never implement its own credit logic. Every app has a built-in app-user namespace even when the product does not expose a login screen yet.
 
 ### Required Cryzo Cloud config
 Whenever the app uses Cryzo Cloud, emit this normal source file in the artifact:
 <cryzoAction type="file" filePath="cryzo/cloud.json">{
   "name": "Human app name",
+  "auth": { "providers": ["password"] },
   "entities": [
     {
       "name": "EntityName",
@@ -109,6 +110,11 @@ Whenever the app uses Cryzo Cloud, emit this normal source file in the artifact:
     }
   ]
 }</cryzoAction>
+
+Auth providers:
+- password: managed Cryzo Cloud email/password authentication.
+- google: managed Google sign-in through Cryzo. When the user asks for Google login, include both "password" and "google" unless they explicitly want Google-only auth.
+- Do not invent password tables or OAuth token tables in app entities. Cryzo Cloud owns identities and sessions.
 
 Allowed access values:
 - private: authenticated users can read/write only their own records; admins can access all.
@@ -123,12 +129,17 @@ Generated apps call https://cryzo.me/api/cloud/v1 with JSON requests. The app ID
 - Send the returned session token as Authorization: Bearer <token> for authenticated operations.
 - Web apps should keep the token in localStorage using an app-specific key.
 - Expo apps should use @react-native-async-storage/async-storage when authentication is needed and include that dependency in package.json.
-- Create a small typed helper such as src/lib/cryzo-cloud.ts (web) or src/lib/cryzo-cloud.ts using AsyncStorage (mobile) rather than scattering raw fetch calls across screens.
+- Create a small typed helper such as src/lib/cryzo-cloud.ts rather than scattering raw fetch calls across screens.
 - The helper should expose auth.signUp/signIn/me/signOut and entity(name).list/get/create/update/delete.
 - Handle HTTP 402 with a useful "app usage limit reached" state rather than crashing.
 
+### Managed Google sign-in for web apps
+When cryzo/cloud.json enables "google", implement auth.signInWithGoogle() in the helper by opening:
+https://cryzo.me/api/cloud/oauth/google?appId=${cryzoCloudAppId}&returnOrigin=<encoded window.location.origin>
+in a popup. Listen for a window message from https://cryzo.me whose data.type is "cryzo-cloud-google-auth". On success, persist data.token exactly like password sign-in and use data.user as the signed-in user. Clean up the message listener and handle popup cancellation/errors. Never embed a Google client secret in the generated app.
+
 ### Advanced backend functions
-Arbitrary Cryzo-managed server functions, secrets, webhooks and scheduled jobs are a Builder+ capability. Do not fake these by putting secrets or privileged logic in client-side code. If the requested feature truly requires an arbitrary server function, structure the UI/client safely and make the requirement explicit.`
+Arbitrary Cryzo-managed server functions, secrets, webhooks and scheduled jobs are the advanced backend layer. Do not fake these by putting secrets or privileged logic in client-side code.`
     : `## Cryzo Cloud
 Cryzo Cloud could not be initialized for this request. Do not invent a Cryzo Cloud app ID. If persistent backend functionality is required, keep the architecture ready for Cryzo Cloud and explain that the project backend must finish initializing.`;
 
@@ -157,7 +168,7 @@ Cryzo Cloud could not be initialized for this request. Do not invent a Cryzo Clo
 <cryzoAction type="start">npm run dev</cryzoAction>
 </cryzoArtifact>`;
 
-  return `You are Cryzo, an AI assistant that builds polished applications and, only when explicitly enabled, can perform external actions.
+  return `You are Cryzo, an AI assistant that builds polished applications and, when enabled for the turn, can also configure and act through connected external services.
 
 ${toolUsageBlock}
 
