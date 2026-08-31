@@ -11,18 +11,20 @@ type OAuthState = {
   createdAt: number;
 };
 
-function googleClientId() {
-  return process.env.CRYZO_GOOGLE_CLIENT_ID || process.env.AUTH_GOOGLE_ID || "";
-}
-
-function googleClientSecret() {
-  return process.env.CRYZO_GOOGLE_CLIENT_SECRET || process.env.AUTH_GOOGLE_SECRET || "";
-}
-
 function convexClient() {
   const deployment = process.env.NEXT_PUBLIC_CONVEX_URL;
   if (!deployment) throw new Error("Cryzo Cloud is not configured");
   return new ConvexHttpClient(deployment);
+}
+
+function stateSecret() {
+  const value =
+    process.env.CRYZO_OAUTH_STATE_SECRET ||
+    process.env.CRYZO_VERCEL_TOKEN ||
+    process.env.VERCEL_PLATFORM_TOKEN ||
+    process.env.VERCEL_TOKEN;
+  if (!value) throw new Error("Cryzo OAuth state signing is not configured");
+  return value;
 }
 
 function normalizeReturnOrigin(value: string) {
@@ -75,12 +77,8 @@ function popupResult(targetOrigin: string, payload: unknown) {
 
 export async function GET(req: Request) {
   try {
-    const clientId = googleClientId();
-    const clientSecret = googleClientSecret();
-    if (!clientId || !clientSecret) {
-      return htmlResponse("Cryzo managed Google sign-in is not configured.", 503);
-    }
-
+    const client = convexClient();
+    const secret = stateSecret();
     const url = new URL(req.url);
     const callbackUrl = `${url.origin}/api/cloud/oauth/google`;
     const code = url.searchParams.get("code");
@@ -94,7 +92,8 @@ export async function GET(req: Request) {
         return htmlResponse("Missing appId or returnOrigin.", 400);
       }
       const returnOrigin = normalizeReturnOrigin(returnOriginRaw);
-      const state = encodeState({ appId, returnOrigin, createdAt: Date.now() }, clientSecret);
+      const { clientId } = await client.action(api.cloudAuth.googleOAuthClientId, {});
+      const state = encodeState({ appId, returnOrigin, createdAt: Date.now() }, secret);
       const authorize = new URL("https://accounts.google.com/o/oauth2/v2/auth");
       authorize.searchParams.set("client_id", clientId);
       authorize.searchParams.set("redirect_uri", callbackUrl);
@@ -106,7 +105,7 @@ export async function GET(req: Request) {
     }
 
     if (!stateParam) return htmlResponse("Missing OAuth state.", 400);
-    const state = decodeState(stateParam, clientSecret);
+    const state = decodeState(stateParam, secret);
     if (oauthError) {
       return popupResult(state.returnOrigin, {
         type: "cryzo-cloud-google-auth",
@@ -116,26 +115,10 @@ export async function GET(req: Request) {
     }
     if (!code) return htmlResponse("Missing Google authorization code.", 400);
 
-    const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        code,
-        client_id: clientId,
-        client_secret: clientSecret,
-        redirect_uri: callbackUrl,
-        grant_type: "authorization_code",
-      }),
-      cache: "no-store",
-    });
-    const tokenData = (await tokenResponse.json()) as { id_token?: string; error_description?: string };
-    if (!tokenResponse.ok || !tokenData.id_token) {
-      throw new Error(tokenData.error_description || "Google token exchange failed");
-    }
-
-    const result = await convexClient().action(api.cloudAuth.signInGoogle, {
+    const result = await client.action(api.cloudAuth.exchangeGoogleCode, {
       appId: state.appId as any,
-      idToken: tokenData.id_token,
+      code,
+      redirectUri: callbackUrl,
     });
 
     return popupResult(state.returnOrigin, {
