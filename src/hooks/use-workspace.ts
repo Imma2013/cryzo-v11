@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useQuery } from "convex/react";
+import { useMutation, useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { Id } from "../../convex/_generated/dataModel";
 import { useAuth } from "@/providers/AuthProvider";
@@ -10,12 +10,14 @@ import {
   getStreamingRuntimeSnapshot,
   isStreamingRuntimeActive,
   restoreStreamingRuntime,
+  saveStreamingRuntimeFile,
   subscribeStreamingRuntime,
 } from "@/lib/workspace/streaming-runtime";
 
 export function useWorkspace(conversationId: Id<"conversations">) {
   const runtimeId = String(conversationId);
   const { isAuthenticated, isLoading: authLoading } = useAuth();
+  const saveManualFile = useMutation(api.artifacts.saveManualFile);
   const [runtime, setRuntime] = useState<StreamingRuntimeSnapshot>(() =>
     getStreamingRuntimeSnapshot(runtimeId),
   );
@@ -36,11 +38,6 @@ export function useWorkspace(conversationId: Id<"conversations">) {
     return unsubscribe;
   }, [runtimeId]);
 
-  // Hard refresh / old conversation restore. Convex remains the durable source
-  // of project actions; execution now happens in a named persistent Vercel Sandbox.
-  // Do not restore until the current Convex session is fully authenticated. On a
-  // fast account switch, this prevents a new conversation from racing a stale
-  // browser auth token into the sandbox ownership check.
   useEffect(() => {
     if (authLoading || !isAuthenticated) return;
     if (!artifacts?.length) return;
@@ -62,6 +59,18 @@ export function useWorkspace(conversationId: Id<"conversations">) {
     if (selectedFile !== firstFile) setSelectedFile(firstFile);
   }, [firstFile, runtime.files, selectedFile]);
 
+  const saveFile = async (filePath: string, content: string) => {
+    const saved = await saveStreamingRuntimeFile(runtimeId, filePath, content);
+    const artifactId = `manual:${Date.now()}:${crypto.randomUUID()}`;
+    await saveManualFile({
+      conversationId,
+      artifactId,
+      filePath: saved.filePath,
+      content: saved.content,
+    });
+    return saved;
+  };
+
   const isBooting =
     isAuthenticated &&
     runtime.active &&
@@ -77,5 +86,6 @@ export function useWorkspace(conversationId: Id<"conversations">) {
     isBooting,
     selectedFile,
     setSelectedFile,
+    saveFile,
   };
 }
