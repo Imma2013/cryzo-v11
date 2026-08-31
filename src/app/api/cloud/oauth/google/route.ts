@@ -1,6 +1,6 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { ConvexHttpClient } from "convex/browser";
-import { api } from "../../../../../../../convex/_generated/api";
+import { api } from "../../../../../../convex/_generated/api";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
