@@ -22,8 +22,27 @@ function publicUser(user: any) {
     email: user.email,
     name: user.name,
     role: user.role,
+    authProvider: user.authProvider || (user.passwordHash ? "password" : undefined),
     createdAt: user.createdAt,
   };
+}
+
+function enabledProviders(app: any): string[] {
+  return Array.isArray(app?.authProviders) && app.authProviders.length
+    ? app.authProviders
+    : ["password"];
+}
+
+async function createSession(ctx: any, appId: any, appUserId: any) {
+  const token = randomBytes(32).toString("base64url");
+  const expiresAt = Date.now() + SESSION_TTL_MS;
+  await ctx.runMutation(internalApi.cloudAuthStore.createSessionInternal, {
+    appId,
+    appUserId,
+    token,
+    expiresAt,
+  });
+  return { token, expiresAt };
 }
 
 export const signUp = action({
@@ -38,6 +57,9 @@ export const signUp = action({
       appId: args.appId,
     });
     if (!app) throw new Error("Cryzo Cloud app not found");
+    if (!enabledProviders(app).includes("password")) {
+      throw new Error("Password authentication is not enabled for this app");
+    }
     const email = normalizeEmail(args.email);
     if (!email.includes("@")) throw new Error("Enter a valid email address");
     if (args.password.length < 8) throw new Error("Password must be at least 8 characters");
@@ -59,14 +81,7 @@ export const signUp = action({
     });
     if (!user) throw new Error("Unable to create account");
 
-    const token = randomBytes(32).toString("base64url");
-    const expiresAt = Date.now() + SESSION_TTL_MS;
-    await ctx.runMutation(internalApi.cloudAuthStore.createSessionInternal, {
-      appId: args.appId,
-      appUserId: user._id,
-      token,
-      expiresAt,
-    });
+    const session = await createSession(ctx, args.appId, user._id);
     await ctx.runMutation(internalApi.cloudRuntime.logUsageInternal, {
       appId: args.appId,
       ownerUserId: app.ownerUserId,
@@ -76,7 +91,7 @@ export const signUp = action({
       detail: email,
     });
 
-    return { user: publicUser(user), token, expiresAt };
+    return { user: publicUser(user), ...session };
   },
 });
 
@@ -91,12 +106,15 @@ export const signIn = action({
       appId: args.appId,
     });
     if (!app) throw new Error("Cryzo Cloud app not found");
+    if (!enabledProviders(app).includes("password")) {
+      throw new Error("Password authentication is not enabled for this app");
+    }
     const email = normalizeEmail(args.email);
     const user = await ctx.runQuery(internalApi.cloudAuthStore.getUserByEmailInternal, {
       appId: args.appId,
       email,
     });
-    if (!user) throw new Error("Invalid email or password");
+    if (!user?.passwordSalt || !user?.passwordHash) throw new Error("Invalid email or password");
 
     const candidate = Buffer.from(hashPassword(args.password, user.passwordSalt), "base64");
     const expected = Buffer.from(user.passwordHash, "base64");
@@ -104,14 +122,7 @@ export const signIn = action({
       throw new Error("Invalid email or password");
     }
 
-    const token = randomBytes(32).toString("base64url");
-    const expiresAt = Date.now() + SESSION_TTL_MS;
-    await ctx.runMutation(internalApi.cloudAuthStore.createSessionInternal, {
-      appId: args.appId,
-      appUserId: user._id,
-      token,
-      expiresAt,
-    });
+    const session = await createSession(ctx, args.appId, user._id);
     await ctx.runMutation(internalApi.cloudRuntime.logUsageInternal, {
       appId: args.appId,
       ownerUserId: app.ownerUserId,
@@ -121,7 +132,62 @@ export const signIn = action({
       detail: email,
     });
 
-    return { user: publicUser(user), token, expiresAt };
+    return { user: publicUser(user), ...session };
+  },
+});
+
+export const signInGoogle = action({
+  args: {
+    appId: v.id("cloudApps"),
+    idToken: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const app = await ctx.runQuery(internalApi.cloudRuntime.getAppInternal, {
+      appId: args.appId,
+    });
+    if (!app) throw new Error("Cryzo Cloud app not found");
+    if (!enabledProviders(app).includes("google")) {
+      throw new Error("Google authentication is not enabled for this app");
+    }
+    const clientId = process.env.AUTH_GOOGLE_ID;
+    if (!clientId) throw new Error("Google authentication is not configured on Cryzo");
+
+    const response = await fetch(
+      `https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(args.idToken)}`,
+    );
+    if (!response.ok) throw new Error("Google identity token is invalid");
+    const identity = (await response.json()) as {
+      aud?: string;
+      sub?: string;
+      email?: string;
+      email_verified?: string | boolean;
+      name?: string;
+    };
+    const verified = identity.email_verified === true || identity.email_verified === "true";
+    if (identity.aud !== clientId || !identity.sub || !identity.email || !verified) {
+      throw new Error("Google identity could not be verified");
+    }
+
+    const email = normalizeEmail(identity.email);
+    const user = await ctx.runMutation(internalApi.cloudAuthStore.upsertGoogleUserInternal, {
+      appId: args.appId,
+      email,
+      name: identity.name?.trim() || undefined,
+      providerSubject: identity.sub,
+    });
+    if (!user) throw new Error("Unable to create Google account");
+
+    const session = await createSession(ctx, args.appId, user._id);
+    await ctx.runMutation(internalApi.cloudRuntime.logUsageInternal, {
+      appId: args.appId,
+      ownerUserId: app.ownerUserId,
+      category: "auth",
+      operation: "sign_in_google",
+      credits: 0,
+      detail: email,
+    });
+
+    return { user: publicUser(user), ...session };
   },
 });
 
