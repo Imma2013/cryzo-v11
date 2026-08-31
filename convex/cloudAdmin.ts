@@ -7,6 +7,7 @@ const accessValidator = v.union(
   v.literal("public-read"),
   v.literal("public"),
 );
+const authProviderValidator = v.union(v.literal("password"), v.literal("google"));
 
 async function requireOwnedConversation(ctx: any, conversationId: any) {
   const userId = await getAuthUserId(ctx);
@@ -21,6 +22,7 @@ export const configureFromPublish = mutation({
   args: {
     conversationId: v.id("conversations"),
     name: v.string(),
+    authProviders: v.optional(v.array(authProviderValidator)),
     entities: v.array(
       v.object({
         name: v.string(),
@@ -39,19 +41,27 @@ export const configureFromPublish = mutation({
       )
       .unique();
 
+    const requestedProviders = args.authProviders?.length
+      ? Array.from(new Set(args.authProviders))
+      : undefined;
     let appId;
     if (!app) {
       appId = await ctx.db.insert("cloudApps", {
         ownerUserId: userId,
         conversationId: args.conversationId,
         name: args.name,
+        authProviders: requestedProviders || ["password"],
         createdAt: now,
         updatedAt: now,
       });
       app = await ctx.db.get(appId);
     } else {
       appId = app._id;
-      await ctx.db.patch(appId, { name: args.name, updatedAt: now });
+      await ctx.db.patch(appId, {
+        name: args.name,
+        ...(requestedProviders ? { authProviders: requestedProviders } : {}),
+        updatedAt: now,
+      });
     }
 
     for (const entity of args.entities) {
@@ -75,6 +85,7 @@ export const configureFromPublish = mutation({
     return {
       appId,
       name: args.name,
+      authProviders: requestedProviders || app?.authProviders || ["password"],
       entitiesConfigured: args.entities.length,
     };
   },
@@ -99,6 +110,7 @@ export const ensureForConversation = mutation({
       ownerUserId: userId,
       conversationId: args.conversationId,
       name: args.name,
+      authProviders: ["password"],
       createdAt: now,
       updatedAt: now,
     });
@@ -162,7 +174,10 @@ export const getOverview = query({
     );
 
     return {
-      app,
+      app: {
+        ...app,
+        authProviders: app.authProviders || ["password"],
+      },
       entities: entityRows,
       users: users.map(({ passwordHash, passwordSalt, ...user }) => user),
       usage,
