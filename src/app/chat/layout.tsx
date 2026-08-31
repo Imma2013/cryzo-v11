@@ -26,11 +26,19 @@ export default function ChatLayout({ children }: { children: React.ReactNode }) 
     );
   }
 
-  const section = pathname === "/chat/apps" ? "Apps" : pathname === "/chat/billing" ? "Billing" : "Cryzo";
+  const section =
+    pathname === "/chat/apps"
+      ? "Apps"
+      : pathname === "/chat/billing"
+        ? "Billing"
+        : pathname === "/chat/cloud"
+          ? "Cloud"
+          : "Cryzo";
   const isConversationPage =
     /^\/chat\/[^/]+$/.test(pathname) &&
     pathname !== "/chat/apps" &&
-    pathname !== "/chat/billing";
+    pathname !== "/chat/billing" &&
+    pathname !== "/chat/cloud";
 
   const openSidebar = () => {
     window.dispatchEvent(new Event("cryzo:open-sidebar"));
