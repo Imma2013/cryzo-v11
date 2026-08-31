@@ -45,6 +45,53 @@ async function createSession(ctx: any, appId: any, appUserId: any) {
   return { token, expiresAt };
 }
 
+async function googleSessionFromIdToken(ctx: any, appId: any, idToken: string) {
+  const app = await ctx.runQuery(internalApi.cloudRuntime.getAppInternal, { appId });
+  if (!app) throw new Error("Cryzo Cloud app not found");
+  if (!enabledProviders(app).includes("google")) {
+    throw new Error("Google authentication is not enabled for this app");
+  }
+
+  const clientId = process.env.AUTH_GOOGLE_ID;
+  if (!clientId) throw new Error("Google authentication is not configured on Cryzo");
+  const response = await fetch(
+    `https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(idToken)}`,
+  );
+  if (!response.ok) throw new Error("Google identity token is invalid");
+  const identity = (await response.json()) as {
+    aud?: string;
+    sub?: string;
+    email?: string;
+    email_verified?: string | boolean;
+    name?: string;
+  };
+  const verified = identity.email_verified === true || identity.email_verified === "true";
+  if (identity.aud !== clientId || !identity.sub || !identity.email || !verified) {
+    throw new Error("Google identity could not be verified");
+  }
+
+  const email = normalizeEmail(identity.email);
+  const user = await ctx.runMutation(internalApi.cloudAuthStore.upsertGoogleUserInternal, {
+    appId,
+    email,
+    name: identity.name?.trim() || undefined,
+    providerSubject: identity.sub,
+  });
+  if (!user) throw new Error("Unable to create Google account");
+
+  const session = await createSession(ctx, appId, user._id);
+  await ctx.runMutation(internalApi.cloudRuntime.logUsageInternal, {
+    appId,
+    ownerUserId: app.ownerUserId,
+    category: "auth",
+    operation: "sign_in_google",
+    credits: 0,
+    detail: email,
+  });
+
+  return { user: publicUser(user), ...session };
+}
+
 export const signUp = action({
   args: {
     appId: v.id("cloudApps"),
@@ -136,59 +183,55 @@ export const signIn = action({
   },
 });
 
+export const googleOAuthClientId = action({
+  args: {},
+  handler: async () => {
+    const clientId = process.env.AUTH_GOOGLE_ID;
+    if (!clientId) throw new Error("Google authentication is not configured on Cryzo");
+    return { clientId };
+  },
+});
+
+export const exchangeGoogleCode = action({
+  args: {
+    appId: v.id("cloudApps"),
+    code: v.string(),
+    redirectUri: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const clientId = process.env.AUTH_GOOGLE_ID;
+    const clientSecret = process.env.AUTH_GOOGLE_SECRET;
+    if (!clientId || !clientSecret) {
+      throw new Error("Google authentication is not configured on Cryzo");
+    }
+    const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        code: args.code,
+        client_id: clientId,
+        client_secret: clientSecret,
+        redirect_uri: args.redirectUri,
+        grant_type: "authorization_code",
+      }),
+    });
+    const tokenData = (await tokenResponse.json()) as {
+      id_token?: string;
+      error_description?: string;
+    };
+    if (!tokenResponse.ok || !tokenData.id_token) {
+      throw new Error(tokenData.error_description || "Google token exchange failed");
+    }
+    return await googleSessionFromIdToken(ctx, args.appId, tokenData.id_token);
+  },
+});
+
 export const signInGoogle = action({
   args: {
     appId: v.id("cloudApps"),
     idToken: v.string(),
   },
-  handler: async (ctx, args) => {
-    const app = await ctx.runQuery(internalApi.cloudRuntime.getAppInternal, {
-      appId: args.appId,
-    });
-    if (!app) throw new Error("Cryzo Cloud app not found");
-    if (!enabledProviders(app).includes("google")) {
-      throw new Error("Google authentication is not enabled for this app");
-    }
-    const clientId = process.env.AUTH_GOOGLE_ID;
-    if (!clientId) throw new Error("Google authentication is not configured on Cryzo");
-
-    const response = await fetch(
-      `https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(args.idToken)}`,
-    );
-    if (!response.ok) throw new Error("Google identity token is invalid");
-    const identity = (await response.json()) as {
-      aud?: string;
-      sub?: string;
-      email?: string;
-      email_verified?: string | boolean;
-      name?: string;
-    };
-    const verified = identity.email_verified === true || identity.email_verified === "true";
-    if (identity.aud !== clientId || !identity.sub || !identity.email || !verified) {
-      throw new Error("Google identity could not be verified");
-    }
-
-    const email = normalizeEmail(identity.email);
-    const user = await ctx.runMutation(internalApi.cloudAuthStore.upsertGoogleUserInternal, {
-      appId: args.appId,
-      email,
-      name: identity.name?.trim() || undefined,
-      providerSubject: identity.sub,
-    });
-    if (!user) throw new Error("Unable to create Google account");
-
-    const session = await createSession(ctx, args.appId, user._id);
-    await ctx.runMutation(internalApi.cloudRuntime.logUsageInternal, {
-      appId: args.appId,
-      ownerUserId: app.ownerUserId,
-      category: "auth",
-      operation: "sign_in_google",
-      credits: 0,
-      detail: email,
-    });
-
-    return { user: publicUser(user), ...session };
-  },
+  handler: async (ctx, args) => await googleSessionFromIdToken(ctx, args.appId, args.idToken),
 });
 
 export const me = action({
