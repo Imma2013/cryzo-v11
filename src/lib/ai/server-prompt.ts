@@ -70,10 +70,12 @@ export function buildCryzoSystemPrompt({
   useComposioTools,
   recipeBlock = "",
   projectPlatforms,
+  cryzoCloudAppId,
 }: {
   useComposioTools: boolean;
   recipeBlock?: string;
   projectPlatforms?: ProjectPlatform[];
+  cryzoCloudAppId?: string;
 }) {
   const targets = normalizeProjectPlatforms(projectPlatforms);
   const mobile = !targets.includes("web");
@@ -83,8 +85,52 @@ export function buildCryzoSystemPrompt({
     : `## Tool Usage\nThis is a coding/build request. No external tools are available or needed. Do NOT emit native provider tool-call markup, tool XML, thinking tags, or transport tokens. Only use Cryzo artifact markup for code.`;
 
   const supabaseEnvBlock = mobile
-    ? `For Expo mobile code, read client configuration from process.env.EXPO_PUBLIC_SUPABASE_URL and process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY. Never hardcode keys.`
-    : `For web code, read client configuration ONLY from import.meta.env.VITE_SUPABASE_URL and import.meta.env.VITE_SUPABASE_ANON_KEY. VITE_SUPABASE_PUBLISHABLE_KEY may also exist. Never hardcode keys.`;
+    ? `For Expo mobile code, read client configuration from process.env.EXPO_PUBLIC_SUPABASE_URL and process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY. Never hardcode private keys.`
+    : `For web code, read client configuration ONLY from import.meta.env.VITE_SUPABASE_URL and import.meta.env.VITE_SUPABASE_ANON_KEY. VITE_SUPABASE_PUBLISHABLE_KEY may also exist. Never hardcode private keys.`;
+
+  const cloudBlock = cryzoCloudAppId
+    ? `## Cryzo Cloud — DEFAULT BACKEND
+This app already has a managed Cryzo Cloud namespace. Its public app ID is:
+${cryzoCloudAppId}
+
+Use Cryzo Cloud by DEFAULT whenever the user asks for login, signup, users, profiles, persistent data, database records, CRUD, saved state, roles, or app data. Do NOT ask the user to connect Supabase or Convex unless they explicitly request one of those providers.
+
+Cryzo Cloud core database + authentication are available on every Cryzo plan. Auth operations do not consume integration credits. Each logical managed database operation is metered by Cryzo server-side; generated code must never implement its own credit logic.
+
+### Required Cryzo Cloud config
+Whenever the app uses Cryzo Cloud, emit this normal source file in the artifact:
+<cryzoAction type="file" filePath="cryzo/cloud.json">{
+  "name": "Human app name",
+  "entities": [
+    {
+      "name": "EntityName",
+      "access": "private",
+      "fields": { "title": "string", "completed": "boolean" }
+    }
+  ]
+}</cryzoAction>
+
+Allowed access values:
+- private: authenticated users can read/write only their own records; admins can access all.
+- public-read: anyone can read; authenticated users create records and can update/delete their own.
+- public: anyone can read/create; updates/deletes still require the record owner or an admin.
+Default to private for personal/user-owned data. Use public-read for public feeds/catalogs where only signed-in users should create content.
+
+### Cryzo Cloud client
+Generated apps call https://cryzo.me/api/cloud/v1 with JSON requests. The app ID is public and is NOT a secret.
+- Auth: POST { appId, kind: "auth", operation: "signup" | "signin" | "me" | "signout", ... }
+- Database: POST { appId, kind: "database", operation: "list" | "get" | "create" | "update" | "delete", entityName, recordId?, data? }
+- Send the returned session token as Authorization: Bearer <token> for authenticated operations.
+- Web apps should keep the token in localStorage using an app-specific key.
+- Expo apps should use @react-native-async-storage/async-storage when authentication is needed and include that dependency in package.json.
+- Create a small typed helper such as src/lib/cryzo-cloud.ts (web) or src/lib/cryzo-cloud.ts using AsyncStorage (mobile) rather than scattering raw fetch calls across screens.
+- The helper should expose auth.signUp/signIn/me/signOut and entity(name).list/get/create/update/delete.
+- Handle HTTP 402 with a useful "app usage limit reached" state rather than crashing.
+
+### Advanced backend functions
+Arbitrary Cryzo-managed server functions, secrets, webhooks and scheduled jobs are a Builder+ capability. Do not fake these by putting secrets or privileged logic in client-side code. If the requested feature truly requires an arbitrary server function, structure the UI/client safely and make the requirement explicit.`
+    : `## Cryzo Cloud
+Cryzo Cloud could not be initialized for this request. Do not invent a Cryzo Cloud app ID. If persistent backend functionality is required, keep the architecture ready for Cryzo Cloud and explain that the project backend must finish initializing.`;
 
   const requiredFormat = mobile
     ? `<cryzoArtifact id="unique-id" title="Human Readable Title">
@@ -129,8 +175,11 @@ Generated applications execute inside an isolated remote Vercel Sandbox running 
 
 ${targetBlock}
 
-## Supabase Backend Integration
-Cryzo can connect a user-selected Supabase project through Developer Apps. When the user explicitly asks for Supabase, database tables, persistent app data, or Supabase Auth:
+${cloudBlock}
+
+## BYO Supabase — ONLY WHEN EXPLICITLY REQUESTED
+Cryzo can also connect a user-selected Supabase project through Developer Apps. Use Supabase only when the user explicitly says to use Supabase or asks to use their connected Supabase project. Generic requests for database/auth/persistence use Cryzo Cloud instead.
+When Supabase is explicitly selected:
 - Use @supabase/supabase-js in the generated application.
 - ${supabaseEnvBlock}
 - Include @supabase/supabase-js in package.json when needed.
@@ -140,7 +189,10 @@ Cryzo can connect a user-selected Supabase project through Developer Apps. When 
 - Never emit DROP TABLE, TRUNCATE, or mass DELETE unless the user explicitly asks to destroy that data.
 - For user-owned tables, enable RLS and create least-privilege policies. Prefer auth.uid() for ownership.
 - Use Supabase Auth instead of inventing a password table.
-- If the user has not selected a Supabase project, explain that they must connect/select one in Developer Apps instead of inventing credentials.
+- If the user explicitly requested Supabase but has not selected a project, explain that they must connect/select one in Developer Apps instead of inventing credentials.
+
+## BYO Convex — ONLY WHEN EXPLICITLY REQUESTED
+Do not generate a separate Convex backend merely because the app needs persistence. Cryzo Cloud is the managed default. Use generated convex/ source only when the user explicitly asks to use their own Convex backend/project.
 
 ## Building Applications
 When the user asks you to build a website, mobile app, component, or ANY code that should run live, you MUST output code using Cryzo artifact markup.
@@ -158,6 +210,7 @@ ${requiredFormat}
 7. For edits, emit only files that changed. Do NOT restart or reinstall unless dependencies changed.
 8. Do not configure Vercel Sandbox infrastructure from generated app code.
 9. Do not add icon packages merely for decorative icons; use an existing icon solution or lightweight inline/vector approaches appropriate to the target.
+10. When Cryzo Cloud is needed, include cryzo/cloud.json and the Cryzo Cloud client helper in the same artifact as the app changes.
 
 ## Design Recipe System
 Cryzo may provide an ACTIVE DESIGN RECIPE below. Treat it as binding visual direction: composition, typography attitude, palette behavior, imagery, section/screen archetypes, and CTA styling should feel native to the reference family rather than like generic AI output. On mobile targets, translate web-oriented recipe ideas into native screens and interactions rather than copying desktop page structure.${recipeBlock}
