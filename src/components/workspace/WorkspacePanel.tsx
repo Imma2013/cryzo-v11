@@ -5,7 +5,6 @@ import { Panel, Group, Separator } from "react-resizable-panels";
 import {
   AlertCircle,
   ArrowLeft,
-  Code2,
   ExternalLink,
   Eye,
   FileText,
@@ -13,6 +12,8 @@ import {
   Mic,
   MoreHorizontal,
   RefreshCw,
+  RotateCcw,
+  Save,
 } from "lucide-react";
 import { useWorkspace } from "@/hooks/use-workspace";
 import {
@@ -26,7 +27,7 @@ import { WorkspaceTerminal } from "./WorkspaceTerminal";
 import { PublishControls } from "./PublishControls";
 import { Id } from "../../../convex/_generated/dataModel";
 
-type ViewMode = "preview" | "code";
+type ViewMode = "preview" | "files";
 type MobilePanel = "preview" | "code" | "files";
 
 export type WorkspaceStatus = {
@@ -54,6 +55,9 @@ export function WorkspacePanel({
   const [refreshToken, setRefreshToken] = useState(0);
   const [showErrorLogs, setShowErrorLogs] = useState(false);
   const [retrying, setRetrying] = useState(false);
+  const [draftContent, setDraftContent] = useState("");
+  const [savingFile, setSavingFile] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   const {
     files,
@@ -64,6 +68,7 @@ export function WorkspacePanel({
     isBooting,
     selectedFile,
     setSelectedFile,
+    saveFile,
   } = useWorkspace(conversationId);
 
   useEffect(() => {
@@ -91,7 +96,32 @@ export function WorkspacePanel({
   }, [mobile]);
 
   const selectedContent = selectedFile ? files[selectedFile]?.content || "" : "";
+  const dirty = Boolean(selectedFile && draftContent !== selectedContent);
   const errorSummary = error?.split("\n")[0] || "The preview server could not start.";
+
+  useEffect(() => {
+    setDraftContent(selectedContent);
+    setSaveError(null);
+  }, [selectedFile, selectedContent]);
+
+  const saveSelectedFile = async () => {
+    if (!selectedFile || !dirty || savingFile) return;
+    setSavingFile(true);
+    setSaveError(null);
+    try {
+      const saved = await saveFile(selectedFile, draftContent);
+      setDraftContent(saved.content);
+    } catch (saveFailure) {
+      setSaveError(saveFailure instanceof Error ? saveFailure.message : "Unable to save file");
+    } finally {
+      setSavingFile(false);
+    }
+  };
+
+  const discardSelectedFile = () => {
+    setDraftContent(selectedContent);
+    setSaveError(null);
+  };
 
   const retryPreview = async () => {
     if (retrying) return;
@@ -223,12 +253,46 @@ export function WorkspacePanel({
               Preview
             </button>
           </div>
+          {selectedFile && (
+            <div className="flex shrink-0 items-center gap-2 border-b border-zinc-800 bg-zinc-950 px-3 py-2">
+              <span className="min-w-0 flex-1 truncate text-[11px] text-zinc-500">
+                {dirty ? "Unsaved changes" : "Saved"}
+              </span>
+              <button
+                type="button"
+                onClick={discardSelectedFile}
+                disabled={!dirty || savingFile}
+                className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-zinc-800 px-2.5 text-xs text-zinc-300 disabled:opacity-30"
+              >
+                <RotateCcw size={13} /> Discard
+              </button>
+              <button
+                type="button"
+                onClick={() => void saveSelectedFile()}
+                disabled={!dirty || savingFile}
+                className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-white px-2.5 text-xs font-semibold text-black disabled:opacity-30"
+              >
+                {savingFile ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
+                Save
+              </button>
+            </div>
+          )}
+          {saveError && (
+            <div className="shrink-0 border-b border-red-950 bg-red-950/20 px-3 py-2 text-[11px] text-red-300">
+              {saveError}
+            </div>
+          )}
           <div className="min-h-0 flex-1 overflow-hidden">
             {selectedFile ? (
-              <CodeEditor filePath={selectedFile} content={selectedContent} />
+              <CodeEditor
+                filePath={selectedFile}
+                content={draftContent}
+                editable
+                onChange={setDraftContent}
+              />
             ) : (
               <div className="flex h-full items-center justify-center text-xs text-zinc-600">
-                Choose a file to view its code.
+                Choose a file to edit its code.
               </div>
             )}
           </div>
@@ -364,15 +428,15 @@ export function WorkspacePanel({
           </button>
           <button
             type="button"
-            onClick={() => setViewMode("code")}
+            onClick={() => setViewMode("files")}
             className={`flex items-center gap-1.5 rounded px-3 py-1 text-xs font-medium transition-colors ${
-              viewMode === "code"
+              viewMode === "files"
                 ? "bg-zinc-700 text-white"
                 : "text-zinc-400 hover:text-white"
             }`}
           >
-            <Code2 size={12} />
-            Code
+            <FileText size={12} />
+            Files
           </button>
         </div>
 
@@ -423,11 +487,39 @@ export function WorkspacePanel({
               <div className="flex-1 overflow-hidden">
                 {selectedFile ? (
                   <div className="flex h-full flex-col">
-                    <div className="border-b border-zinc-800 px-3 py-1 text-xs text-zinc-500">
-                      {selectedFile}
+                    <div className="flex min-h-10 items-center gap-2 border-b border-zinc-800 px-3 text-xs text-zinc-500">
+                      <span className="min-w-0 flex-1 truncate">{selectedFile}</span>
+                      {dirty && <span className="text-amber-400">Unsaved</span>}
+                      <button
+                        type="button"
+                        onClick={discardSelectedFile}
+                        disabled={!dirty || savingFile}
+                        className="inline-flex h-7 items-center gap-1 rounded-md border border-zinc-800 px-2 text-[11px] text-zinc-300 disabled:opacity-30"
+                      >
+                        <RotateCcw size={11} /> Discard
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void saveSelectedFile()}
+                        disabled={!dirty || savingFile}
+                        className="inline-flex h-7 items-center gap-1 rounded-md bg-white px-2 text-[11px] font-semibold text-black disabled:opacity-30"
+                      >
+                        {savingFile ? <Loader2 size={11} className="animate-spin" /> : <Save size={11} />}
+                        Save
+                      </button>
                     </div>
+                    {saveError && (
+                      <div className="border-b border-red-950 bg-red-950/20 px-3 py-1.5 text-[11px] text-red-300">
+                        {saveError}
+                      </div>
+                    )}
                     <div className="flex-1 overflow-hidden">
-                      <CodeEditor filePath={selectedFile} content={selectedContent} />
+                      <CodeEditor
+                        filePath={selectedFile}
+                        content={draftContent}
+                        editable
+                        onChange={setDraftContent}
+                      />
                     </div>
                   </div>
                 ) : (
