@@ -22,6 +22,8 @@ import type * as http from "../http.js";
 import type * as messages from "../messages.js";
 import type * as mobileBuilds from "../mobileBuilds.js";
 import type * as providerSecrets from "../providerSecrets.js";
+import type * as social from "../social.js";
+import type * as socialWorker from "../socialWorker.js";
 import type * as users from "../users.js";
 
 import type {
@@ -45,6 +47,8 @@ declare const fullApi: ApiFromModules<{
   messages: typeof messages;
   mobileBuilds: typeof mobileBuilds;
   providerSecrets: typeof providerSecrets;
+  social: typeof social;
+  socialWorker: typeof socialWorker;
   users: typeof users;
 }>;
 

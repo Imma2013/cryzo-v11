@@ -205,6 +205,37 @@ export default defineSchema({
     updatedAt: v.number(),
   }).index("by_user_provider", ["userId", "providerId"]),
 
+  socialPosts: defineTable({
+    userId: v.id("users"),
+    content: v.string(),
+    channels: v.array(
+      v.union(
+        v.literal("x"),
+        v.literal("linkedin"),
+        v.literal("reddit"),
+        v.literal("youtube"),
+        v.literal("tiktok"),
+        v.literal("instagram"),
+        v.literal("facebook"),
+      ),
+    ),
+    scheduledFor: v.number(),
+    status: v.union(
+      v.literal("draft"),
+      v.literal("scheduled"),
+      v.literal("publishing"),
+      v.literal("published"),
+      v.literal("failed"),
+    ),
+    mediaStorageIds: v.array(v.id("_storage")),
+    error: v.optional(v.string()),
+    publishedAt: v.optional(v.number()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_user_and_scheduled", ["userId", "scheduledFor"])
+    .index("by_status_and_scheduled", ["status", "scheduledFor"]),
+
   subscriptions: defineTable({
     userId: v.id("users"),
     plan: v.union(
