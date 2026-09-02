@@ -81,6 +81,7 @@ function lobeSlug(id: string) {
 
 function logoCandidates(id?: string): LogoCandidate[] {
   if (!id) return [];
+  if (id === "cryzo") return [{ src: "/icon.svg", treatment: "raw" }];
   const slug = lobeSlug(id);
   const encodedSlug = encodeURIComponent(slug);
   return [
@@ -192,14 +193,12 @@ function logoFrame({
 }
 
 function providerLogoId(provider: ProviderDefinition) {
-  if (provider.id === "cryzo") return undefined;
+  if (provider.id === "cryzo") return "cryzo";
   return provider.logoSlug || provider.catalogId || provider.id;
 }
 
 function modelLabId(provider: ProviderDefinition, modelId: string) {
-  if (provider.id === "cryzo") {
-    return getManagedModel(modelId).logoProviderId;
-  }
+  if (provider.id === "cryzo") return "cryzo";
 
   if (provider.id === "openrouter" && modelId.includes("/")) {
     const prefix = modelId.split("/")[0].trim().toLowerCase();

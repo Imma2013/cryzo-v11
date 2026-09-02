@@ -106,9 +106,7 @@ export default function Home() {
       <div className="relative z-10 flex min-h-screen flex-col">
         <header className="flex items-center justify-between px-5 py-4 sm:px-8">
           <Link href="/" className="flex items-center gap-2 text-sm font-semibold">
-            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-white text-black">
-              C
-            </span>
+            <img src="/icon.svg" alt="" className="h-8 w-8 rounded-lg" />
             <span>Cryzo</span>
           </Link>
           <Link

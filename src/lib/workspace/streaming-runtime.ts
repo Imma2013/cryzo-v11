@@ -29,6 +29,7 @@ const runtimes = new Map<string, RuntimeState>();
 let sandboxAuthToken: string | null = null;
 
 export function setStreamingRuntimeAuthToken(token: string | null) {
+  if (!token && sandboxAuthToken) runtimes.clear();
   sandboxAuthToken = token;
 }
 
@@ -175,34 +176,51 @@ async function authenticatedPost<T>(
   body: Record<string, unknown>,
   timeoutMs = 90_000,
 ): Promise<T> {
-  const authToken = await waitForSandboxAuthToken();
-  const controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
+  let lastError: Error | null = null;
 
-  try {
-    const response = await fetch(url, {
-      method: "POST",
-      signal: controller.signal,
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${authToken}`,
-      },
-      body: JSON.stringify(body),
-    });
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const authToken = await waitForSandboxAuthToken();
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
 
-    const data = (await response.json()) as T & { error?: string };
-    if (!response.ok) {
-      throw new Error(data.error || `Request failed with ${response.status}`);
+    try {
+      const response = await fetch(url, {
+        method: "POST",
+        signal: controller.signal,
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${authToken}`,
+        },
+        body: JSON.stringify(body),
+      });
+
+      const data = (await response.json()) as T & { error?: string };
+      if (response.ok) return data;
+
+      if (response.status === 401 && attempt === 0) {
+        await new Promise((resolve) => window.setTimeout(resolve, 500));
+        continue;
+      }
+
+      throw new Error(
+        response.status === 401
+          ? "Your Cryzo session expired. Refresh the page to reconnect the preview."
+          : data.error || `Request failed with ${response.status}`,
+      );
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") {
+        throw new Error(
+          "The build service took too long to respond. Completed files were preserved; retry the preview to continue.",
+        );
+      }
+      lastError = error instanceof Error ? error : new Error(String(error));
+      if (attempt === 1) throw lastError;
+    } finally {
+      window.clearTimeout(timeout);
     }
-    return data;
-  } catch (error) {
-    if (error instanceof DOMException && error.name === "AbortError") {
-      throw new Error("The build service took too long to respond. Completed files were preserved; retry the preview to continue.");
-    }
-    throw error;
-  } finally {
-    window.clearTimeout(timeout);
   }
+
+  throw lastError || new Error("Unable to reach the Cryzo build service.");
 }
 
 async function callSandbox(body: Record<string, unknown>): Promise<SandboxResponse> {

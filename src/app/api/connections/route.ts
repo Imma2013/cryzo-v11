@@ -2,13 +2,13 @@ import { Composio } from "@composio/core";
 import {
   INITIAL_APP_CONNECTIONS,
   SELECTED_COMPOSIO_APPS,
-  SELECTED_COMPOSIO_APP_SLUGS,
 } from "@/lib/composio-apps";
 import {
   getCachedConnections,
   invalidateConnectionsCache,
   setCachedConnections,
 } from "@/lib/composio-connection-cache";
+import { requireRequestUserId } from "@/lib/server/request-user";
 
 let composio: Composio | null = null;
 
@@ -29,81 +29,72 @@ function fallbackLogo(domain?: string) {
   return proxiedLogo(`https://www.google.com/s2/favicons?domain=${domain}&sz=64`);
 }
 
-async function fetchSelectedToolkits(session: Awaited<ReturnType<Composio["create"]>>) {
-  try {
-    const result = await session.toolkits({
-      toolkits: SELECTED_COMPOSIO_APP_SLUGS,
-      limit: SELECTED_COMPOSIO_APP_SLUGS.length,
-    });
-    return result.items;
-  } catch (error) {
-    console.warn("Failed to fetch selected Composio toolkits in one request", error);
-  }
-
-  const batches = await Promise.allSettled(
-    SELECTED_COMPOSIO_APP_SLUGS.map((slug) =>
-      session.toolkits({ toolkits: [slug], limit: 1 }),
-    ),
-  );
-
-  return batches.flatMap((batch) =>
-    batch.status === "fulfilled" ? batch.value.items : [],
-  );
+async function fetchAllToolkits(session: Awaited<ReturnType<Composio["create"]>>) {
+  const result = await session.toolkits({ limit: 1000 });
+  return result.items || [];
 }
 
 export async function GET(req: Request) {
-  const { searchParams } = new URL(req.url);
-  const userId = searchParams.get("userId");
-  const forceRefresh = searchParams.get("refresh") === "1";
-
+  const userId = await requireRequestUserId(req);
   if (!userId) {
     return Response.json({ error: "unauthorized" }, { status: 401 });
   }
 
+  const { searchParams } = new URL(req.url);
+  const forceRefresh = searchParams.get("refresh") === "1";
   const cached = getCachedConnections(userId);
-  if (!forceRefresh && cached) {
-    return Response.json(cached);
-  }
+  if (!forceRefresh && cached) return Response.json(cached);
 
-  const session = await getComposio().create(userId);
-  const items = await fetchSelectedToolkits(session);
-  const bySlug = new Map(items.map((toolkit: any) => [toolkit.slug, toolkit]));
+  try {
+    const session = await getComposio().create(userId);
+    const items = await fetchAllToolkits(session);
+    const known = new Map(SELECTED_COMPOSIO_APPS.map((app) => [app.slug, app]));
 
-  const result = {
-    toolkits: SELECTED_COMPOSIO_APPS.map((app) => {
-      const toolkit = bySlug.get(app.slug) as any | undefined;
-
-      if (!toolkit || toolkit.isNoAuth) {
+    const toolkits = items
+      .map((toolkit: any) => {
+        const fallback = known.get(toolkit.slug);
+        const requiresAuth = !toolkit.isNoAuth;
         return {
-          ...INITIAL_APP_CONNECTIONS.find((item) => item.slug === app.slug)!,
-          logo: fallbackLogo(app.domain),
+          slug: toolkit.slug,
+          name: toolkit.name || fallback?.name || toolkit.slug,
+          domain: fallback?.domain,
+          logo: proxiedLogo(toolkit.logo) ?? fallbackLogo(fallback?.domain),
+          isConnected: requiresAuth
+            ? toolkit.connection?.isActive ?? false
+            : true,
+          connectedAccountId: toolkit.connection?.connectedAccount?.id,
+          available: true,
+          requiresAuth,
         };
-      }
+      })
+      .sort((a: any, b: any) => {
+        if (a.isConnected !== b.isConnected) return a.isConnected ? -1 : 1;
+        return a.name.localeCompare(b.name);
+      });
 
-      return {
-        slug: app.slug,
-        name: toolkit.name || app.name,
-        logo: proxiedLogo(toolkit.logo) ?? fallbackLogo(app.domain),
-        isConnected: toolkit.connection?.isActive ?? false,
-        connectedAccountId: toolkit.connection?.connectedAccount?.id,
-        available: true,
-      };
-    }),
-  };
-
-  setCachedConnections(userId, result);
-  return Response.json(result);
+    const result = {
+      toolkits: toolkits.length > 0 ? toolkits : INITIAL_APP_CONNECTIONS,
+    };
+    setCachedConnections(userId, result);
+    return Response.json(result);
+  } catch (error) {
+    console.error("[connections/catalog]", error);
+    return Response.json({ toolkits: INITIAL_APP_CONNECTIONS });
+  }
 }
 
 export async function POST(req: Request) {
-  const { toolkit, userId }: { toolkit: string; userId?: string } =
-    await req.json();
-  const origin = new URL(req.url).origin;
-
+  const userId = await requireRequestUserId(req);
   if (!userId) {
     return Response.json({ error: "unauthorized" }, { status: 401 });
   }
 
+  const { toolkit }: { toolkit?: string } = await req.json();
+  if (!toolkit || toolkit.length > 120) {
+    return Response.json({ error: "invalid_toolkit" }, { status: 400 });
+  }
+
+  const origin = new URL(req.url).origin;
   invalidateConnectionsCache(userId);
   const session = await getComposio().create(userId);
   const connectionRequest = await session.authorize(toolkit, {

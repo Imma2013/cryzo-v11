@@ -96,9 +96,7 @@ export function Sidebar() {
         <div className="flex items-center justify-between p-3">
           {!collapsed && (
             <div className="flex min-w-0 items-center gap-2">
-              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white text-lg font-black text-black">
-                C
-              </div>
+              <img src="/icon.svg" alt="" className="h-9 w-9 shrink-0 rounded-xl" />
               <h1 className="truncate text-lg font-bold text-white">Cryzo</h1>
             </div>
           )}

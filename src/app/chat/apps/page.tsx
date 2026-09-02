@@ -105,15 +105,17 @@ export default function AppsPage() {
   }, [toolkits, search]);
 
   const fetchConnections = useCallback(async (forceRefresh = false) => {
-    if (!userId) return;
+    if (!userId || !authToken) return;
 
     setRefreshing(true);
     try {
       const params = new URLSearchParams();
-      params.set("userId", userId);
       if (forceRefresh) params.set("refresh", "1");
       const query = params.toString() ? `?${params.toString()}` : "";
-      const res = await fetch(`/api/connections${query}`, { cache: "no-store" });
+      const res = await fetch(`/api/connections${query}`, {
+        cache: "no-store",
+        headers: { Authorization: `Bearer ${authToken}` },
+      });
       if (!res.ok) throw new Error(`Connections request failed: ${res.status}`);
       const data = await res.json();
       const nextToolkits = data.toolkits ?? [];
@@ -127,7 +129,7 @@ export default function AppsPage() {
       setCheckedConnections(true);
       setRefreshing(false);
     }
-  }, [userId]);
+  }, [authToken, userId]);
 
   useEffect(() => {
     setDeveloperTokens({
@@ -205,14 +207,17 @@ export default function AppsPage() {
   }, [fetchConnections, pendingToolkit]);
 
   async function connect(slug: string) {
-    if (!userId) return;
+    if (!userId || !authToken) return;
 
     setBusyToolkit(slug);
     sessionStorage.setItem(PENDING_TOOLKIT_KEY, slug);
     const res = await fetch("/api/connections", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ toolkit: slug, userId }),
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({ toolkit: slug }),
     });
     if (!res.ok) {
       sessionStorage.removeItem(PENDING_TOOLKIT_KEY);
@@ -225,13 +230,16 @@ export default function AppsPage() {
   }
 
   async function disconnect(connectedAccountId: string, slug: string) {
-    if (!userId) return;
+    if (!userId || !authToken) return;
 
     setBusyToolkit(slug);
     await fetch("/api/connections/disconnect", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ connectedAccountId, userId }),
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({ connectedAccountId }),
     });
     sessionStorage.removeItem(PENDING_TOOLKIT_KEY);
     setPendingToolkit(null);
@@ -589,7 +597,11 @@ export default function AppsPage() {
                         </p>
                       </div>
                     </div>
-                    {toolkit.isConnected ? (
+                    {toolkit.requiresAuth === false ? (
+                      <span className="ml-2 rounded border border-emerald-800/60 px-3 py-1.5 text-xs text-emerald-400">
+                        Ready
+                      </span>
+                    ) : toolkit.isConnected ? (
                       <button
                         onClick={() =>
                           disconnect(toolkit.connectedAccountId!, toolkit.slug)

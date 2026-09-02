@@ -16,7 +16,7 @@ import {
 
 export function useWorkspace(conversationId: Id<"conversations">) {
   const runtimeId = String(conversationId);
-  const { isAuthenticated, isLoading: authLoading } = useAuth();
+  const { authToken, isAuthenticated, isLoading: authLoading } = useAuth();
   const saveManualFile = useMutation(api.artifacts.saveManualFile);
   const [runtime, setRuntime] = useState<StreamingRuntimeSnapshot>(() =>
     getStreamingRuntimeSnapshot(runtimeId),
@@ -39,13 +39,13 @@ export function useWorkspace(conversationId: Id<"conversations">) {
   }, [runtimeId]);
 
   useEffect(() => {
-    if (authLoading || !isAuthenticated) return;
+    if (authLoading || !isAuthenticated || !authToken) return;
     if (!artifacts?.length) return;
     if (isStreamingRuntimeActive(runtimeId)) return;
 
     const actions = artifacts.flatMap((artifact) => artifact.actions);
     void restoreStreamingRuntime(runtimeId, actions);
-  }, [artifacts, authLoading, isAuthenticated, runtimeId]);
+  }, [artifacts, authLoading, authToken, isAuthenticated, runtimeId]);
 
   const firstFile = useMemo(
     () =>

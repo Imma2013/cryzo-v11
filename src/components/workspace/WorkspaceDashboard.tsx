@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { Component, useState, type ErrorInfo, type ReactNode } from "react";
 import { useQuery } from "convex/react";
 import {
   AppWindow,
@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
+import { useAuth } from "@/providers/AuthProvider";
 
 type DashboardSection = "data" | "users" | "apps" | "code" | "domains";
 
@@ -27,7 +28,7 @@ const NAVIGATION = [
   { id: "domains" as const, label: "Domains", icon: Globe2 },
 ];
 
-export function WorkspaceDashboard({
+function WorkspaceDashboardContent({
   conversationId,
   children,
   onOpenCode,
@@ -36,13 +37,21 @@ export function WorkspaceDashboard({
   children?: ReactNode;
   onOpenCode?: () => void;
 }) {
+  const { authToken, isAuthenticated, isLoading: authLoading } = useAuth();
+  const ready = !authLoading && isAuthenticated && Boolean(authToken);
   const [section, setSection] = useState<DashboardSection>("data");
   const [entityName, setEntityName] = useState("");
-  const overview = useQuery(api.cloudAdmin.getOverview, { conversationId });
-  const publishTarget = useQuery(api.hosting.getCryzoTarget, { conversationId });
+  const overview = useQuery(
+    api.cloudAdmin.getOverview,
+    ready ? { conversationId } : "skip",
+  );
+  const publishTarget = useQuery(
+    api.hosting.getCryzoTarget,
+    ready ? { conversationId } : "skip",
+  );
   const records = useQuery(
     api.cloudAdmin.listRecords,
-    entityName ? { conversationId, entityName } : "skip",
+    ready && entityName ? { conversationId, entityName } : "skip",
   );
 
   const selectSection = (next: DashboardSection) => {
@@ -241,5 +250,66 @@ export function WorkspaceDashboard({
       </nav>
       <main className="min-h-0 overflow-auto">{content}</main>
     </div>
+  );
+}
+
+
+type DashboardBoundaryProps = {
+  children: ReactNode;
+};
+
+type DashboardBoundaryState = {
+  error: string | null;
+};
+
+class DashboardBoundary extends Component<
+  DashboardBoundaryProps,
+  DashboardBoundaryState
+> {
+  state: DashboardBoundaryState = { error: null };
+
+  static getDerivedStateFromError(error: unknown): DashboardBoundaryState {
+    return {
+      error: error instanceof Error ? error.message : "The project dashboard could not load.",
+    };
+  }
+
+  componentDidCatch(error: unknown, info: ErrorInfo) {
+    console.error("[workspace/dashboard]", error, info);
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="flex h-full items-center justify-center bg-[#08090b] p-6 text-center">
+          <div className="max-w-md rounded-2xl border border-amber-500/30 bg-amber-500/5 p-6">
+            <h3 className="text-base font-semibold text-white">Dashboard needs to reconnect</h3>
+            <p className="mt-2 text-sm leading-6 text-zinc-400">
+              Your project is safe. Refresh the dashboard after your Cryzo session reconnects.
+            </p>
+            <button
+              type="button"
+              onClick={() => this.setState({ error: null })}
+              className="mt-4 rounded-xl bg-white px-4 py-2 text-sm font-semibold text-black"
+            >
+              Try again
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+export function WorkspaceDashboard(props: {
+  conversationId: Id<"conversations">;
+  children?: ReactNode;
+  onOpenCode?: () => void;
+}) {
+  return (
+    <DashboardBoundary>
+      <WorkspaceDashboardContent {...props} />
+    </DashboardBoundary>
   );
 }

@@ -16,7 +16,11 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "Cryzo - AI Chat",
-  description: "AI assistant with 1000+ app integrations",
+  description: "Build apps, automate work, and schedule social content with AI.",
+  icons: {
+    icon: "/icon.svg",
+    shortcut: "/icon.svg",
+  },
 };
 
 export default function RootLayout({

@@ -13,6 +13,7 @@ import { MobileBuilderHeader } from "@/components/MobileBuilderHeader";
 import type { ElementInfo } from "@/components/workspace/LivePreview";
 import { prebootStreamingRuntime } from "@/lib/workspace/streaming-runtime";
 import { Id } from "../../../../convex/_generated/dataModel";
+import { useAuth } from "@/providers/AuthProvider";
 
 export default function ConversationPage({
   params,
@@ -20,6 +21,7 @@ export default function ConversationPage({
   params: Promise<{ conversationId: string }>;
 }) {
   const { conversationId } = use(params);
+  const { authToken, isAuthenticated, isLoading: authLoading } = useAuth();
   const id = conversationId as Id<"conversations">;
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
   const [mobileView, setMobileView] = useState<"chat" | "preview">("chat");
@@ -40,10 +42,11 @@ export default function ConversationPage({
   const workspaceStarted = workspaceOpen || hasArtifacts;
 
   useEffect(() => {
+    if (authLoading || !isAuthenticated || !authToken) return;
     void prebootStreamingRuntime(String(id)).catch(() => {
       // Workspace state will surface an actionable error if startup fails.
     });
-  }, [id]);
+  }, [authLoading, authToken, id, isAuthenticated]);
 
   useEffect(() => {
     const media = window.matchMedia("(max-width: 767px)");

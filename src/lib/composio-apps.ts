@@ -9,6 +9,7 @@ export type AppConnection = SelectedComposioApp & {
   isConnected: boolean;
   connectedAccountId?: string;
   available: boolean;
+  requiresAuth?: boolean;
 };
 
 const APP_ALIASES: Record<string, string[]> = {

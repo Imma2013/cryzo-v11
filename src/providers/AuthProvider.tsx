@@ -16,6 +16,7 @@ interface AuthContextType {
   userId: Id<"users"> | null;
   isAuthenticated: boolean;
   isLoading: boolean;
+  authToken: string | null;
   signIn: (provider: string, params?: Record<string, any>) => Promise<any>;
   signOut: () => Promise<void>;
 }
@@ -47,7 +48,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     userId: user?._id ?? null,
     isAuthenticated,
     isLoading,
-    signIn,
+    authToken: authToken ?? null,
+    signIn:
     signOut: safeSignOut,
   };
 
