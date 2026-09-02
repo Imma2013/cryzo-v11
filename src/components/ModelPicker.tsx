@@ -29,7 +29,10 @@ import {
   type CredentialMode,
   type ModelSelection,
 } from "@/lib/ai/models";
-import { CRYZO_MANAGED_MODELS } from "@/lib/ai/managed-models";
+import {
+  CRYZO_MANAGED_MODELS,
+  normalizeManagedModelId,
+} from "@/lib/ai/managed-models";
 import { ModelLogo, ProviderLogo } from "@/components/ProviderLogo";
 
 export type CatalogModel = {
@@ -113,7 +116,11 @@ export function ModelPicker({
   const authToken = useAuthToken();
   const [open, setOpen] = useState(false);
   const [providerId, setProviderId] = useState(selection.providerId || "cryzo");
-  const [modelId, setModelId] = useState(selection.modelId || DEFAULT_MODEL_SELECTION.modelId);
+  const [modelId, setModelId] = useState(
+    selection.providerId === "cryzo"
+      ? normalizeManagedModelId(selection.modelId)
+      : selection.modelId || DEFAULT_MODEL_SELECTION.modelId,
+  );
   const [credentialMode, setCredentialMode] = useState<CredentialMode>(selection.credentialMode || "cryzo");
   const [apiKey, setApiKey] = useState("");
   const [baseURL, setBaseURL] = useState(selection.baseURL || "");
@@ -129,7 +136,11 @@ export function ModelPicker({
 
   const provider = getProvider(providerId);
   const selectedProvider = getProvider(selection.providerId);
-  const selectedModelName = displayModelName(selection.modelId);
+  const selectedModelId =
+    selectedProvider.id === "cryzo"
+      ? normalizeManagedModelId(selection.modelId)
+      : selection.modelId;
+  const selectedModelName = displayModelName(selectedModelId);
   const accountSaved = accountConnections.some((item) => item.providerId === providerId);
   const providerConsole = PROVIDER_CONSOLES[providerId];
 
@@ -142,7 +153,11 @@ export function ModelPicker({
   useEffect(() => {
     if (!open) return;
     setProviderId(selection.providerId || "cryzo");
-    setModelId(selection.modelId || DEFAULT_MODEL_SELECTION.modelId);
+    setModelId(
+      selection.providerId === "cryzo"
+        ? normalizeManagedModelId(selection.modelId)
+        : selection.modelId || DEFAULT_MODEL_SELECTION.modelId,
+    );
     setCredentialMode(selection.credentialMode || "cryzo");
     setSearch("");
     setFeedback({ type: "idle" });
@@ -165,7 +180,7 @@ export function ModelPicker({
 
     if (nextProvider.id === "cryzo") {
       setCredentialMode("cryzo");
-      if (!modelId.startsWith("cryzo/")) setModelId(DEFAULT_MODEL_SELECTION.modelId);
+      setModelId(normalizeManagedModelId(modelId));
     } else if (nextProvider.local) {
       setCredentialMode("device");
     } else if (selection.providerId !== providerId) {
@@ -347,7 +362,11 @@ export function ModelPicker({
     setFeedback({ type: "idle" });
     try {
       if (provider.id === "cryzo") {
-        onChange({ providerId: "cryzo", modelId: modelId.trim(), credentialMode: "cryzo" });
+        onChange({
+          providerId: "cryzo",
+          modelId: normalizeManagedModelId(modelId),
+          credentialMode: "cryzo",
+        });
         setOpen(false);
         return;
       }
@@ -400,9 +419,9 @@ export function ModelPicker({
             ? "inline-flex h-9 min-w-0 shrink-0 items-center gap-1.5 rounded-lg px-2 text-xs text-zinc-400 transition-colors hover:bg-zinc-900 hover:text-white"
             : "inline-flex h-9 max-w-[220px] items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-900 px-2.5 text-xs text-zinc-300 hover:text-white"
         }
-        title={`${selectedProvider.name} · ${selection.modelId}`}
+        title={`${selectedProvider.name} · ${selectedModelId}`}
       >
-        <ModelLogo provider={selectedProvider} modelId={selection.modelId} size={26} />
+        <ModelLogo provider={selectedProvider} modelId={selectedModelId} size={26} />
         <span className="max-w-32 truncate">{selectedModelName}</span>
         <ChevronDown size={13} className="shrink-0" />
       </button>
@@ -415,7 +434,7 @@ export function ModelPicker({
             <header className="flex items-center justify-between border-b border-zinc-800 px-4 py-3 sm:px-5">
               <div>
                 <h2 className="text-base font-semibold text-white">Choose your model</h2>
-                <p className="mt-0.5 text-xs text-zinc-500">Free models and BYOK never spend message credits.</p>
+                <p className="mt-0.5 text-xs text-zinc-500">BYOK models never spend Cryzo message credits.</p>
               </div>
               <button type="button" onClick={() => setOpen(false)} className="rounded-lg p-2 text-zinc-500 hover:bg-zinc-900 hover:text-white">
                 <X size={18} />
@@ -506,8 +525,8 @@ export function ModelPicker({
                               <div className="min-w-0">
                                 <div className="flex flex-wrap items-center gap-2">
                                   <span className="text-sm font-medium text-white">{managed.name}</span>
-                                  <ModelBadge tone={managed.tier === "free" ? "free" : "premium"}>{managed.badge}</ModelBadge>
-                                  {managed.tier === "premium" && <ModelBadge>Message credits</ModelBadge>}
+                                  <ModelBadge tone="premium">{managed.badge}</ModelBadge>
+                                  <ModelBadge>Message credits</ModelBadge>
                                 </div>
                                 <p className="mt-1 text-xs text-zinc-500">{managed.providerName} · {managed.description}</p>
                               </div>
@@ -676,7 +695,7 @@ export function ModelPicker({
             <footer className="flex items-center justify-between gap-3 border-t border-zinc-800 bg-black/40 px-4 py-3 sm:px-5">
               <div className="min-w-0 text-xs text-zinc-500">
                 {provider.id === "cryzo" ? (
-                  <span className="inline-flex items-center gap-1.5"><Sparkles size={13} /> {modelId === "cryzo/free-auto" ? "Free Auto · 0 message credits" : "Managed premium · usage-based message credits"}</span>
+                  <span className="inline-flex items-center gap-1.5"><Sparkles size={13} /> Managed premium · usage-based message credits</span>
                 ) : (
                   <span>BYOK · unlimited app creation · 0 Cryzo message credits</span>
                 )}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import type { ProviderDefinition } from "@/lib/ai/models";
 import { getManagedModel } from "@/lib/ai/managed-models";
 
@@ -58,7 +58,17 @@ const LOBE_ALIASES: Record<string, string> = {
   zerooneai: "yi",
 };
 
-const LOBE_CDN = "https://unpkg.com/@lobehub/icons-static-svg@1.94.0/icons";
+type LogoTreatment = "color" | "dark" | "monochrome" | "raw";
+
+type LogoCandidate = {
+  src: string;
+  treatment: LogoTreatment;
+};
+
+const LOBE_SVG_CDN =
+  "https://unpkg.com/@lobehub/icons-static-svg@1.94.0/icons";
+const LOBE_PNG_CDN =
+  "https://unpkg.com/@lobehub/icons-static-png@1.94.0";
 
 function modelsDevLogoUrl(id: string) {
   return `https://models.dev/logos/${encodeURIComponent(id)}.svg`;
@@ -69,40 +79,94 @@ function lobeSlug(id: string) {
   return LOBE_ALIASES[normalized] || normalized;
 }
 
-function logoCandidates(id?: string) {
+function logoCandidates(id?: string): LogoCandidate[] {
   if (!id) return [];
   const slug = lobeSlug(id);
+  const encodedSlug = encodeURIComponent(slug);
   return [
-    `${LOBE_CDN}/${encodeURIComponent(slug)}-color.svg`,
-    `${LOBE_CDN}/${encodeURIComponent(slug)}.svg`,
-    modelsDevLogoUrl(id),
+    {
+      src: `${LOBE_SVG_CDN}/${encodedSlug}-color.svg`,
+      treatment: "color",
+    },
+    {
+      src: `${LOBE_PNG_CDN}/dark/${encodedSlug}.png`,
+      treatment: "dark",
+    },
+    {
+      src: `${LOBE_SVG_CDN}/${encodedSlug}.svg`,
+      treatment: "monochrome",
+    },
+    {
+      src: modelsDevLogoUrl(id),
+      treatment: "raw",
+    },
   ];
+}
+
+function BrandImageCandidateList({
+  candidates,
+  fallback,
+  size,
+}: {
+  candidates: LogoCandidate[];
+  fallback: string;
+  size: number;
+}) {
+  const [{ index, loaded }, setState] = useState({
+    index: 0,
+    loaded: false,
+  });
+  const candidate = candidates[index];
+
+  return (
+    <>
+      <span
+        className={`absolute inset-0 flex items-center justify-center ${loaded ? "invisible" : ""}`}
+      >
+        {fallback}
+      </span>
+      {candidate && (
+        <img
+          src={candidate.src}
+          alt=""
+          width={Math.max(16, size - 6)}
+          height={Math.max(16, size - 6)}
+          className={`relative z-10 block max-h-full max-w-full object-contain ${candidate.treatment === "monochrome" ? "brightness-0 invert" : ""} ${loaded ? "opacity-100" : "opacity-0"}`}
+          onLoad={() =>
+            setState((current) => ({ ...current, loaded: true }))
+          }
+          onError={() =>
+            setState((current) => ({
+              index: current.index + 1,
+              loaded: false,
+            }))
+          }
+        />
+      )}
+    </>
+  );
 }
 
 function BrandImage({
   id,
+  fallback,
   size,
 }: {
   id?: string;
+  fallback: string;
   size: number;
 }) {
   const candidates = useMemo(() => logoCandidates(id), [id]);
-  const candidateKey = candidates.join("|");
-  const [index, setIndex] = useState(0);
-
-  useEffect(() => setIndex(0), [candidateKey]);
-
-  const src = candidates[index];
-  if (!src) return null;
+  const candidateKey = candidates
+    .map((candidate) => `${candidate.treatment}:${candidate.src}`)
+    .join("|");
 
   return (
-    <img
-      src={src}
-      alt=""
-      width={Math.max(16, size - 6)}
-      height={Math.max(16, size - 6)}
-      className="relative z-10 block max-h-full max-w-full object-contain"
-      onError={() => setIndex((current) => current + 1)}
+    <BrandImageCandidateList
+      key={candidateKey}
+      candidates={candidates}
+      fallback={fallback}
+      size={size}
     />
   );
 }
@@ -122,17 +186,14 @@ function logoFrame({
       style={{ width: size, height: size }}
       aria-hidden="true"
     >
-      <span className="absolute inset-0 flex items-center justify-center">
-        {fallback}
-      </span>
-      <BrandImage id={id} size={size} />
+      <BrandImage id={id} fallback={fallback} size={size} />
     </span>
   );
 }
 
 function providerLogoId(provider: ProviderDefinition) {
   if (provider.id === "cryzo") return undefined;
-  return provider.catalogId || provider.id;
+  return provider.logoSlug || provider.catalogId || provider.id;
 }
 
 function modelLabId(provider: ProviderDefinition, modelId: string) {

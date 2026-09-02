@@ -53,7 +53,7 @@ const PLANS: PlanDefinition[] = [
     tagline: "Build without counting projects.",
     features: [
       "Unlimited projects",
-      "Cryzo Free rotating AI models",
+      "25 managed-AI message credits",
       "Bring your own AI keys",
       "GitHub sync and code export",
       "Deploy with your own Vercel or Netlify",
@@ -309,7 +309,7 @@ export default function BillingPage() {
             remaining={subscription.messageCreditsRemaining || 0}
             used={messageUsed}
             total={messageTotal}
-            note="Only Cryzo-managed premium models spend these. Free Auto and BYOK cost 0."
+            note="Cryzo-managed models spend these. BYOK models cost 0."
           />
 
           <MeterCard
@@ -323,7 +323,7 @@ export default function BillingPage() {
         </section>
 
         <section className="grid gap-3 sm:grid-cols-3">
-          <RuleCard icon={<Zap size={17} />} title="Free models" text="0 message credits. Cryzo can rotate the free pool without changing your project." />
+          <RuleCard icon={<Zap size={17} />} title="Managed models" text="MiniMax M3 and Kimi K3 use message credits based on request scope." />
           <RuleCard icon={<Bot size={17} />} title="Bring your own key" text="0 Cryzo message credits. You pay OpenAI, Anthropic, NVIDIA or another provider directly." />
           <RuleCard icon={<Globe2 size={17} />} title="Unlimited projects" text="Build, export, sync to GitHub and DIY-deploy as many projects as you want." />
         </section>
@@ -446,7 +446,7 @@ export default function BillingPage() {
             <div className="flex items-start justify-between gap-4">
               <div>
                 <h2 className="text-lg font-semibold">Add message credits</h2>
-                <p className="mt-1 text-sm text-zinc-500">For Cryzo-managed premium AI. Free models and BYOK still use zero message credits.</p>
+                <p className="mt-1 text-sm text-zinc-500">For Cryzo-managed AI. BYOK models use zero Cryzo message credits.</p>
               </div>
               <button type="button" onClick={() => setTopUpOpen(false)} className="rounded-lg p-2 text-zinc-500 hover:bg-zinc-900 hover:text-white"><X size={16} /></button>
             </div>

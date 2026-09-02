@@ -36,7 +36,7 @@ export const PROVIDERS: ProviderDefinition[] = [
   {
     id: "cryzo",
     name: "Cryzo",
-    description: "Free rotating models plus Cryzo-managed premium models. No API key required.",
+    description: "Cryzo-managed premium models. No API key required.",
   },
   {
     id: "openrouter",
@@ -83,7 +83,7 @@ export const PROVIDERS: ProviderDefinition[] = [
   {
     id: "xai",
     name: "xAI",
-    logoSlug: "x",
+    logoSlug: "xai",
     catalogId: "xai",
     apiKeyLabel: "xAI API key",
     defaultBaseURL: "https://api.x.ai/v1",

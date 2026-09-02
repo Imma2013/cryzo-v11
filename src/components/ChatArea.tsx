@@ -31,6 +31,7 @@ import {
   type ModelSelection,
 } from "@/lib/ai/models";
 import { buildLocalSystemPrompt } from "@/lib/ai/local-prompt";
+import { normalizeManagedModelId } from "@/lib/ai/managed-models";
 import type { ElementInfo } from "./workspace/LivePreview";
 import { Id } from "../../convex/_generated/dataModel";
 
@@ -114,12 +115,18 @@ export function ChatArea({
       ? optimisticMode.mode
       : conversation?.chatMode ?? "build";
 
+  const savedProviderId =
+    conversation?.modelProvider || DEFAULT_MODEL_SELECTION.providerId;
+  const savedModelId = conversation?.modelId || DEFAULT_MODEL_SELECTION.modelId;
   const modelSelection: ModelSelection =
     optimisticModel?.conversationId === conversationId
       ? optimisticModel.selection
       : {
-          providerId: conversation?.modelProvider || DEFAULT_MODEL_SELECTION.providerId,
-          modelId: conversation?.modelId || DEFAULT_MODEL_SELECTION.modelId,
+          providerId: savedProviderId,
+          modelId:
+            savedProviderId === "cryzo"
+              ? normalizeManagedModelId(savedModelId)
+              : savedModelId,
           credentialMode:
             conversation?.modelCredentialMode || DEFAULT_MODEL_SELECTION.credentialMode,
           baseURL: conversation?.modelBaseUrl,

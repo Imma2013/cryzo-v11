@@ -144,7 +144,7 @@ const APP_WIDE_PATTERN =
 
 /**
  * Message-credit pricing intentionally follows Base44-style scope pricing.
- * BYOK and Cryzo Free models bypass this function entirely at request time.
+ * BYOK models bypass this function entirely at request time.
  */
 export function classifyCreditCost({ text, mode, hasFiles }: CreditCostInput) {
   if (mode === "plan") return 0.3;

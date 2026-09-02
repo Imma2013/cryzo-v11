@@ -18,20 +18,6 @@ export type ManagedModelDefinition = {
 
 export const CRYZO_MANAGED_MODELS: ManagedModelDefinition[] = [
   {
-    id: "cryzo/free-auto",
-    name: "Free Auto",
-    providerName: "OpenRouter",
-    logoProviderId: "openrouter",
-    upstreamProvider: "openrouter",
-    upstreamModel: "openrouter/free",
-    tier: "free",
-    creditMultiplier: 0,
-    reasoning: true,
-    toolCall: true,
-    description: "Rotates across available free models. Unlimited app creation; no message credits.",
-    badge: "Free",
-  },
-  {
     id: "cryzo/minimax-m3",
     name: "MiniMax M3",
     providerName: "MiniMax",
@@ -63,10 +49,18 @@ export const CRYZO_MANAGED_MODELS: ManagedModelDefinition[] = [
   },
 ];
 
-export const DEFAULT_MANAGED_MODEL_ID = "cryzo/free-auto";
+export const DEFAULT_MANAGED_MODEL_ID = "cryzo/minimax-m3";
+
+export function normalizeManagedModelId(modelId?: string | null) {
+  const id = modelId?.trim();
+  return (
+    CRYZO_MANAGED_MODELS.find((model) => model.id === id)?.id ||
+    DEFAULT_MANAGED_MODEL_ID
+  );
+}
 
 export function getManagedModel(modelId?: string | null) {
-  const id = modelId?.trim() || DEFAULT_MANAGED_MODEL_ID;
+  const id = normalizeManagedModelId(modelId);
   return (
     CRYZO_MANAGED_MODELS.find((model) => model.id === id) ||
     CRYZO_MANAGED_MODELS[0]
