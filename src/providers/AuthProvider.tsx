@@ -49,7 +49,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     isAuthenticated,
     isLoading,
     authToken: authToken ?? null,
-    signIn:
+    signIn,
     signOut: safeSignOut,
   };
 
