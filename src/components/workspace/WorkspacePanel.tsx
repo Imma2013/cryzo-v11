@@ -8,6 +8,7 @@ import {
   ExternalLink,
   Eye,
   FileText,
+  LayoutDashboard,
   Loader2,
   Mic,
   MoreHorizontal,
@@ -25,10 +26,11 @@ import { CodeEditor } from "./CodeEditor";
 import { LivePreview, type ElementInfo } from "./LivePreview";
 import { WorkspaceTerminal } from "./WorkspaceTerminal";
 import { PublishControls } from "./PublishControls";
+import { WorkspaceDashboard } from "./WorkspaceDashboard";
 import { Id } from "../../../convex/_generated/dataModel";
 
-type ViewMode = "preview" | "files";
-type MobilePanel = "preview" | "code" | "files";
+type ViewMode = "preview" | "dashboard";
+type MobilePanel = "preview" | "code" | "files" | "dashboard";
 
 export type WorkspaceStatus = {
   isBooting: boolean;
@@ -87,7 +89,7 @@ export function WorkspacePanel({
     if (!mobile) return;
     const handlePanel = (event: Event) => {
       const requested = (event as CustomEvent<{ panel?: MobilePanel }>).detail?.panel;
-      if (requested === "preview" || requested === "code" || requested === "files") {
+      if (requested === "preview" || requested === "code" || requested === "files" || requested === "dashboard") {
         setMobilePanel(requested);
       }
     };
@@ -207,7 +209,12 @@ export function WorkspacePanel({
     };
 
     const mobileWorkspaceContent =
-      mobilePanel === "files" ? (
+      mobilePanel === "dashboard" ? (
+        <WorkspaceDashboard
+          conversationId={conversationId}
+          onOpenCode={() => setMobilePanel("files")}
+        />
+      ) : mobilePanel === "files" ? (
         <div className="flex h-full min-h-0 flex-col bg-zinc-950 text-white">
           <div className="flex h-12 shrink-0 items-center justify-between border-b border-zinc-800 px-4">
             <div className="flex items-center gap-2 text-sm font-semibold">
@@ -316,6 +323,17 @@ export function WorkspacePanel({
         <div className="relative z-40 shrink-0 border-t border-zinc-200 bg-[#fafafa] px-4 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-3 text-black">
           {mobileMenuOpen && (
             <div className="absolute bottom-[calc(100%+0.5rem)] right-4 w-56 overflow-hidden rounded-2xl border border-zinc-200 bg-white p-1.5 shadow-2xl shadow-black/20">
+              <button
+                type="button"
+                onClick={() => {
+                  setMobilePanel("dashboard");
+                  setMobileMenuOpen(false);
+                }}
+                className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm text-zinc-800 hover:bg-zinc-100"
+              >
+                <LayoutDashboard size={17} />
+                Project dashboard
+              </button>
               <button
                 type="button"
                 onClick={() => {
@@ -428,15 +446,15 @@ export function WorkspacePanel({
           </button>
           <button
             type="button"
-            onClick={() => setViewMode("files")}
+            onClick={() => setViewMode("dashboard")}
             className={`flex items-center gap-1.5 rounded px-3 py-1 text-xs font-medium transition-colors ${
-              viewMode === "files"
+              viewMode === "dashboard"
                 ? "bg-zinc-700 text-white"
                 : "text-zinc-400 hover:text-white"
             }`}
           >
-            <FileText size={12} />
-            Files
+            <LayoutDashboard size={12} />
+            Dashboard
           </button>
         </div>
 
@@ -474,6 +492,7 @@ export function WorkspacePanel({
       {viewMode === "preview" ? (
         <div className="flex-1 overflow-hidden">{previewContent}</div>
       ) : (
+        <WorkspaceDashboard conversationId={conversationId}>
         <Group orientation="vertical" className="flex-1">
           <Panel defaultSize={65} minSize={30}>
             <div className="flex h-full">
@@ -537,6 +556,7 @@ export function WorkspacePanel({
             <WorkspaceTerminal output={terminalOutput} />
           </Panel>
         </Group>
+        </WorkspaceDashboard>
       )}
     </div>
   );

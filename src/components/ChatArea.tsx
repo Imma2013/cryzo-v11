@@ -18,7 +18,11 @@ import { ToolCallDisplay } from "./ToolCallDisplay";
 import { ArtifactBadge } from "./ArtifactBadge";
 import AgentPlan from "@/components/ui/agent-plan";
 import { parseArtifacts } from "@/lib/workspace/artifact-parser";
-import { processStreamingArtifactText } from "@/lib/workspace/streaming-runtime";
+import {
+  finishStreamingArtifactStream,
+  getCompletedStreamingActions,
+  processStreamingArtifactText,
+} from "@/lib/workspace/streaming-runtime";
 import {
   filesToUIParts,
   takeInitialChatMessage,
@@ -242,8 +246,29 @@ export function ChatArea({
     }
   }, [messages, status, localLoading, conversationId, onArtifactCreated]);
 
-  // Persist only completed artifacts. Persistence is deliberately decoupled
-  // from live execution so database latency cannot hold up the preview.
+  const runtimeStatusRef = useRef(status);
+  useEffect(() => {
+    const previous = runtimeStatusRef.current;
+    runtimeStatusRef.current = status;
+    const generationEnded =
+      (previous === "streaming" || previous === "submitted") &&
+      (status === "ready" || status === "error");
+    if (!generationEnded) return;
+
+    const latestAssistant = [...messages]
+      .reverse()
+      .find((message) => message.role === "assistant");
+    if (!latestAssistant || !liveMessageIdsRef.current.has(latestAssistant.id)) return;
+
+    finishStreamingArtifactStream(
+      String(conversationId),
+      latestAssistant.id,
+      status === "error" ? error?.message : undefined,
+    );
+  }, [conversationId, error?.message, messages, status]);
+
+  // Persist completed artifacts and per-file checkpoints. Database writes stay
+  // outside the execution queue so they never delay the live preview.
   useEffect(() => {
     for (const message of messages) {
       if (message.role !== "assistant") continue;
@@ -256,13 +281,29 @@ export function ChatArea({
           if (savedArtifactsRef.current.has(artifact.id)) continue;
 
           savedArtifactsRef.current.add(artifact.id);
-          createArtifact({
+          void createArtifact({
             conversationId,
             artifactId: artifact.id,
             title: artifact.title,
             actions: artifact.actions,
           });
           onArtifactCreated?.();
+        }
+
+        if (artifacts.length === 0) {
+          const checkpoints = getCompletedStreamingActions(part.text);
+          checkpoints.forEach((action, index) => {
+            const checkpointId = `${message.id}-checkpoint-${index}`;
+            if (savedArtifactsRef.current.has(checkpointId)) return;
+
+            savedArtifactsRef.current.add(checkpointId);
+            void createArtifact({
+              conversationId,
+              artifactId: checkpointId,
+              title: "Build checkpoint",
+              actions: [action],
+            });
+          });
         }
       }
     }
@@ -695,8 +736,20 @@ export function ChatArea({
                     </a>
                   </div>
                 ) : (
-                  <div className="rounded-xl border border-red-800 bg-red-900/20 px-4 py-3 text-sm text-red-400">
-                    Error: {localError || error?.message}
+                  <div className="rounded-xl border border-red-800 bg-red-900/20 px-4 py-3 text-sm text-red-300">
+                    <p>Error: {localError || error?.message}</p>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        void sendPreparedMessage(
+                          "Continue the interrupted build from the latest saved project files. Finish any missing files, preserve completed work, install dependencies if needed, and start the preview.",
+                        )
+                      }
+                      disabled={isLoading}
+                      className="mt-3 rounded-lg bg-white px-3 py-2 text-xs font-semibold text-black hover:bg-zinc-200 disabled:opacity-50"
+                    >
+                      Continue build
+                    </button>
                   </div>
                 ))}
 

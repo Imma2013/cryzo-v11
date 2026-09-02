@@ -163,6 +163,32 @@ function buildCurrentProjectContext(artifacts: any[]) {
 }
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 300;
+
+const MODEL_TOTAL_TIMEOUT_MS = 240_000;
+const MODEL_CHUNK_TIMEOUT_MS = 45_000;
+const MANAGED_MAX_OUTPUT_TOKENS = 8_192;
+
+function streamLimits(providerId: string) {
+  return {
+    maxRetries: 1,
+    timeout: {
+      totalMs: MODEL_TOTAL_TIMEOUT_MS,
+      chunkMs: MODEL_CHUNK_TIMEOUT_MS,
+    },
+    ...(providerId === "cryzo"
+      ? { maxOutputTokens: MANAGED_MAX_OUTPUT_TOKENS }
+      : {}),
+  };
+}
+
+function chatStreamError(error: unknown) {
+  console.error("[chat/stream]", error);
+  const message = error instanceof Error ? error.message : String(error);
+  return /abort|timeout|timed out/i.test(message)
+    ? "The model stopped responding, so Cryzo ended this run safely. Completed files were preserved. Choose Continue build to resume."
+    : "The model run ended before it finished. Completed files were preserved. Choose Continue build to resume.";
+}
 
 export async function POST(req: Request) {
   try {
@@ -321,6 +347,7 @@ export async function POST(req: Request) {
     if (mode === "plan") {
       const result = streamText({
         model: resolved.model,
+        ...streamLimits(resolved.providerId),
         system: buildPlanPrompt(recipeBlock, resolvedProjectPlatforms) + currentProjectContext,
         messages: modelMessages,
         stopWhen: stepCountIs(5),
@@ -338,6 +365,7 @@ export async function POST(req: Request) {
       }
 
       return result.toUIMessageStreamResponse({
+        onError: chatStreamError,
         headers: {
           ...(composioSessionId
             ? { "x-composio-session-id": composioSessionId }
@@ -381,6 +409,7 @@ export async function POST(req: Request) {
       responseSessionId = session.sessionId;
       result = streamText({
         model: resolved.model,
+        ...streamLimits(resolved.providerId),
         system: systemPrompt,
         messages: modelMessages,
         tools,
@@ -410,6 +439,7 @@ export async function POST(req: Request) {
     } else {
       result = streamText({
         model: resolved.model,
+        ...streamLimits(resolved.providerId),
         system: systemPrompt,
         messages: modelMessages,
         stopWhen: stepCountIs(10),
@@ -431,6 +461,7 @@ export async function POST(req: Request) {
     }
 
     return result.toUIMessageStreamResponse({
+      onError: chatStreamError,
       headers: {
         ...(responseSessionId
           ? { "x-composio-session-id": responseSessionId }

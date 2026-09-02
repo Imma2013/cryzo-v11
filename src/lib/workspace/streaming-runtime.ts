@@ -136,7 +136,7 @@ function parseActionAttributes(raw: string) {
   return { type, filePath, operation };
 }
 
-function parseCompletedActions(text: string): ArtifactAction[] {
+export function getCompletedStreamingActions(text: string): ArtifactAction[] {
   if (!text.includes("<cryzoArtifact")) return [];
 
   const actions: ArtifactAction[] = [];
@@ -170,30 +170,47 @@ type GuardResponse = {
   error?: string;
 };
 
-async function authenticatedPost<T>(url: string, body: Record<string, unknown>): Promise<T> {
+async function authenticatedPost<T>(
+  url: string,
+  body: Record<string, unknown>,
+  timeoutMs = 90_000,
+): Promise<T> {
   const authToken = await waitForSandboxAuthToken();
-  const response = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${authToken}`,
-    },
-    body: JSON.stringify(body),
-  });
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
 
-  const data = (await response.json()) as T & { error?: string };
-  if (!response.ok) {
-    throw new Error(data.error || `Request failed with ${response.status}`);
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      signal: controller.signal,
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify(body),
+    });
+
+    const data = (await response.json()) as T & { error?: string };
+    if (!response.ok) {
+      throw new Error(data.error || `Request failed with ${response.status}`);
+    }
+    return data;
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new Error("The build service took too long to respond. Completed files were preserved; retry the preview to continue.");
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timeout);
   }
-  return data;
 }
 
 async function callSandbox(body: Record<string, unknown>): Promise<SandboxResponse> {
-  return await authenticatedPost<SandboxResponse>("/api/sandbox/runtime", body);
+  return await authenticatedPost<SandboxResponse>("/api/sandbox/runtime", body, 210_000);
 }
 
 async function callGuard(body: Record<string, unknown>): Promise<GuardResponse> {
-  return await authenticatedPost<GuardResponse>("/api/sandbox/validate", body);
+  return await authenticatedPost<GuardResponse>("/api/sandbox/validate", body, 60_000);
 }
 
 function applyResponse(state: RuntimeState, response: SandboxResponse) {
@@ -391,7 +408,7 @@ export function processStreamingArtifactText(
     emit(state);
   }
 
-  const actions = parseCompletedActions(text);
+  const actions = getCompletedStreamingActions(text);
   const processed = state.processedActionsByMessage.get(messageId) ?? 0;
   if (actions.length <= processed) return true;
 
@@ -405,6 +422,33 @@ export function processStreamingArtifactText(
   }
 
   return true;
+}
+
+export function finishStreamingArtifactStream(
+  conversationId: string,
+  messageId: string,
+  failure?: string,
+) {
+  const state = getState(conversationId);
+  if (!state.processedActionsByMessage.has(messageId)) return;
+
+  state.queue = state.queue
+    .then(() => {
+      if (state.previewUrl) {
+        state.active = true;
+        state.progress = "ready";
+        state.error = null;
+        emit(state);
+        return;
+      }
+
+      setError(
+        state,
+        failure ||
+          "Generation ended before the preview started. Completed files were preserved. Continue the build to finish the remaining files.",
+      );
+    })
+    .catch((error) => setError(state, error));
 }
 
 export async function prebootStreamingRuntime(conversationId: string) {

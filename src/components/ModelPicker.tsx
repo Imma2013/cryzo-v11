@@ -315,6 +315,45 @@ export function ModelPicker({
     }
   };
 
+  const testCredential = async () => {
+    if (provider.local) {
+      await discoverLocalModels();
+      return;
+    }
+
+    setBusy(true);
+    setFeedback({ type: "saving", message: "Testing connection…" });
+    try {
+      const runtimeKey = apiKey.trim() || readRuntimeProviderKey(providerId);
+      const response = await fetch("/api/models/credentials/test", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+        },
+        body: JSON.stringify({
+          providerId,
+          credentialMode,
+          apiKey: credentialMode === "device" ? runtimeKey : apiKey.trim() || undefined,
+          baseURL: baseURL.trim() || undefined,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Connection test failed");
+      setFeedback({
+        type: "success",
+        message: data.message || "Connected successfully.",
+      });
+    } catch (error) {
+      setFeedback({
+        type: "error",
+        message: error instanceof Error ? error.message : "Connection test failed",
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const discoverLocalModels = async () => {
     const endpoint = (baseURL || provider.defaultBaseURL || "").replace(/\/$/, "");
     if (!endpoint) {
@@ -488,94 +527,6 @@ export function ModelPicker({
                   </div>
                 </div>
 
-                <div className="relative mt-5">
-                  <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-600" size={15} />
-                  <input
-                    value={search}
-                    onChange={(event) => setSearch(event.target.value)}
-                    placeholder="Search models"
-                    className="h-10 w-full rounded-xl border border-zinc-800 bg-black pl-9 pr-3 text-sm text-white outline-none placeholder:text-zinc-600 focus:border-zinc-600"
-                  />
-                </div>
-
-                <section className="mt-3 space-y-2">
-                  {catalogLoading && provider.id !== "cryzo" && !provider.local && (
-                    <div className="flex items-center gap-2 rounded-xl border border-zinc-800 px-3 py-4 text-xs text-zinc-500">
-                      <Loader2 className="animate-spin" size={14} /> Loading model catalog…
-                    </div>
-                  )}
-
-                  {provider.id === "cryzo" ? (
-                    providerModels.map((model) => {
-                      const active = modelId === model.id;
-                      const managed = CRYZO_MANAGED_MODELS.find((item) => item.id === model.id);
-                      if (!managed) return null;
-                      return (
-                        <button
-                          key={model.id}
-                          type="button"
-                          onClick={() => setModelId(model.id)}
-                          className={`w-full rounded-xl border p-3 text-left transition-colors ${
-                            active ? "border-zinc-500 bg-zinc-900" : "border-zinc-800 bg-black/40 hover:border-zinc-700"
-                          }`}
-                        >
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="flex min-w-0 items-start gap-3">
-                              <ModelLogo provider={provider} modelId={model.id} size={34} />
-                              <div className="min-w-0">
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <span className="text-sm font-medium text-white">{managed.name}</span>
-                                  <ModelBadge tone="premium">{managed.badge}</ModelBadge>
-                                  <ModelBadge>Message credits</ModelBadge>
-                                </div>
-                                <p className="mt-1 text-xs text-zinc-500">{managed.providerName} · {managed.description}</p>
-                              </div>
-                            </div>
-                            {active && <CheckCircle2 className="shrink-0 text-white" size={17} />}
-                          </div>
-                        </button>
-                      );
-                    })
-                  ) : (
-                    providerModels.slice(0, 100).map((model) => {
-                      const active = modelId === model.id;
-                      return (
-                        <button
-                          key={model.id}
-                          type="button"
-                          onClick={() => setModelId(model.id)}
-                          className={`w-full rounded-xl border p-3 text-left transition-colors ${
-                            active ? "border-sky-700 bg-sky-950/20" : "border-zinc-800 bg-black/40 hover:border-zinc-700"
-                          }`}
-                        >
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="flex min-w-0 items-start gap-3">
-                              <ModelLogo provider={provider} modelId={model.id} size={34} />
-                              <div className="min-w-0">
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <span className="truncate text-sm font-medium text-white">{model.name}</span>
-                                  <ModelBadge tone="byok">BYOK</ModelBadge>
-                                  {model.reasoning && <ModelBadge>Reasoning</ModelBadge>}
-                                  {model.toolCall && <ModelBadge>Tools</ModelBadge>}
-                                  {formatContext(model.context) && <ModelBadge>{formatContext(model.context)}</ModelBadge>}
-                                </div>
-                                <p className="mt-1 truncate text-[11px] text-zinc-600">{model.id}</p>
-                              </div>
-                            </div>
-                            {active && <CheckCircle2 className="shrink-0 text-sky-300" size={17} />}
-                          </div>
-                        </button>
-                      );
-                    })
-                  )}
-
-                  {!catalogLoading && providerModels.length === 0 && (
-                    <div className="rounded-xl border border-dashed border-zinc-800 px-4 py-7 text-center text-xs text-zinc-500">
-                      {provider.local ? "Connect to discover local models." : "No models matched your search."}
-                    </div>
-                  )}
-                </section>
-
                 {provider.id !== "cryzo" && (
                   <section className="mt-5 rounded-2xl border border-zinc-800 bg-zinc-900/30 p-4">
                     <div className="flex flex-wrap items-center justify-between gap-3">
@@ -667,6 +618,16 @@ export function ModelPicker({
                         {busy && feedback.type === "saving" ? <Loader2 className="animate-spin" size={13} /> : <Server size={13} />}
                         Save connection
                       </button>
+                      {!provider.local && (
+                        <button
+                          type="button"
+                          onClick={() => void testCredential()}
+                          disabled={busy}
+                          className="inline-flex h-9 items-center gap-2 rounded-xl bg-white px-3 text-xs font-semibold text-black hover:bg-zinc-200 disabled:opacity-50"
+                        >
+                          <Zap size={13} /> Test key
+                        </button>
+                      )}
                       {provider.local && (
                         <button
                           type="button"
@@ -689,6 +650,96 @@ export function ModelPicker({
                     )}
                   </section>
                 )}
+
+                <div className="relative mt-5">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-600" size={15} />
+                  <input
+                    value={search}
+                    onChange={(event) => setSearch(event.target.value)}
+                    placeholder="Search models"
+                    className="h-10 w-full rounded-xl border border-zinc-800 bg-black pl-9 pr-3 text-sm text-white outline-none placeholder:text-zinc-600 focus:border-zinc-600"
+                  />
+                </div>
+
+                <section className="mt-3 space-y-2">
+                  {catalogLoading && provider.id !== "cryzo" && !provider.local && (
+                    <div className="flex items-center gap-2 rounded-xl border border-zinc-800 px-3 py-4 text-xs text-zinc-500">
+                      <Loader2 className="animate-spin" size={14} /> Loading model catalog…
+                    </div>
+                  )}
+
+                  {provider.id === "cryzo" ? (
+                    providerModels.map((model) => {
+                      const active = modelId === model.id;
+                      const managed = CRYZO_MANAGED_MODELS.find((item) => item.id === model.id);
+                      if (!managed) return null;
+                      return (
+                        <button
+                          key={model.id}
+                          type="button"
+                          onClick={() => setModelId(model.id)}
+                          className={`w-full rounded-xl border p-3 text-left transition-colors ${
+                            active ? "border-zinc-500 bg-zinc-900" : "border-zinc-800 bg-black/40 hover:border-zinc-700"
+                          }`}
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="flex min-w-0 items-start gap-3">
+                              <ModelLogo provider={provider} modelId={model.id} size={34} />
+                              <div className="min-w-0">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span className="text-sm font-medium text-white">{managed.name}</span>
+                                  <ModelBadge tone="premium">{managed.badge}</ModelBadge>
+                                  <ModelBadge>Message credits</ModelBadge>
+                                </div>
+                                <p className="mt-1 text-xs text-zinc-500">{managed.providerName} · {managed.description}</p>
+                              </div>
+                            </div>
+                            {active && <CheckCircle2 className="shrink-0 text-white" size={17} />}
+                          </div>
+                        </button>
+                      );
+                    })
+                  ) : (
+                    providerModels.slice(0, 100).map((model) => {
+                      const active = modelId === model.id;
+                      return (
+                        <button
+                          key={model.id}
+                          type="button"
+                          onClick={() => setModelId(model.id)}
+                          className={`w-full rounded-xl border p-3 text-left transition-colors ${
+                            active ? "border-sky-700 bg-sky-950/20" : "border-zinc-800 bg-black/40 hover:border-zinc-700"
+                          }`}
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="flex min-w-0 items-start gap-3">
+                              <ModelLogo provider={provider} modelId={model.id} size={34} />
+                              <div className="min-w-0">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span className="truncate text-sm font-medium text-white">{model.name}</span>
+                                  <ModelBadge tone="byok">BYOK</ModelBadge>
+                                  {model.reasoning && <ModelBadge>Reasoning</ModelBadge>}
+                                  {model.toolCall && <ModelBadge>Tools</ModelBadge>}
+                                  {formatContext(model.context) && <ModelBadge>{formatContext(model.context)}</ModelBadge>}
+                                </div>
+                                <p className="mt-1 truncate text-[11px] text-zinc-600">{model.id}</p>
+                              </div>
+                            </div>
+                            {active && <CheckCircle2 className="shrink-0 text-sky-300" size={17} />}
+                          </div>
+                        </button>
+                      );
+                    })
+                  )}
+
+                  {!catalogLoading && providerModels.length === 0 && (
+                    <div className="rounded-xl border border-dashed border-zinc-800 px-4 py-7 text-center text-xs text-zinc-500">
+                      {provider.local ? "Connect to discover local models." : "No models matched your search."}
+                    </div>
+                  )}
+                </section>
+
+
               </main>
             </div>
 

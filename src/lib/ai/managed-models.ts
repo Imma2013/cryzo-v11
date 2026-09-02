@@ -19,8 +19,8 @@ export type ManagedModelDefinition = {
 export const CRYZO_MANAGED_MODELS: ManagedModelDefinition[] = [
   {
     id: "cryzo/minimax-m3",
-    name: "MiniMax M3",
-    providerName: "MiniMax",
+    name: "Cryzo Fast",
+    providerName: "Powered by MiniMax M3",
     logoProviderId: "minimax",
     upstreamProvider: "nvidia",
     upstreamModel: "minimaxai/minimax-m3",
@@ -29,13 +29,13 @@ export const CRYZO_MANAGED_MODELS: ManagedModelDefinition[] = [
     reasoning: true,
     toolCall: true,
     multimodal: true,
-    description: "Long-context coding, design and tool use through Cryzo-managed NVIDIA NIM.",
+    description: "Fast, balanced coding and design for everyday builds.",
     badge: "Premium",
   },
   {
     id: "cryzo/kimi-k3",
-    name: "Kimi K3",
-    providerName: "Moonshot AI",
+    name: "Cryzo Max",
+    providerName: "Powered by Kimi K3",
     logoProviderId: "moonshotai",
     upstreamProvider: "nvidia",
     upstreamModel: "moonshotai/kimi-k3",
@@ -44,7 +44,7 @@ export const CRYZO_MANAGED_MODELS: ManagedModelDefinition[] = [
     reasoning: true,
     toolCall: true,
     multimodal: true,
-    description: "Long-horizon coding and agentic work through Cryzo-managed NVIDIA NIM.",
+    description: "Deeper long-horizon coding and agentic work for complex builds.",
     badge: "Premium",
   },
 ];

@@ -133,6 +133,37 @@ async function writeFile(sandbox: Sandbox, action: ArtifactAction) {
   ]);
 }
 
+async function writeProjectFiles(sandbox: Sandbox, actions: ArtifactAction[]) {
+  const latestByPath = new Map<string, { path: string; content: Buffer }>();
+
+  for (const action of actions) {
+    if (!action.filePath) throw new Error("File action is missing filePath");
+    if (Buffer.byteLength(action.content, "utf8") > MAX_FILE_BYTES) {
+      throw new Error(`Generated file is too large: ${action.filePath}`);
+    }
+    const relative = safeRelativePath(action.filePath);
+    latestByPath.set(relative, {
+      path: `${PROJECT_DIR}/${relative}`,
+      content: Buffer.from(action.content, "utf8"),
+    });
+  }
+
+  const directories = Array.from(
+    new Set(
+      Array.from(latestByPath.keys())
+        .map((relative) => path.posix.dirname(relative))
+        .filter((directory) => directory !== ".")
+        .map((directory) => `${PROJECT_DIR}/${directory}`),
+    ),
+  );
+  if (directories.length > 0) {
+    await sandbox.runCommand("mkdir", ["-p", ...directories]);
+  }
+  if (latestByPath.size > 0) {
+    await sandbox.writeFiles(Array.from(latestByPath.values()));
+  }
+}
+
 async function runInstall(sandbox: Sandbox) {
   const result = await sandbox.runCommand({
     cmd: "npm",
@@ -387,9 +418,20 @@ async function startPreview(sandbox: Sandbox, forceRestart = false) {
   const runtimeConfig = await launchPreview(sandbox);
   output += `Cryzo runtime config: ${runtimeConfig.userConfigPath || "no user vite.config found"} + ${runtimeConfig.publicHost}\n`;
 
+  let listening = false;
+  for (let attempt = 0; attempt < 60 && !listening; attempt++) {
+    listening = await isPreviewListening(sandbox).catch(() => false);
+    if (!listening) await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+
+  if (!listening) {
+    const diagnostics = await previewDiagnostics(sandbox);
+    throw new Error(`Preview server did not listen on port ${PREVIEW_PORT}.\n\n${diagnostics}`);
+  }
+
   let lastCheck = await checkPublicPreview(sandbox);
-  for (let attempt = 0; attempt < 90 && !lastCheck.ready; attempt++) {
-    await new Promise((resolve) => setTimeout(resolve, 300));
+  for (let attempt = 0; attempt < 4 && !lastCheck.ready; attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 350));
     lastCheck = await checkPublicPreview(sandbox);
   }
 
@@ -520,9 +562,9 @@ async function restoreProject(sandbox: Sandbox, actions: ArtifactAction[]) {
   const shellActions = actions.filter((action) => action.type === "shell");
   const startActions = actions.filter((action) => action.type === "start");
 
-  for (const action of fileActions) await writeFile(sandbox, action);
+  await writeProjectFiles(sandbox, fileActions);
 
-  let output = `Restored ${fileActions.length} project files.\n`;
+  let output = `Restored ${fileActions.length} project files in one checkpoint.\n`;
   if (shellActions.some((action) => /(^|\s)npm\s+(install|i)(\s|$)/.test(action.content))) {
     output += await ensureDependencies(sandbox);
   }

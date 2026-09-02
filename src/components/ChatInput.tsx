@@ -430,7 +430,7 @@ export function ChatInput({
         />
 
         <div className="flex items-end justify-between gap-2 px-3 pb-3">
-          <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <div className="flex min-w-0 flex-1 items-center gap-1">
             <div ref={modeMenuRef} className="relative shrink-0">
               <button
                 type="button"
@@ -486,6 +486,7 @@ export function ChatInput({
               )}
             </div>
 
+            <div className="flex min-w-0 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             <ModelPicker
               selection={modelSelection}
               onChange={onModelSelectionChange}
@@ -528,6 +529,7 @@ export function ChatInput({
             >
               {isListening ? <MicOff size={18} /> : <Mic size={18} />}
             </button>
+            </div>
           </div>
 
           <button
