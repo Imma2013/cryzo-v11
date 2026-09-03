@@ -26,12 +26,39 @@ function proxiedLogo(logo?: string) {
 
 function fallbackLogo(domain?: string) {
   if (!domain) return undefined;
-  return proxiedLogo(`https://www.google.com/s2/favicons?domain=${domain}&sz=64`);
+  return proxiedLogo(
+    `https://www.google.com/s2/favicons?domain=${domain}&sz=64`,
+  );
 }
 
-async function fetchAllToolkits(session: Awaited<ReturnType<Composio["create"]>>) {
-  const result = await session.toolkits({ limit: 1000 });
-  return result.items || [];
+function domainFromAppUrl(appUrl?: string) {
+  if (!appUrl) return undefined;
+  try {
+    return new URL(appUrl).hostname.replace(/^www\./, "");
+  } catch {
+    return undefined;
+  }
+}
+
+async function fetchAllToolkits(
+  session: Awaited<ReturnType<Composio["create"]>>,
+) {
+  const allItems: any[] = [];
+  let cursor: string | undefined;
+
+  // Tool Router catalog pages are capped at 50 by Composio.
+  for (let page = 0; page < 100; page += 1) {
+    const result: any = await session.toolkits({ limit: 50, cursor });
+    allItems.push(...(result.items || []));
+
+    const nextCursor = result.nextCursor ?? result.next_cursor;
+    if (!nextCursor || nextCursor === cursor) break;
+    cursor = nextCursor;
+  }
+
+  return Array.from(
+    new Map(allItems.map((toolkit) => [toolkit.slug, toolkit])).values(),
+  );
 }
 
 export async function GET(req: Request) {
@@ -53,17 +80,35 @@ export async function GET(req: Request) {
     const toolkits = items
       .map((toolkit: any) => {
         const fallback = known.get(toolkit.slug);
-        const requiresAuth = !toolkit.isNoAuth;
+        const meta = toolkit.meta ?? {};
+        const connectedAccount =
+          toolkit.connection?.connectedAccount ??
+          toolkit.connectedAccount ??
+          toolkit.connected_account;
+        const status = String(connectedAccount?.status ?? "").toUpperCase();
+        const noAuth =
+          toolkit.isNoAuth ??
+          toolkit.is_no_auth ??
+          toolkit.noAuth ??
+          meta.isNoAuth ??
+          false;
+        const requiresAuth = !noAuth;
+        const appUrl = meta.appUrl ?? meta.app_url;
+        const domain = fallback?.domain ?? domainFromAppUrl(appUrl);
+
         return {
           slug: toolkit.slug,
           name: toolkit.name || fallback?.name || toolkit.slug,
-          domain: fallback?.domain,
-          logo: proxiedLogo(toolkit.logo) ?? fallbackLogo(fallback?.domain),
+          domain,
+          logo:
+            proxiedLogo(meta.logo ?? toolkit.logo) ?? fallbackLogo(domain),
           isConnected: requiresAuth
-            ? toolkit.connection?.isActive ?? false
+            ? toolkit.connection?.isActive ??
+              status === "ACTIVE" ||
+              status === "CONNECTED"
             : true,
-          connectedAccountId: toolkit.connection?.connectedAccount?.id,
-          available: true,
+          connectedAccountId: connectedAccount?.id,
+          available: toolkit.enabled ?? true,
           requiresAuth,
         };
       })
