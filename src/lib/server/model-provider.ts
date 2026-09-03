@@ -27,44 +27,25 @@ const PROVIDER_BASE_URLS: Record<string, string> = {
   moonshotai: "https://api.moonshot.ai/v1",
 };
 
-function cryzoHeaders(provider: "openrouter" | "nvidia" | "openai") {
-  return provider === "openrouter"
-    ? {
-        "HTTP-Referer": "https://www.cryzo.me",
-        "X-Title": "Cryzo",
-      }
-    : undefined;
+function cryzoHeaders() {
+  return {
+    "HTTP-Referer": "https://www.cryzo.me",
+    "X-Title": "Cryzo",
+  };
 }
 
 function resolveManagedCryzoModel(requestedModel?: string) {
   const managed = getManagedModel(requestedModel);
-  const apiKey =
-    managed.upstreamProvider === "openrouter"
-      ? process.env.OPENROUTER_API_KEY?.trim()
-      : managed.upstreamProvider === "openai"
-        ? process.env.OPENAI_API_KEY?.trim()
-        : process.env.NVIDIA_API_KEY?.trim();
+  const apiKey = process.env.OPENROUTER_API_KEY?.trim();
 
   if (!apiKey) {
-    const envName =
-      managed.upstreamProvider === "openrouter"
-        ? "OPENROUTER_API_KEY"
-        : managed.upstreamProvider === "openai"
-          ? "OPENAI_API_KEY"
-          : "NVIDIA_API_KEY";
-    throw new Error(`${envName} is not configured`);
+    throw new Error("OPENROUTER_API_KEY is not configured");
   }
 
-  const baseURL =
-    managed.upstreamProvider === "openrouter"
-      ? "https://openrouter.ai/api/v1"
-      : managed.upstreamProvider === "openai"
-        ? "https://api.openai.com/v1"
-        : "https://integrate.api.nvidia.com/v1";
   const provider = createOpenAI({
-    baseURL,
+    baseURL: "https://openrouter.ai/api/v1",
     apiKey,
-    headers: cryzoHeaders(managed.upstreamProvider),
+    headers: cryzoHeaders(),
   });
 
   return {
@@ -76,6 +57,7 @@ function resolveManagedCryzoModel(requestedModel?: string) {
     usesCryzoCredits: managed.tier === "premium",
     creditMultiplier: managed.creditMultiplier,
     minimumPlan: managed.minimumPlan ?? "free",
+    supportsTools: Boolean(managed.toolCall),
   } as const;
 }
 
@@ -145,5 +127,7 @@ export async function resolveServerModel(request: ServerModelRequest) {
     usesCryzoCredits: false,
     creditMultiplier: 0,
     minimumPlan: "free" as const,
+    supportsTools: true,
   };
 }
+

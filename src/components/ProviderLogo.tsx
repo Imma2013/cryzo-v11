@@ -198,7 +198,7 @@ function providerLogoId(provider: ProviderDefinition) {
 }
 
 function modelLabId(provider: ProviderDefinition, modelId: string) {
-  if (provider.id === "cryzo") return "cryzo";
+  if (provider.id === "cryzo") return getManagedModel(modelId).logoProviderId;
 
   if (provider.id === "openrouter" && modelId.includes("/")) {
     const prefix = modelId.split("/")[0].trim().toLowerCase();
@@ -261,3 +261,4 @@ export function ModelLogo({
       : provider.name.slice(0, 2).toUpperCase());
   return logoFrame({ id, fallback, size });
 }
+

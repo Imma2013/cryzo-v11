@@ -688,8 +688,12 @@ export function ModelPicker({
                               <div className="min-w-0">
                                 <div className="flex flex-wrap items-center gap-2">
                                   <span className="text-sm font-medium text-white">{managed.name}</span>
-                                  <ModelBadge tone="premium">{managed.badge}</ModelBadge>
-                                  <ModelBadge>Message credits</ModelBadge>
+                                  <ModelBadge tone={managed.tier === "free" ? "free" : "premium"}>
+                                    {managed.badge}
+                                  </ModelBadge>
+                                  {managed.minimumPlan === "starter" && (
+                                    <ModelBadge>Starter</ModelBadge>
+                                  )}
                                 </div>
                                 <p className="mt-1 text-xs text-zinc-500">{managed.providerName} · {managed.description}</p>
                               </div>
@@ -767,3 +771,4 @@ export function ModelPicker({
     </>
   );
 }
+

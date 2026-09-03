@@ -36,7 +36,7 @@ export const PROVIDERS: ProviderDefinition[] = [
   {
     id: "cryzo",
     name: "Cryzo",
-    description: "Cryzo-managed premium models. No API key required.",
+    description: "Managed free and Starter models with transparent provider branding. No API key required.",
   },
   {
     id: "openrouter",
@@ -256,3 +256,4 @@ export function displayModelName(modelId: string) {
     .replace(/[-_]+/g, " ")
     .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
+

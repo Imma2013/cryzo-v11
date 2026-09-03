@@ -171,7 +171,7 @@ const MANAGED_MAX_OUTPUT_TOKENS = 8_192;
 
 function streamLimits(providerId: string) {
   return {
-    maxRetries: 1,
+    maxRetries: providerId === "cryzo" ? 2 : 1,
     timeout: {
       totalMs: MODEL_TOTAL_TIMEOUT_MS,
       chunkMs: MODEL_CHUNK_TIMEOUT_MS,
@@ -182,15 +182,29 @@ function streamLimits(providerId: string) {
   };
 }
 
-function chatStreamError(error: unknown) {
-  console.error("[chat/stream]", error);
+function chatStreamError(
+  error: unknown,
+  requestId: string,
+  model: { providerId: string; modelId: string; upstreamModelId: string },
+) {
   const message = error instanceof Error ? error.message : String(error);
+  console.error(
+    "[chat/stream-error]",
+    JSON.stringify({
+      requestId,
+      providerId: model.providerId,
+      modelId: model.modelId,
+      upstreamModelId: model.upstreamModelId,
+      message,
+    }),
+  );
   return /abort|timeout|timed out/i.test(message)
-    ? "The model stopped responding, so Cryzo ended this run safely. Completed files were preserved. Choose Continue build to resume."
-    : "The model run ended before it finished. Completed files were preserved. Choose Continue build to resume.";
+    ? `The model stopped responding, so Cryzo ended this run safely. Completed files were preserved. Retry this message or choose another model. Reference: ${requestId}`
+    : `Cryzo could not establish a complete response from this model. Your prompt and completed files were preserved. Retry this message or choose another model. Reference: ${requestId}`;
 }
 
 export async function POST(req: Request) {
+  const requestId = crypto.randomUUID();
   try {
     const {
       messages,
@@ -231,6 +245,17 @@ export async function POST(req: Request) {
       modelBaseUrl,
       authToken,
     });
+    console.info(
+      "[chat/start]",
+      JSON.stringify({
+        requestId,
+        providerId: resolved.providerId,
+        modelId: resolved.modelId,
+        upstreamModelId: resolved.upstreamModelId,
+        mode,
+        hasAttachments: hasAttachedContent(messages),
+      }),
+    );
 
     if (resolved.minimumPlan === "starter" && userId) {
       const subscription = await convex.query(api.billing.getSubscription, {
@@ -359,6 +384,45 @@ export async function POST(req: Request) {
 
     const modelMessages = await convertToModelMessages(messages);
 
+    let charged = false;
+    const chargeCompletedMessage = async () => {
+      if (charged || messageCharge <= 0 || !userId) return;
+      charged = true;
+      await convex.mutation(api.billing.deductMessageCredits, {
+        userId: userId as any,
+        amount: messageCharge,
+        reason: "message",
+        description: describeCreditCharge(messageCharge),
+        providerId: resolved.providerId,
+        modelId: resolved.modelId,
+      });
+    };
+
+    const completeRun = async (text: string) => {
+      if (!text.trim()) {
+        console.warn("[chat/empty-completion]", JSON.stringify({ requestId }));
+        return;
+      }
+      await syncGeneratedCloudConfig(text || "");
+      await chargeCompletedMessage();
+      console.info(
+        "[chat/complete]",
+        JSON.stringify({
+          requestId,
+          providerId: resolved.providerId,
+          modelId: resolved.modelId,
+        }),
+      );
+    };
+
+    const responseHeaders = {
+      "x-cryzo-request-id": requestId,
+      "x-cryzo-model-provider": resolved.providerId,
+      "x-cryzo-model-id": resolved.modelId,
+      "x-cryzo-billing-tier": resolved.billingTier,
+      "x-cryzo-message-credits": String(messageCharge),
+    };
+
     if (mode === "plan") {
       const result = streamText({
         model: resolved.model,
@@ -366,34 +430,34 @@ export async function POST(req: Request) {
         system: buildPlanPrompt(recipeBlock, resolvedProjectPlatforms) + currentProjectContext,
         messages: modelMessages,
         stopWhen: stepCountIs(5),
+        onFinish: async ({ text }) => {
+          await completeRun(text || "");
+        },
       });
 
-      if (messageCharge > 0 && userId) {
-        void convex.mutation(api.billing.deductMessageCredits, {
-          userId: userId as any,
-          amount: messageCharge,
-          reason: "message",
-          description: describeCreditCharge(messageCharge),
-          providerId: resolved.providerId,
-          modelId: resolved.modelId,
-        });
-      }
-
       return result.toUIMessageStreamResponse({
-        onError: chatStreamError,
+        onError: (error) => chatStreamError(error, requestId, resolved),
         headers: {
           ...(composioSessionId
             ? { "x-composio-session-id": composioSessionId }
             : {}),
-          "x-cryzo-model-provider": resolved.providerId,
-          "x-cryzo-model-id": resolved.modelId,
-          "x-cryzo-billing-tier": resolved.billingTier,
-          "x-cryzo-message-credits": String(messageCharge),
+          ...responseHeaders,
         },
       });
     }
 
-    const useComposioTools = shouldUseComposioTools(lastUserText);
+    const askedForExternalAction = shouldUseComposioTools(lastUserText);
+    if (askedForExternalAction && !resolved.supportsTools) {
+      return Response.json(
+        {
+          error: "model_tools_unsupported",
+          message: `${resolved.modelId} cannot run connected actions. Select a tool-capable model before asking Cryzo to publish, send, or configure an external service.`,
+          requestId,
+        },
+        { status: 400 },
+      );
+    }
+    const useComposioTools = askedForExternalAction;
     if (useComposioTools && userId) {
       const hasIntegrationCredits = await convex.query(
         api.billing.hasIntegrationCredits,
@@ -448,7 +512,7 @@ export async function POST(req: Request) {
           }
         },
         onFinish: async ({ text }) => {
-          await syncGeneratedCloudConfig(text || "");
+          await completeRun(text || "");
         },
       });
     } else {
@@ -459,32 +523,18 @@ export async function POST(req: Request) {
         messages: modelMessages,
         stopWhen: stepCountIs(10),
         onFinish: async ({ text }) => {
-          await syncGeneratedCloudConfig(text || "");
+          await completeRun(text || "");
         },
       });
     }
 
-    if (messageCharge > 0 && userId) {
-      void convex.mutation(api.billing.deductMessageCredits, {
-        userId: userId as any,
-        amount: messageCharge,
-        reason: "message",
-        description: describeCreditCharge(messageCharge),
-        providerId: resolved.providerId,
-        modelId: resolved.modelId,
-      });
-    }
-
     return result.toUIMessageStreamResponse({
-      onError: chatStreamError,
+      onError: (error) => chatStreamError(error, requestId, resolved),
       headers: {
         ...(responseSessionId
           ? { "x-composio-session-id": responseSessionId }
           : {}),
-        "x-cryzo-model-provider": resolved.providerId,
-        "x-cryzo-model-id": resolved.modelId,
-        "x-cryzo-billing-tier": resolved.billingTier,
-        "x-cryzo-message-credits": String(messageCharge),
+        ...responseHeaders,
         "x-cryzo-integration-credits": useComposioTools ? "metered" : "0",
         ...(cryzoCloudAppId ? { "x-cryzo-cloud-app-id": cryzoCloudAppId } : {}),
       },
@@ -501,6 +551,8 @@ export async function POST(req: Request) {
             message.includes("is not configured")
           ? 400
           : 500;
-    return Response.json({ error: message }, { status });
+    console.error("[chat/start-error]", JSON.stringify({ requestId, message }));
+    return Response.json({ error: message, requestId }, { status });
   }
 }
+
