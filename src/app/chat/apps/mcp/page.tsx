@@ -4,12 +4,35 @@ import { useState } from "react";
 import Link from "next/link";
 import { useMutation, useQuery } from "convex/react";
 import { ArrowLeft, CheckCircle2, Loader2, Plus, Server, Trash2 } from "lucide-react";
+import type { FunctionReference } from "convex/server";
+import type { Id } from "../../../../../convex/_generated/dataModel";
 import { api } from "../../../../../convex/_generated/api";
 
+type McpServer = {
+  _id: Id<"mcpServers">;
+  _creationTime: number;
+  userId: Id<"users">;
+  name: string;
+  url: string;
+  transport: "http";
+  authType: "none";
+  enabled: boolean;
+  createdAt: number;
+  updatedAt: number;
+};
+
+const mcpApi = (api as unknown as {
+  mcpServers: {
+    list: FunctionReference<"query", "public", Record<string, never>, McpServer[]>;
+    add: FunctionReference<"mutation", "public", { name: string; url: string }, Id<"mcpServers">>;
+    remove: FunctionReference<"mutation", "public", { serverId: Id<"mcpServers"> }, null>;
+  };
+}).mcpServers;
+
 export default function McpConnectorsPage() {
-  const servers = useQuery(api.mcpServers.list);
-  const addServer = useMutation(api.mcpServers.add);
-  const removeServer = useMutation(api.mcpServers.remove);
+  const servers = useQuery(mcpApi.list);
+  const addServer = useMutation(mcpApi.add);
+  const removeServer = useMutation(mcpApi.remove);
   const [name, setName] = useState("");
   const [url, setUrl] = useState("");
   const [saving, setSaving] = useState(false);
