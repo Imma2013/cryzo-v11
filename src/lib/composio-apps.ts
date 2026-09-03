@@ -34,6 +34,7 @@ const APP_ALIASES: Record<string, string[]> = {
   linkedin: ["linkedin", "linked in"],
   linkedin_ads: ["linkedin ads", "linked in ads"],
   reddit: ["reddit", "subreddit", "subreddits", "redditor", "karma"],
+  twitter: ["twitter", "x", "tweet", "tweets"],
   youtube: ["youtube", "you tube"],
 };
 
@@ -53,6 +54,7 @@ export const SELECTED_COMPOSIO_APPS = [
   { slug: "googlemeet", name: "Google Meet", domain: "meet.google.com" },
   { slug: "hubspot", name: "HubSpot", domain: "hubspot.com" },
   { slug: "linkedin", name: "LinkedIn", domain: "linkedin.com" },
+  { slug: "twitter", name: "X", domain: "x.com" },
   { slug: "tiktok", name: "TikTok", domain: "tiktok.com" },
   { slug: "discord", name: "Discord", domain: "discord.com" },
   { slug: "github", name: "GitHub", domain: "github.com" },
@@ -137,3 +139,4 @@ export function getComposioAppAliases(app: SelectedComposioApp) {
 export function getSelectedComposioApp(slug: string) {
   return SELECTED_COMPOSIO_APPS.find((app) => app.slug === slug);
 }
+

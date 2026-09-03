@@ -14,6 +14,7 @@ function tokenFrom(req: Request) {
 }
 
 export async function POST(req: Request) {
+  const requestId = crypto.randomUUID();
   const token = tokenFrom(req);
   if (!token) return Response.json({ error: "unauthorized" }, { status: 401 });
 
@@ -42,13 +43,44 @@ export async function POST(req: Request) {
     credentialMode: "cryzo",
     authToken: token,
   });
-  const result = await generateText({
-    model: resolved.model,
-    system:
-      "You are Cryzo Social. Write a polished social post ready for review. Adapt naturally to the selected networks, keep claims grounded, avoid fake links and hashtags, and return only the post copy.",
-    prompt: `Networks: ${(channels || []).join(", ")}\nRequest: ${request}`,
-    maxOutputTokens: 900,
-  });
+  let text = "";
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    try {
+      const result = await generateText({
+        model: resolved.model,
+        system:
+          "You are Cryzo Social. Write a polished social post ready for review. Adapt naturally to the selected networks, keep claims grounded, avoid fake links and hashtags, and return only the post copy.",
+        prompt: `Networks: ${(channels || []).join(", ")}\nRequest: ${request}`,
+        maxOutputTokens: 900,
+      });
+      text = result.text.trim();
+      if (text) break;
+      lastError = new Error("The model returned an empty draft.");
+    } catch (error) {
+      lastError = error;
+    }
+    console.warn("[social-draft] retry", {
+      requestId,
+      attempt,
+      modelId: resolved.modelId,
+    });
+  }
+
+  if (!text) {
+    console.error("[social-draft] failed", {
+      requestId,
+      modelId: resolved.modelId,
+      error: lastError instanceof Error ? lastError.message : String(lastError),
+    });
+    return Response.json(
+      {
+        error: `Cryzo could not create a draft. Try again and reference ${requestId} if it repeats.`,
+        requestId,
+      },
+      { status: 502 },
+    );
+  }
 
   await fetchMutation(
     api.billing.deductMessageCredits,
@@ -63,5 +95,6 @@ export async function POST(req: Request) {
     { token },
   );
 
-  return Response.json({ text: result.text });
+  return Response.json({ text, requestId });
 }
+

@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
+import Link from "next/link";
 import {
   CalendarDays,
   ChevronLeft,
@@ -15,6 +16,7 @@ import {
   X,
 } from "lucide-react";
 import { api } from "../../../../convex/_generated/api";
+import type { Id } from "../../../../convex/_generated/dataModel";
 import { useAuth } from "@/providers/AuthProvider";
 
 const CHANNELS = [
@@ -28,6 +30,29 @@ const CHANNELS = [
 ] as const;
 
 type ChannelId = (typeof CHANNELS)[number]["id"];
+type DeliveryStatus =
+  | "draft"
+  | "scheduled"
+  | "pending"
+  | "publishing"
+  | "published"
+  | "failed"
+  | "unknown";
+type SocialDelivery = {
+  channel: ChannelId;
+  status: DeliveryStatus;
+  error?: string;
+  remoteUrl?: string;
+};
+type SocialPost = {
+  _id: Id<"socialPosts">;
+  content: string;
+  channels: ChannelId[];
+  scheduledFor: number;
+  status: "draft" | "scheduled" | "publishing" | "published" | "failed";
+  error?: string;
+  deliveries?: SocialDelivery[];
+};
 
 function startOfWeek(date: Date) {
   const next = new Date(date);
@@ -44,8 +69,9 @@ function localInputValue(date: Date) {
 
 export default function SocialPage() {
   const { authToken } = useAuth();
-  const access = useQuery(api.social.getAccess);
-  const posts = useQuery(api.social.listPosts);
+  const [accessNow] = useState(() => Date.now());
+  const access = useQuery(api.social.getAccess, { now: accessNow });
+  const posts = useQuery(api.social.listPosts) as SocialPost[] | undefined;
   const createPost = useMutation(api.social.createPost);
   const publishNow = useMutation(api.social.publishNow);
   const removePost = useMutation(api.social.removePost);
@@ -54,7 +80,7 @@ export default function SocialPage() {
   const [weekAnchor, setWeekAnchor] = useState(() => new Date());
   const [composerOpen, setComposerOpen] = useState(false);
   const [content, setContent] = useState("");
-  const [channels, setChannels] = useState<ChannelId[]>(["x", "linkedin"]);
+  const [channels, setChannels] = useState<ChannelId[]>(["x"]);
   const [scheduledFor, setScheduledFor] = useState(() => {
     const next = new Date(Date.now() + 60 * 60 * 1000);
     next.setMinutes(0, 0, 0);
@@ -62,6 +88,9 @@ export default function SocialPage() {
   });
   const [mediaStorageIds, setMediaStorageIds] = useState<string[]>([]);
   const [mediaNames, setMediaNames] = useState<string[]>([]);
+  const [redditCommunity, setRedditCommunity] = useState("");
+  const [youtubeTitle, setYoutubeTitle] = useState("");
+  const [tiktokPrivacy, setTiktokPrivacy] = useState("PUBLIC_TO_EVERYONE");
   const [saving, setSaving] = useState(false);
   const [composerError, setComposerError] = useState<string | null>(null);
   const [aiPrompt, setAiPrompt] = useState("");
@@ -79,7 +108,7 @@ export default function SocialPage() {
   }, [weekAnchor]);
 
   const postsForDay = (date: Date) =>
-    (posts || []).filter((post: any) => {
+    (posts || []).filter((post) => {
       const scheduled = new Date(post.scheduledFor);
       return scheduled.toDateString() === date.toDateString();
     });
@@ -88,7 +117,9 @@ export default function SocialPage() {
     setChannels((current) =>
       current.includes(id)
         ? current.filter((channel) => channel !== id)
-        : [...current, id],
+        : access?.maxChannelsPerPost === 1
+          ? [id]
+          : [...current, id],
     );
   };
 
@@ -123,12 +154,19 @@ export default function SocialPage() {
         channels,
         scheduledFor: new Date(scheduledFor).getTime(),
         status,
-        mediaStorageIds: mediaStorageIds as any,
+        mediaStorageIds: mediaStorageIds as Id<"_storage">[],
+        platformOptions: {
+          redditCommunity: redditCommunity.trim() || undefined,
+          youtubeTitle: youtubeTitle.trim() || undefined,
+          tiktokPrivacy: channels.includes("tiktok") ? tiktokPrivacy : undefined,
+        },
       });
       setComposerOpen(false);
       setContent("");
       setMediaStorageIds([]);
       setMediaNames([]);
+      setRedditCommunity("");
+      setYoutubeTitle("");
     } catch (error) {
       setComposerError(error instanceof Error ? error.message : "Unable to save post");
     } finally {
@@ -178,9 +216,9 @@ export default function SocialPage() {
           <p className="mt-2 text-sm leading-6 text-zinc-400">
             Plan campaigns, create posts with AI, and publish across seven networks from one calendar.
           </p>
-          <a href="/chat/billing" className="mt-6 inline-flex rounded-xl bg-white px-5 py-3 text-sm font-semibold text-black">
+          <Link href="/chat/billing" className="mt-6 inline-flex rounded-xl bg-white px-5 py-3 text-sm font-semibold text-black">
             Upgrade to Starter
-          </a>
+          </Link>
         </div>
       </div>
     );
@@ -194,9 +232,15 @@ export default function SocialPage() {
           Social copilot
         </div>
         <h2 className="mt-5 text-2xl font-semibold leading-tight">Turn an idea into a week of posts.</h2>
-        <p className="mt-2 text-sm leading-6 text-zinc-500">
-          Cryzo writes the copy. You choose where and when it goes live.
-        </p>
+          <p className="mt-2 text-sm leading-6 text-zinc-500">
+            Cryzo writes the copy. Composio uses your connected accounts to publish it.
+          </p>
+          <Link
+            href="/chat/apps"
+            className="mt-3 inline-flex text-xs font-semibold text-[#ff7550] hover:text-[#ff9a7f]"
+          >
+            Connect or manage social accounts
+          </Link>
         <textarea
           value={aiPrompt}
           onChange={(event) => setAiPrompt(event.target.value)}
@@ -234,15 +278,27 @@ export default function SocialPage() {
         <header className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-800 px-5 py-4">
           <div>
             <h1 className="text-xl font-semibold">Social calendar</h1>
-            <p className="text-xs text-zinc-500">X, LinkedIn, Reddit, YouTube, TikTok, Instagram and Facebook</p>
+            <p className="text-xs text-zinc-500">
+              {access.monthlyPostLimit === null
+                ? "Starter: unlimited posts across connected networks"
+                : `Free: ${access.postsUsed}/${access.monthlyPostLimit} posts this month, one network per post`}
+            </p>
           </div>
-          <button
-            type="button"
-            onClick={() => setComposerOpen(true)}
-            className="rounded-xl bg-white px-4 py-2.5 text-sm font-semibold text-black"
-          >
-            Create post
-          </button>
+          <div className="flex items-center gap-2">
+            <Link
+              href="/chat/apps"
+              className="rounded-xl border border-zinc-700 px-4 py-2.5 text-sm font-semibold text-zinc-300"
+            >
+              Connections
+            </Link>
+            <button
+              type="button"
+              onClick={() => setComposerOpen(true)}
+              className="rounded-xl bg-white px-4 py-2.5 text-sm font-semibold text-black"
+            >
+              Create post
+            </button>
+          </div>
         </header>
 
         <div className="flex items-center justify-between border-b border-zinc-800 px-5 py-3">
@@ -274,7 +330,7 @@ export default function SocialPage() {
                   <p className="mt-1 text-lg font-semibold">{day.getDate()}</p>
                 </div>
                 <div className="space-y-2 p-2">
-                  {postsForDay(day).map((post: any) => (
+                  {postsForDay(day).map((post) => (
                     <article key={post._id} className="group rounded-xl border border-zinc-800 bg-zinc-950 p-3">
                       <div className="flex items-center justify-between gap-2">
                         <span className={`text-[10px] font-semibold uppercase ${post.status === "failed" ? "text-red-400" : post.status === "published" ? "text-emerald-400" : "text-[#ff7550]"}`}>
@@ -286,8 +342,26 @@ export default function SocialPage() {
                       </div>
                       <p className="mt-2 line-clamp-4 text-xs leading-5 text-zinc-300">{post.content}</p>
                       <div className="mt-3 flex flex-wrap gap-1">
-                        {post.channels.map((channel: ChannelId) => (
-                          <span key={channel} className="rounded bg-zinc-800 px-1.5 py-1 text-[9px] uppercase text-zinc-400">{channel}</span>
+                        {(post.deliveries?.length
+                          ? post.deliveries
+                          : post.channels.map((channel: ChannelId) => ({
+                              channel,
+                              status: post.status,
+                            }))
+                        ).map((delivery: SocialDelivery) => (
+                          <span
+                            key={delivery.channel}
+                            title={delivery.error || delivery.remoteUrl || delivery.status}
+                            className={`rounded px-1.5 py-1 text-[9px] uppercase ${
+                              delivery.status === "published"
+                                ? "bg-emerald-500/15 text-emerald-300"
+                                : delivery.status === "failed" || delivery.status === "unknown"
+                                  ? "bg-red-500/15 text-red-300"
+                                  : "bg-zinc-800 text-zinc-400"
+                            }`}
+                          >
+                            {delivery.channel}: {delivery.status}
+                          </span>
                         ))}
                       </div>
                       <p className="mt-3 flex items-center gap-1 text-[10px] text-zinc-600">
@@ -336,6 +410,11 @@ export default function SocialPage() {
                 );
               })}
             </div>
+            {access.maxChannelsPerPost === 1 && (
+              <p className="mt-3 text-xs text-zinc-500">
+                Free includes one connected social account and 10 posts per month. Starter unlocks multi-network publishing and unlimited posts.
+              </p>
+            )}
             <textarea
               value={content}
               onChange={(event) => setContent(event.target.value)}
@@ -348,6 +427,42 @@ export default function SocialPage() {
               <input type="file" accept="image/*,video/*" multiple className="hidden" onChange={(event) => void uploadMedia(event.target.files)} />
             </label>
             {mediaNames.length > 0 && <p className="mt-2 text-xs text-zinc-500">{mediaNames.join(", ")}</p>}
+            {channels.includes("reddit") && (
+              <div className="mt-4">
+                <label className="text-xs font-medium text-zinc-400">Reddit community</label>
+                <input
+                  value={redditCommunity}
+                  onChange={(event) => setRedditCommunity(event.target.value)}
+                  placeholder="e.g. smallbusiness"
+                  className="mt-2 h-11 w-full rounded-xl border border-zinc-700 bg-black px-3 text-sm outline-none focus:border-[#ff7550]"
+                />
+              </div>
+            )}
+            {channels.includes("youtube") && (
+              <div className="mt-4">
+                <label className="text-xs font-medium text-zinc-400">YouTube video title</label>
+                <input
+                  value={youtubeTitle}
+                  onChange={(event) => setYoutubeTitle(event.target.value)}
+                  placeholder="Video title"
+                  className="mt-2 h-11 w-full rounded-xl border border-zinc-700 bg-black px-3 text-sm outline-none focus:border-[#ff7550]"
+                />
+              </div>
+            )}
+            {channels.includes("tiktok") && (
+              <div className="mt-4">
+                <label className="text-xs font-medium text-zinc-400">TikTok privacy</label>
+                <select
+                  value={tiktokPrivacy}
+                  onChange={(event) => setTiktokPrivacy(event.target.value)}
+                  className="mt-2 h-11 w-full rounded-xl border border-zinc-700 bg-black px-3 text-sm outline-none focus:border-[#ff7550]"
+                >
+                  <option value="PUBLIC_TO_EVERYONE">Public</option>
+                  <option value="MUTUAL_FOLLOW_FRIENDS">Friends</option>
+                  <option value="SELF_ONLY">Only me</option>
+                </select>
+              </div>
+            )}
             <div className="mt-4">
               <label className="text-xs font-medium text-zinc-400">Publish time</label>
               <input type="datetime-local" value={scheduledFor} onChange={(event) => setScheduledFor(event.target.value)} className="mt-2 h-11 w-full rounded-xl border border-zinc-700 bg-black px-3 text-sm outline-none focus:border-[#ff7550]" />
@@ -368,3 +483,4 @@ export default function SocialPage() {
     </div>
   );
 }
+

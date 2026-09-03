@@ -239,13 +239,56 @@ export default defineSchema({
       v.literal("failed"),
     ),
     mediaStorageIds: v.array(v.id("_storage")),
+    platformOptions: v.optional(
+      v.object({
+        redditCommunity: v.optional(v.string()),
+        youtubeTitle: v.optional(v.string()),
+        tiktokPrivacy: v.optional(v.string()),
+      }),
+    ),
     error: v.optional(v.string()),
     publishedAt: v.optional(v.number()),
     createdAt: v.number(),
     updatedAt: v.number(),
   })
     .index("by_user_and_scheduled", ["userId", "scheduledFor"])
+    .index("by_user_and_created", ["userId", "createdAt"])
     .index("by_status_and_scheduled", ["status", "scheduledFor"]),
+
+  socialDeliveries: defineTable({
+    postId: v.id("socialPosts"),
+    userId: v.id("users"),
+    channel: v.union(
+      v.literal("x"),
+      v.literal("linkedin"),
+      v.literal("reddit"),
+      v.literal("youtube"),
+      v.literal("tiktok"),
+      v.literal("instagram"),
+      v.literal("facebook"),
+    ),
+    status: v.union(
+      v.literal("draft"),
+      v.literal("pending"),
+      v.literal("publishing"),
+      v.literal("published"),
+      v.literal("failed"),
+      v.literal("unknown"),
+    ),
+    idempotencyKey: v.string(),
+    attempts: v.number(),
+    toolSlug: v.optional(v.string()),
+    providerLogId: v.optional(v.string()),
+    remotePostId: v.optional(v.string()),
+    remoteUrl: v.optional(v.string()),
+    error: v.optional(v.string()),
+    startedAt: v.optional(v.number()),
+    completedAt: v.optional(v.number()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_post", ["postId"])
+    .index("by_user_and_status", ["userId", "status", "updatedAt"]),
 
   subscriptions: defineTable({
     userId: v.id("users"),
@@ -321,3 +364,4 @@ export default defineSchema({
     createdAt: v.number(),
   }).index("by_event", ["eventId"]),
 });
+
