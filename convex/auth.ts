@@ -8,6 +8,15 @@ export const { auth, signIn, signOut, store, isAuthenticated } = convexAuth({
       clientId: process.env.AUTH_GOOGLE_ID,
       clientSecret: process.env.AUTH_GOOGLE_SECRET,
     }),
-    Password,
+    Password({
+      profile(params) {
+        if (params.flow === "signUp") {
+          throw new Error(
+            "Email sign-up requires verification and is temporarily disabled. Continue with Google.",
+          );
+        }
+        return { email: String(params.email ?? "").trim().toLowerCase() };
+      },
+    }),
   ],
 });

@@ -12,7 +12,7 @@ function LoginContent() {
   const nextRoute = rawNextRoute?.startsWith("/") ? rawNextRoute : "/chat";
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [isSignUp, setIsSignUp] = useState(false);
+  const [isSignUp] = useState(false);
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
@@ -114,7 +114,7 @@ function LoginContent() {
             onChange={(e) => setPassword(e.target.value)}
             placeholder="Password"
             required
-            minLength={6}
+            minLength={8}
             className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-4 py-3 text-sm text-white placeholder-zinc-500 focus:border-zinc-500 focus:outline-none"
           />
           <button
@@ -131,13 +131,7 @@ function LoginContent() {
         )}
 
         <p className="text-center text-sm text-zinc-500">
-          {isSignUp ? "Already have an account?" : "Don't have an account?"}{" "}
-          <button
-            onClick={() => setIsSignUp(!isSignUp)}
-            className="text-white hover:underline"
-          >
-            {isSignUp ? "Sign In" : "Sign Up"}
-          </button>
+          New here? Continue with Google. Verified email sign-up is coming soon.
         </p>
       </div>
     </div>
