@@ -21,6 +21,7 @@ type Listener = (snapshot: StreamingRuntimeSnapshot) => void;
 type RuntimeState = StreamingRuntimeSnapshot & {
   listeners: Set<Listener>;
   processedActionsByMessage: Map<string, number>;
+  pendingActionsByMessage: Map<string, ArtifactAction[]>;
   queue: Promise<void>;
   initialized: boolean;
 };
@@ -51,6 +52,7 @@ function createState(): RuntimeState {
     error: null,
     listeners: new Set(),
     processedActionsByMessage: new Map(),
+    pendingActionsByMessage: new Map(),
     queue: Promise.resolve(),
     initialized: false,
   };
@@ -348,6 +350,42 @@ async function executeRemoteAction(
   }
 }
 
+async function executeRemoteActions(
+  conversationId: string,
+  state: RuntimeState,
+  actions: ArtifactAction[],
+) {
+  const fileActions = actions.filter((action) => action.type === "file");
+  const remainingActions = actions.filter((action) => action.type !== "file");
+
+  if (fileActions.length > 0) {
+    state.progress = state.previewUrl ? "ready" : "writing";
+    appendOutput(state, `Writing ${fileActions.length} completed files...\n`);
+    emit(state);
+
+    const validation = await callGuard({
+      operation: "actions",
+      conversationId,
+      actions: fileActions,
+    });
+    const safeFiles = validation.actions || fileActions;
+    if (validation.output) appendOutput(state, validation.output);
+    for (const action of safeFiles) updateFileMap(state, action);
+    emit(state);
+
+    const response = await callSandbox({
+      operation: "actions",
+      conversationId,
+      actions: safeFiles,
+    });
+    applyResponse(state, response);
+  }
+
+  for (const action of remainingActions) {
+    await executeRemoteAction(conversationId, state, action);
+  }
+}
+
 export async function saveStreamingRuntimeFile(
   conversationId: string,
   filePath: string,
@@ -432,13 +470,15 @@ export function processStreamingArtifactText(
 
   const newActions = actions.slice(processed);
   state.processedActionsByMessage.set(messageId, actions.length);
+  const pending = state.pendingActionsByMessage.get(messageId) || [];
+  state.pendingActionsByMessage.set(messageId, [...pending, ...newActions]);
 
-  for (const action of newActions) {
-    state.queue = state.queue
-      .then(() => executeRemoteAction(conversationId, state, action))
-      .catch((error) => setError(state, error));
-  }
-
+  for (const action of newActions) updateFileMap(state, action);
+  appendOutput(
+    state,
+    `Prepared ${newActions.length} action${newActions.length === 1 ? "" : "s"} from the model stream.\n`,
+  );
+  emit(state);
   return true;
 }
 
@@ -448,10 +488,16 @@ export function finishStreamingArtifactStream(
   failure?: string,
 ) {
   const state = getState(conversationId);
-  if (!state.processedActionsByMessage.has(messageId)) return;
+  const pending = state.pendingActionsByMessage.get(messageId) || [];
+  if (!state.processedActionsByMessage.has(messageId) && pending.length === 0) return;
+  state.pendingActionsByMessage.delete(messageId);
 
   state.queue = state.queue
-    .then(() => {
+    .then(async () => {
+      if (pending.length > 0) {
+        await executeRemoteActions(conversationId, state, pending);
+      }
+
       if (state.previewUrl) {
         state.active = true;
         state.progress = "ready";

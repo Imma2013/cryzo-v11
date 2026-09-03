@@ -586,7 +586,7 @@ async function restoreProject(sandbox: Sandbox, actions: ArtifactAction[]) {
 export async function POST(req: Request) {
   try {
     const body = (await req.json()) as {
-      operation?: "init" | "action" | "restore" | "status" | "build" | "restart" | "logs";
+      operation?: "init" | "action" | "actions" | "restore" | "status" | "build" | "restart" | "logs";
       conversationId?: string;
       action?: ArtifactAction;
       actions?: ArtifactAction[];
@@ -649,6 +649,25 @@ export async function POST(req: Request) {
     if (body.operation === "action" && body.action) {
       const result = await applyAction(sandbox, body.action);
       return Response.json({ sandboxName: sandbox.name, ...result });
+    }
+
+    if (body.operation === "actions") {
+      if (!Array.isArray(body.actions) || body.actions.length > 250) {
+        return Response.json({ error: "Invalid actions" }, { status: 400 });
+      }
+      const fileActions = body.actions.filter((action) => action.type === "file");
+      if (fileActions.length !== body.actions.length) {
+        return Response.json(
+          { error: "Batched actions may only contain files" },
+          { status: 400 },
+        );
+      }
+      await writeProjectFiles(sandbox, fileActions);
+      return Response.json({
+        sandboxName: sandbox.name,
+        progress: "writing",
+        output: `Wrote ${fileActions.length} files in one checkpoint.\n`,
+      });
     }
 
     if (body.operation === "build") {
