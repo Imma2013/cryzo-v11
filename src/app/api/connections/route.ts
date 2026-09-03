@@ -104,8 +104,7 @@ export async function GET(req: Request) {
             proxiedLogo(meta.logo ?? toolkit.logo) ?? fallbackLogo(domain),
           isConnected: requiresAuth
             ? toolkit.connection?.isActive ??
-              status === "ACTIVE" ||
-              status === "CONNECTED"
+              (status === "ACTIVE" || status === "CONNECTED")
             : true,
           connectedAccountId: connectedAccount?.id,
           available: toolkit.enabled ?? true,
