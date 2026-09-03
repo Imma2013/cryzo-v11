@@ -144,5 +144,6 @@ export async function resolveServerModel(request: ServerModelRequest) {
     billingTier: "byok" as const,
     usesCryzoCredits: false,
     creditMultiplier: 0,
+    minimumPlan: "free" as const,
   };
 }
