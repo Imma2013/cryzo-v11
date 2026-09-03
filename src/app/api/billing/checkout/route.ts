@@ -5,17 +5,22 @@ import {
   PLANS,
   type BillingCycle,
 } from "@/lib/stripe";
+import { requireRequestUserId } from "@/lib/server/request-user";
 
 export async function POST(req: Request) {
-  const { plan, userId, email, billingCycle } = (await req.json()) as {
+  const userId = await requireRequestUserId(req);
+  if (!userId) {
+    return Response.json({ error: "unauthorized" }, { status: 401 });
+  }
+
+  const { plan, email, billingCycle } = (await req.json()) as {
     plan?: string;
-    userId?: string;
     email?: string;
     billingCycle?: BillingCycle;
   };
 
   const cycle: BillingCycle = billingCycle === "yearly" ? "yearly" : "monthly";
-  if (!plan || !userId || !isPaidPlan(plan)) {
+  if (!plan || !isPaidPlan(plan)) {
     return Response.json({ error: "Invalid plan" }, { status: 400 });
   }
 

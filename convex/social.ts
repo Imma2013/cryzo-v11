@@ -34,17 +34,10 @@ async function currentUserId(ctx: { auth: MutationCtx["auth"] }) {
   return userId;
 }
 
-async function paidAccess(ctx: MutationCtx, userId: Id<"users">) {
-  const subscription = await ctx.db
-    .query("subscriptions")
-    .withIndex("by_user", (q) => q.eq("userId", userId))
-    .unique();
-  if (!subscription || subscription.plan === "free") return false;
-  return (
-    subscription.status === "active" ||
-    (subscription.status === "canceled" &&
-      subscription.currentPeriodEnd > Date.now())
-  );
+async function paidAccess(_ctx: MutationCtx, _userId: Id<"users">) {
+  // Social is free during the public beta. Keep this guard centralized so the
+  // Starter entitlement can be restored without touching every mutation.
+  return true;
 }
 
 export const getAccess = query({
@@ -60,14 +53,7 @@ export const getAccess = query({
       .query("subscriptions")
       .withIndex("by_user", (q) => q.eq("userId", userId))
       .unique();
-    const allowed = Boolean(
-      subscription &&
-        subscription.plan !== "free" &&
-        (subscription.status === "active" ||
-          (subscription.status === "canceled" &&
-            subscription.currentPeriodEnd > Date.now())),
-    );
-    return { allowed, plan: subscription?.plan ?? "free" };
+    return { allowed: true, plan: subscription?.plan ?? "free" };
   },
 });
 
@@ -102,7 +88,7 @@ export const generateUploadUrl = mutation({
   handler: async (ctx) => {
     const userId = await currentUserId(ctx);
     if (!(await paidAccess(ctx, userId))) {
-      throw new Error("Social Scheduling requires Starter or higher.");
+      throw new Error("Social Scheduling is unavailable.");
     }
     return await ctx.storage.generateUploadUrl();
   },
@@ -120,7 +106,7 @@ export const createPost = mutation({
   handler: async (ctx, args) => {
     const userId = await currentUserId(ctx);
     if (!(await paidAccess(ctx, userId))) {
-      throw new Error("Social Scheduling requires Starter or higher.");
+      throw new Error("Social Scheduling is unavailable.");
     }
     const content = args.content.trim();
     if (!content || content.length > 12000) throw new Error("Write a post before scheduling.");
@@ -155,7 +141,7 @@ export const publishNow = mutation({
   handler: async (ctx, args) => {
     const userId = await currentUserId(ctx);
     if (!(await paidAccess(ctx, userId))) {
-      throw new Error("Social Scheduling requires Starter or higher.");
+      throw new Error("Social Scheduling is unavailable.");
     }
     const post = await ctx.db.get(args.postId);
     if (!post || post.userId !== userId) throw new Error("Post not found.");

@@ -7,6 +7,24 @@ const MONTH = 30 * DAY;
 const YEAR = 365 * DAY;
 
 const FREE_DAILY_MESSAGE_CREDITS = 5;
+const INTERNAL_TESTER_CREDITS = 1_000_000_000;
+const INTERNAL_TESTER_FALLBACK_EMAIL = "lloyd.ebnchenge@gmail.com";
+
+async function isInternalTester(
+  ctx: QueryCtx | MutationCtx,
+  userId: Id<"users">,
+) {
+  const user = await ctx.db.get(userId);
+  const email = user?.email?.trim().toLowerCase();
+  if (!email) return false;
+
+  const configured = (process.env.INTERNAL_TESTER_EMAILS ?? "")
+    .split(",")
+    .map((value) => value.trim().toLowerCase())
+    .filter(Boolean);
+
+  return new Set([INTERNAL_TESTER_FALLBACK_EMAIL, ...configured]).has(email);
+}
 
 export const PLAN_LIMITS = {
   free: { message: 25, integration: 100 },
@@ -268,13 +286,37 @@ export const getSubscription = query({
   args: { userId: v.id("users") },
   handler: async (ctx, args) => {
     const sub = await findSubscription(ctx, args.userId);
-    return computeCredits(sub, Date.now());
+    const credits = computeCredits(sub, Date.now());
+    if (!(await isInternalTester(ctx, args.userId))) return credits;
+
+    return {
+      ...credits,
+      plan: "elite" as const,
+      status: "active" as const,
+      billingCycle: "monthly" as const,
+      messageMonthlyCredits: INTERNAL_TESTER_CREDITS,
+      messageCreditsUsed: 0,
+      messageCreditsRemaining: INTERNAL_TESTER_CREDITS,
+      integrationMonthlyCredits: INTERNAL_TESTER_CREDITS,
+      integrationCreditsUsed: 0,
+      integrationCreditsRemaining: INTERNAL_TESTER_CREDITS,
+      dailyCreditsUsed: 0,
+      dailyCreditsRemaining: INTERNAL_TESTER_CREDITS,
+      freeMonthlyCreditsUsed: 0,
+      freeMonthlyRemaining: INTERNAL_TESTER_CREDITS,
+      monthlyCredits: INTERNAL_TESTER_CREDITS,
+      creditsUsed: 0,
+      creditsRemaining: INTERNAL_TESTER_CREDITS,
+      billingCreditsTotal: INTERNAL_TESTER_CREDITS,
+      isInternalTester: true,
+    };
   },
 });
 
 export const hasMessageCredits = query({
   args: { userId: v.id("users"), amount: v.optional(v.number()) },
   handler: async (ctx, args) => {
+    if (await isInternalTester(ctx, args.userId)) return true;
     const sub = await findSubscription(ctx, args.userId);
     const amount = Math.max(0, args.amount ?? 1);
     return computeCredits(sub, Date.now()).messageCreditsRemaining >= amount;
@@ -284,6 +326,7 @@ export const hasMessageCredits = query({
 export const hasIntegrationCredits = query({
   args: { userId: v.id("users"), amount: v.optional(v.number()) },
   handler: async (ctx, args) => {
+    if (await isInternalTester(ctx, args.userId)) return true;
     const sub = await findSubscription(ctx, args.userId);
     const amount = Math.max(0, args.amount ?? 1);
     return computeCredits(sub, Date.now()).integrationCreditsRemaining >= amount;
@@ -294,6 +337,7 @@ export const hasIntegrationCredits = query({
 export const hasCredits = query({
   args: { userId: v.id("users"), amount: v.optional(v.number()) },
   handler: async (ctx, args) => {
+    if (await isInternalTester(ctx, args.userId)) return true;
     const sub = await findSubscription(ctx, args.userId);
     const amount = Math.max(0, args.amount ?? 1);
     return computeCredits(sub, Date.now()).messageCreditsRemaining >= amount;
@@ -322,6 +366,9 @@ type MessageDeductionArgs = {
 };
 
 async function deductMessage(ctx: MutationCtx, args: MessageDeductionArgs) {
+  if (await isInternalTester(ctx, args.userId)) {
+    return { success: true, remaining: INTERNAL_TESTER_CREDITS };
+  }
   const now = Date.now();
   const amount = Math.max(0, args.amount);
   const sub = await ensureSubscription(ctx, args.userId, now);
@@ -429,6 +476,9 @@ export const deductIntegrationCredits = mutation({
     toolName: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    if (await isInternalTester(ctx, args.userId)) {
+      return { success: true, remaining: INTERNAL_TESTER_CREDITS };
+    }
     const now = Date.now();
     const amount = Math.max(0, args.amount);
     const sub = await ensureSubscription(ctx, args.userId, now);

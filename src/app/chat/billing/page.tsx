@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useQuery } from "convex/react";
+import { useAuthToken } from "@convex-dev/auth/react";
 import { api } from "../../../../convex/_generated/api";
 import { useAuth } from "@/providers/AuthProvider";
 import {
@@ -154,7 +155,8 @@ function planLabel(plan: string) {
 
 export default function BillingPage() {
   const { userId, user } = useAuth();
-  const [cycle, setCycle] = useState<BillingCycle>("yearly");
+  const authToken = useAuthToken();
+  const [cycle, setCycle] = useState<BillingCycle>("monthly");
   const [topUpOpen, setTopUpOpen] = useState(false);
   const [selectedTopUp, setSelectedTopUp] = useState(100);
   const [loadingAction, setLoadingAction] = useState<string | null>(null);
@@ -194,7 +196,10 @@ export default function BillingPage() {
     try {
       const res = await fetch("/api/billing/checkout", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+        },
         body: JSON.stringify({
           plan: targetPlan,
           billingCycle: cycle,
@@ -219,7 +224,10 @@ export default function BillingPage() {
     try {
       const res = await fetch("/api/billing/topup", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+        },
         body: JSON.stringify({ userId, credits: selectedTopUp }),
       });
       const data = await res.json();
@@ -239,7 +247,10 @@ export default function BillingPage() {
     try {
       const res = await fetch("/api/billing/portal", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+        },
         body: JSON.stringify({ userId }),
       });
       const data = await res.json();
@@ -335,11 +346,11 @@ export default function BillingPage() {
               <h2 className="mt-1 text-2xl font-semibold">Choose managed capacity</h2>
             </div>
             <div className="inline-flex w-fit rounded-xl border border-zinc-800 bg-zinc-950 p-1">
-              <button type="button" onClick={() => setCycle("yearly")} className={`rounded-lg px-4 py-2 text-sm font-medium ${cycle === "yearly" ? "bg-white text-black" : "text-zinc-500 hover:text-white"}`}>
-                Yearly <span className="ml-1 text-[11px] opacity-60">save 20%</span>
-              </button>
               <button type="button" onClick={() => setCycle("monthly")} className={`rounded-lg px-4 py-2 text-sm font-medium ${cycle === "monthly" ? "bg-white text-black" : "text-zinc-500 hover:text-white"}`}>
                 Monthly
+              </button>
+              <button type="button" onClick={() => setCycle("yearly")} className={`rounded-lg px-4 py-2 text-sm font-medium ${cycle === "yearly" ? "bg-white text-black" : "text-zinc-500 hover:text-white"}`}>
+                Yearly <span className="ml-1 text-[11px] opacity-60">save 20%</span>
               </button>
             </div>
           </div>

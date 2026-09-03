@@ -25,12 +25,6 @@ export async function POST(req: Request) {
     { userId: user._id },
     { token },
   );
-  if (subscription.plan === "free") {
-    return Response.json(
-      { error: "Social AI requires Starter or higher." },
-      { status: 402 },
-    );
-  }
   if (subscription.messageCreditsRemaining < 1) {
     return Response.json({ error: "no_message_credits" }, { status: 402 });
   }

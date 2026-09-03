@@ -547,6 +547,8 @@ export function ChatArea({
 
   const isLoading =
     status === "streaming" || status === "submitted" || localLoading;
+  const errorText = localError || error?.message || "";
+  const isCreditError = /no_(message_)?credits|402/i.test(errorText);
   const initialMessageSentRef = useRef(false);
 
   const stopAll = useCallback(() => {
@@ -722,18 +724,27 @@ export function ChatArea({
               )}
 
               {(error || localError) &&
-                (error?.message?.includes("no_credits") || error?.message?.includes("402") ? (
-                  <div className="rounded-xl border border-yellow-800 bg-yellow-900/20 px-4 py-3 text-sm text-yellow-300">
-                    <p className="font-medium">Out of credits</p>
-                    <p className="mt-1 text-yellow-400/80">
-                      You&apos;ve used all your available credits.
-                    </p>
-                    <a
-                      href="/chat/billing"
-                      className="mt-2 inline-block rounded bg-white px-3 py-1.5 text-xs font-medium text-black hover:bg-zinc-200"
-                    >
-                      View Plans & Top Up
-                    </a>
+                (isCreditError ? (
+                  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm">
+                    <div role="dialog" aria-modal="true" aria-labelledby="credit-limit-title" className="w-full max-w-lg rounded-2xl border border-zinc-700 bg-zinc-950 p-6 shadow-2xl">
+                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">Monthly plans</p>
+                      <h2 id="credit-limit-title" className="mt-2 text-2xl font-semibold text-white">Keep building with Cryzo</h2>
+                      <p className="mt-2 text-sm leading-6 text-zinc-400">
+                        Your included managed-model credits are used up. BYOK remains free, or upgrade for more monthly capacity.
+                      </p>
+                      <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                        <a href="/chat/billing?cycle=monthly" className="rounded-xl border border-zinc-700 bg-black p-4 transition hover:border-zinc-500">
+                          <span className="text-sm font-semibold text-white">Starter</span>
+                          <span className="mt-1 block text-2xl font-semibold text-white">$20<span className="text-sm font-normal text-zinc-500">/month</span></span>
+                          <span className="mt-2 block text-xs leading-5 text-zinc-400">100 message credits and 2,000 integration credits.</span>
+                        </a>
+                        <a href="/chat/billing?cycle=monthly" className="rounded-xl border border-zinc-700 bg-white p-4 text-black transition hover:bg-zinc-200">
+                          <span className="text-sm font-semibold">View all plans</span>
+                          <span className="mt-1 block text-2xl font-semibold">Monthly billing</span>
+                          <span className="mt-2 block text-xs leading-5 text-zinc-600">Compare capacity or add a message-credit top-up.</span>
+                        </a>
+                      </div>
+                    </div>
                   </div>
                 ) : (
                   <div className="rounded-xl border border-red-800 bg-red-900/20 px-4 py-3 text-sm text-red-300">
