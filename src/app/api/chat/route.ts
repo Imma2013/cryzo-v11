@@ -232,6 +232,21 @@ export async function POST(req: Request) {
       authToken,
     });
 
+    if (resolved.minimumPlan === "starter" && userId) {
+      const subscription = await convex.query(api.billing.getSubscription, {
+        userId: userId as any,
+      });
+      if (subscription.plan === "free") {
+        return Response.json(
+          {
+            error: "starter_required",
+            modelId: resolved.modelId,
+          },
+          { status: 402 },
+        );
+      }
+    }
+
     const baseMessageCharge = resolved.usesCryzoCredits
       ? classifyCreditCost({
           text: lastUserText,
