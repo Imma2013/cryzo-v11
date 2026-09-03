@@ -194,6 +194,17 @@ export default defineSchema({
     .index("by_user_conversation", ["userId", "conversationId", "updatedAt"])
     .index("by_build_id", ["buildId"]),
 
+  mcpServers: defineTable({
+    userId: v.id("users"),
+    name: v.string(),
+    url: v.string(),
+    transport: v.literal("http"),
+    authType: v.literal("none"),
+    enabled: v.boolean(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index("by_user", ["userId", "updatedAt"]),
+
   providerSecrets: defineTable({
     userId: v.id("users"),
     providerId: v.string(),

@@ -7,6 +7,7 @@ import {
   Database,
   ExternalLink,
   Loader2,
+  Network,
   Rocket,
   Save,
   Search,
@@ -312,6 +313,22 @@ export default function AppsPage() {
         <p className="mt-1 text-sm text-zinc-400">
           Connect developer infrastructure and apps your Cryzo agent can use.
         </p>
+
+        <section className="mt-7">
+          <a href="/chat/apps/mcp" className="group flex items-center gap-4 rounded-2xl border border-zinc-800 bg-zinc-950 p-5 transition hover:border-zinc-600">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-zinc-800 bg-black text-zinc-200">
+              <Network size={20} />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="font-semibold text-white">Connectors (MCP)</h2>
+                <span className="rounded-full border border-zinc-700 px-2 py-0.5 text-[10px] text-zinc-400">New</span>
+              </div>
+              <p className="mt-1 text-xs leading-5 text-zinc-500">Connect any remote MCP server with a custom URL.</p>
+            </div>
+            <span className="text-sm text-zinc-500 transition group-hover:text-white">Open</span>
+          </a>
+        </section>
 
         <section className="mt-7">
           <div className="mb-3">

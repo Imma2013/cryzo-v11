@@ -29,7 +29,7 @@ export default function ChatLayout({ children }: { children: React.ReactNode }) 
   const section =
     pathname === "/chat/social"
       ? "Social"
-      : pathname === "/chat/apps"
+      : pathname.startsWith("/chat/apps")
         ? "Apps"
       : pathname === "/chat/billing"
         ? "Billing"
@@ -39,7 +39,7 @@ export default function ChatLayout({ children }: { children: React.ReactNode }) 
   const isConversationPage =
     /^\/chat\/[^/]+$/.test(pathname) &&
     pathname !== "/chat/social" &&
-    pathname !== "/chat/apps" &&
+    !pathname.startsWith("/chat/apps") &&
     pathname !== "/chat/billing" &&
     pathname !== "/chat/cloud";
 
