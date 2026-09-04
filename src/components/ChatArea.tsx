@@ -108,9 +108,8 @@ export function ChatArea({
     onData: part => {
       if (part.type !== "data-generation") return;
       const data = part.data as { status?: string; actualModelName?: string; fallbackUsed?: boolean };
-      if (data.status === "retrying") setGenerationStatus("The model did not respond. Trying a healthy model...");
-      else if (data.actualModelName) setGenerationStatus(data.fallbackUsed ? "Using " + data.actualModelName + " as a fallback." : data.actualModelName);
-      else setGenerationStatus("Connecting to the model...");
+      if (data.status === "retrying") setGenerationStatus("Retrying the same model...");
+      else setGenerationStatus("Working...");
     },
     onFinish: ({ message, isAbort, isError }) => {
       if (!isAbort && !isError && !message.parts.some(part => part.type === "text" && part.text.trim())) {
@@ -238,6 +237,7 @@ export function ChatArea({
       .reverse()
       .find((message) => message.role === "assistant");
     if (!latestAssistant) return;
+    if (latestAssistant.parts.some(part => part.type === "data-generation" && (part.data as { intent?: string }).intent === "discuss")) return;
 
     if (status === "streaming" || status === "submitted" || localLoading) {
       liveMessageIdsRef.current.add(latestAssistant.id);
@@ -294,6 +294,7 @@ export function ChatArea({
   useEffect(() => {
     for (const message of messages) {
       if (message.role !== "assistant") continue;
+      if (message.parts.some(part => part.type === "data-generation" && (part.data as { intent?: string }).intent === "discuss")) continue;
 
       for (const part of message.parts ?? []) {
         if (part.type !== "text") continue;
@@ -524,7 +525,7 @@ export function ChatArea({
       }
       if (!authToken) { setLocalError("Your sign-in session is still loading. Please try again."); return; }
       setLocalError(null);
-      setGenerationStatus("Connecting to the model...");
+      setGenerationStatus("Working...");
 
       const modelApiKey =
         selection.credentialMode === "device"
@@ -646,7 +647,7 @@ export function ChatArea({
                       }`}
                     >
                       {m.role === "assistant" && m.id === messages[messages.length - 1]?.id && isLoading && !m.parts?.some(part => part.type === "text" && part.text.trim()) && (
-                        <p role="status" className="text-zinc-400">{generationStatus || "Connecting to the model..."}</p>
+                        <p role="status" className="text-xs text-zinc-500 animate-pulse">{generationStatus || "Working..."}</p>
                       )}
                       {m.parts?.map((part, i) => {
                         if (part.type === "data-generation") {
@@ -750,8 +751,8 @@ export function ChatArea({
 
               {isLoading && messages[messages.length - 1]?.role === "user" && (
                 <div className="flex gap-3">
-                  <div className="py-1 text-[15px] leading-7 text-zinc-400 sm:rounded-lg sm:bg-zinc-800 sm:px-4 sm:py-3 sm:text-sm sm:leading-normal">
-                    {generationStatus || "Connecting to the model..."}
+                  <div role="status" className="py-1 text-xs text-zinc-500 animate-pulse">
+                    {generationStatus || "Working..."}
                   </div>
                 </div>
               )}

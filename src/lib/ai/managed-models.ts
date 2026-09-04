@@ -16,6 +16,7 @@ const seeds = [
   ["cryzo/openai-gpt-5.6-sol", "GPT-5.6 Sol", "openai/gpt-5.6-sol"],
   ["cryzo/openai-gpt-5.6-terra", "GPT-5.6 Terra", "openai/gpt-5.6-terra"],
   ["cryzo/google-gemini-3.8-flash", "Gemini 3.8 Flash", "google/gemini-3.8-flash"],
+  ["cryzo/google-gemini-3.1-pro-preview", "Gemini 3.1 Pro Preview", "google/gemini-3.1-pro-preview"],
   ["cryzo/xai-grok-4.6", "Grok 4.6", "x-ai/grok-4.6"],
   ["cryzo/moonshot-kimi-k3", "Kimi K3", "moonshotai/kimi-k3"],
   ["cryzo/anthropic-claude-sonnet-5", "Claude Sonnet 5", "anthropic/claude-sonnet-5"],
@@ -38,6 +39,9 @@ export function managedDefinition(upstreamModel: string, name?: string): Managed
 }
 
 export const CRYZO_MANAGED_MODELS = seeds.map(([, name, upstream]) => managedDefinition(upstream, name));
+// Legacy selections remain resolvable, but are not advertised as new managed choices.
+export const MANAGED_PICKER_MODELS = CRYZO_MANAGED_MODELS.filter(model =>
+  !["minimax/minimax-m3", "moonshotai/kimi-k3"].includes(model.upstreamModel));
 export const DEFAULT_MANAGED_MODEL_ID = "cryzo/ling-3-flash-free";
 export function normalizeManagedModelId(modelId?: string | null) {
   const aliases: Record<string, string> = { "cryzo/kimi-k3": "cryzo/moonshot-kimi-k3" };

@@ -6,6 +6,7 @@ const mock = vi.hoisted(() => ({
   settlements: [] as Array<{ success: boolean; costMicros: number }>,
   usedModels: [] as string[],
   duplicate: false,
+  cloudInitializations: 0,
 }));
 vi.mock("convex/browser", () => ({
   ConvexHttpClient: class {
@@ -22,7 +23,8 @@ vi.mock("convex/browser", () => ({
       const name = getFunctionName(ref as never);
       if (name === "aiUsage:settle") mock.settlements.push(args as never);
       if (name === "aiUsage:reserve" && mock.duplicate) throw new Error("request_already_completed");
-      return name === "cloudAdmin:ensureForConversation" ? { appId: "app" } : "run";
+      if (name === "cloudAdmin:ensureForConversation") { mock.cloudInitializations++; return { appId: "app" }; }
+      return "run";
     }
   },
 }));
@@ -71,7 +73,7 @@ vi.mock("ai", async importOriginal => {
 beforeEach(() => {
   vi.stubEnv("NEXT_PUBLIC_CONVEX_URL", "https://test.convex.cloud");
   vi.stubEnv("CRYZO_INTERNAL_API_SECRET", "test");
-  mock.responses.length = 0; mock.settlements.length = 0; mock.usedModels.length = 0; mock.duplicate = false;
+  mock.responses.length = 0; mock.settlements.length = 0; mock.usedModels.length = 0; mock.duplicate = false; mock.cloudInitializations = 0;
 });
 afterEach(() => vi.unstubAllEnvs());
 async function call(signal?: AbortSignal) {
@@ -83,7 +85,19 @@ async function call(signal?: AbortSignal) {
     }),
   }));
 }
+async function hello() {
+  const { POST } = await import("../src/app/api/chat/route");
+  return POST(new Request("http://localhost/api/chat", { method: "POST", body: JSON.stringify({
+    authToken: "test", conversationId: "project", modelProvider: "cryzo", modelId: "requested", chatMode: "build",
+    messages: [{ id: "hello", role: "user", parts: [{ type: "text", text: "hello" }] }],
+  }) }));
+}
 describe("chat stream lifecycle", () => {
+  it("answers a greeting without initializing a build", async () => {
+    mock.responses.push({ text: "Hello! How can I help?" });
+    expect(await (await hello()).text()).toContain("Hello!");
+    expect(mock.cloudInitializations).toBe(0);
+  });
   it("streams text and charges only the reported successful cost", async () => {
     mock.responses.push({ text: "Hello" });
     const body = await (await call()).text();
@@ -96,12 +110,12 @@ describe("chat stream lifecycle", () => {
     expect(await (await call()).text()).toContain("The answer");
     expect(mock.settlements[0].success).toBe(true);
   });
-  it("retries once, falls back, and discloses the actual model", async () => {
+  it("retries once on the same model and never falls back", async () => {
     mock.responses.push({ error: "429 rate limited" }, { error: "503 unavailable" }, { text: "Fallback answer" });
     const body = await (await call()).text();
-    expect(mock.usedModels).toEqual(["requested", "requested", "fallback"]);
-    expect(body).toContain('"actualModelId":"fallback"');
-    expect(body).toContain('"fallbackUsed":true');
+    expect(mock.usedModels).toEqual(["requested", "requested"]);
+    expect(body).toContain('"type":"error"');
+    expect(body).not.toContain('"fallbackUsed":true');
   });
   it("never finishes an empty answer as success or charges for it", async () => {
     mock.responses.push({}, {}, {});

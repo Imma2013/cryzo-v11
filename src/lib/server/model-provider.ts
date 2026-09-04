@@ -1,5 +1,8 @@
 import { reasoningConfig } from "@/lib/ai/reasoning-config";
 import { createOpenAI } from "@ai-sdk/openai";
+import { createAnthropic } from "@ai-sdk/anthropic";
+import { createGoogleGenerativeAI } from "@ai-sdk/google";
+import { createXai } from "@ai-sdk/xai";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { getProvider } from "@/lib/ai/models";
 import { getManagedModel } from "@/lib/ai/managed-models";
@@ -80,6 +83,9 @@ export async function resolveServerModel(request: ServerModelRequest) {
   }
 
   if (providerId === "cryzo") {
+    if (request.modelApiKey || (request.credentialMode && request.credentialMode !== "cryzo")) {
+      throw new Error("Choose OpenRouter and apply your key to use BYOK. A personal key cannot be used with an included selection.");
+    }
     return resolveManagedCryzoModel(requestedModel);
   }
 
@@ -116,6 +122,13 @@ export async function resolveServerModel(request: ServerModelRequest) {
     throw new Error(`Choose a ${definition.name} model`);
   }
 
+  if (apiKey.startsWith("sk-or-") && providerId !== "openrouter") {
+    throw new Error("This is an OpenRouter key. Select OpenRouter, not a direct provider.");
+  }
+  if (providerId === "openrouter" && baseURL.replace(/\/$/, "") !== PROVIDER_BASE_URLS.openrouter) {
+    throw new Error("OpenRouter keys must use https://openrouter.ai/api/v1.");
+  }
+
   const provider = createOpenAI({
     baseURL,
     apiKey: apiKey || "not-required",
@@ -129,7 +142,15 @@ export async function resolveServerModel(request: ServerModelRequest) {
   });
 
   return {
-    model: provider.chat(requestedModel),
+    model: providerId === "openrouter"
+      ? createOpenRouter({ apiKey, headers: cryzoHeaders() }).chat(requestedModel, {
+          usage: { include: true }, extraBody: { provider: { allow_fallbacks: true } },
+        })
+      : providerId === "anthropic" ? createAnthropic({ apiKey, baseURL })(requestedModel)
+      : providerId === "google" ? createGoogleGenerativeAI({ apiKey })(requestedModel)
+      : providerId === "xai" ? createXai({ apiKey, baseURL })(requestedModel)
+      : providerId === "openai" ? provider.responses(requestedModel)
+      : provider.chat(requestedModel),
     providerId,
     modelId: requestedModel,
     upstreamModelId: requestedModel,

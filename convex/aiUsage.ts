@@ -1,6 +1,6 @@
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { v } from "convex/values";
-import { mutation, query, internalMutation, type MutationCtx, type QueryCtx } from "./_generated/server";
+import { mutation, query, internalMutation, internalQuery, internalAction, type MutationCtx, type QueryCtx } from "./_generated/server";
 import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 
@@ -80,7 +80,7 @@ export const reserve = mutation({
 
 async function settleRun(ctx: MutationCtx, runId: Id<"aiRuns">, success: boolean, costMicros: number, detail?: { actualModel?: string; generationId?: string; telemetry?: unknown }) {
   const run = await ctx.db.get(runId);
-  if (!run || run.status !== "running") return null;
+  if (!run || (run.status !== "running" && !run.pendingCost)) return null;
   const meter = await ctx.db.query("aiUsageMeters").withIndex("by_user_period", q => q.eq("userId", run.userId).eq("period", run.period)).unique();
   // Provider costs can exceed an estimate; Cryzo absorbs any amount beyond the reserved ceiling.
   const cost = success ? Math.min(costMicros, run.reservedMicros) : 0;
@@ -88,7 +88,7 @@ async function settleRun(ctx: MutationCtx, runId: Id<"aiRuns">, success: boolean
   const monthlyRemaining = Math.max(0, access.allowance - ((meter?.spentMicros ?? 0) - (meter?.topUpSpentMicros ?? 0)));
   const topUpCost = Math.min(access.topUp, Math.max(0, cost - monthlyRemaining));
   if (topUpCost && access.sub) await ctx.db.patch(access.sub._id, { managedTopUpConsumedMicros: (access.sub.managedTopUpConsumedMicros ?? 0) + topUpCost });
-  await ctx.db.patch(run._id, { status: success ? "completed" : "failed", costMicros: cost, ...detail });
+  await ctx.db.patch(run._id, { status: success ? "completed" : "failed", pendingCost: false, costMicros: cost, ...detail });
   if (meter) await ctx.db.patch(meter._id, {
     spentMicros: meter.spentMicros + cost, reservedMicros: Math.max(0, meter.reservedMicros - run.reservedMicros),
     topUpSpentMicros: (meter.topUpSpentMicros ?? 0) + topUpCost,
@@ -133,6 +133,62 @@ export const expire = internalMutation({
   args: { runId: v.id("aiRuns") }, returns: v.null(),
   handler: async (ctx, args) => {
     const run = await ctx.db.get(args.runId);
-    return run && run.expiresAt <= Date.now() ? settleRun(ctx, run._id, false, 0) : null;
+    return run && run.expiresAt <= Date.now() ? settleRun(ctx, run._id, Boolean(run.pendingCost), 0) : null;
+  },
+});
+
+export const deferCost = mutation({
+  args: { serviceKey: v.string(), runId: v.id("aiRuns"), generationIds: v.array(v.string()), actualModel: v.string(), telemetry: v.any() },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    if (!process.env.CRYZO_INTERNAL_API_SECRET || args.serviceKey !== process.env.CRYZO_INTERNAL_API_SECRET) throw new Error("Unauthorized.");
+    const run = await ctx.db.get(args.runId);
+    if (!run || run.status !== "running") return null;
+    // Keep the reservation, but finish the answer and block duplicate replay.
+    await ctx.db.patch(run._id, { status: "completed", pendingCost: true, generationIds: args.generationIds,
+      actualModel: args.actualModel, telemetry: args.telemetry });
+    await ctx.scheduler.runAfter(1000, internal.aiUsage.reconcileCost, { runId: run._id, attempt: 0 });
+    return null;
+  },
+});
+export const pendingReceipt = internalQuery({
+  args: { runId: v.id("aiRuns") }, returns: v.union(v.null(), v.object({ generationIds: v.array(v.string()) })),
+  handler: async (ctx, args) => {
+    const run = await ctx.db.get(args.runId);
+    return run?.pendingCost ? { generationIds: run.generationIds ?? [] } : null;
+  },
+});
+export const completeReceipt = internalMutation({
+  args: { runId: v.id("aiRuns"), costMicros: v.number() }, returns: v.null(),
+  handler: async (ctx, args) => {
+    const run = await ctx.db.get(args.runId);
+    if (!run?.pendingCost) return null;
+    return settleRun(ctx, run._id, true, args.costMicros);
+  },
+});
+export const reconcileCost = internalAction({
+  args: { runId: v.id("aiRuns"), attempt: v.number() }, returns: v.null(),
+  handler: async (ctx, args) => {
+    const receipt = await ctx.runQuery(internal.aiUsage.pendingReceipt, { runId: args.runId });
+    if (!receipt) return null;
+    try {
+      if (!receipt.generationIds.length || !process.env.OPENROUTER_API_KEY) throw new Error("Receipt unavailable.");
+      let cost = 0;
+      for (const id of receipt.generationIds) {
+        const response = await fetch("https://openrouter.ai/api/v1/generation?id=" + encodeURIComponent(id), {
+          headers: { Authorization: "Bearer " + process.env.OPENROUTER_API_KEY }, signal: AbortSignal.timeout(10000),
+        });
+        if (!response.ok) throw new Error("Receipt unavailable.");
+        const body = await response.json();
+        const value = body.data?.total_cost;
+        if (typeof value !== "number" || !Number.isFinite(value) || value < 0) throw new Error("Invalid receipt.");
+        cost += value;
+      }
+      await ctx.runMutation(internal.aiUsage.completeReceipt, { runId: args.runId, costMicros: Math.ceil(cost * 1_000_000) });
+    } catch {
+      if (args.attempt < 4) await ctx.scheduler.runAfter(15000 * (args.attempt + 1), internal.aiUsage.reconcileCost, { ...args, attempt: args.attempt + 1 });
+      else await ctx.runMutation(internal.aiUsage.completeReceipt, { runId: args.runId, costMicros: 0 });
+    }
+    return null;
   },
 });

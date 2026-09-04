@@ -1,8 +1,6 @@
 import type { ModelReasoning } from "@openrouter/sdk/models";
 import { OpenRouter } from "@openrouter/sdk";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
-import { managedDefinition, CRYZO_MANAGED_MODELS } from "@/lib/ai/managed-models";
+import { managedDefinition, CRYZO_MANAGED_MODELS, MANAGED_PICKER_MODELS } from "@/lib/ai/managed-models";
 
 export function openRouterClient() {
   const apiKey = process.env.OPENROUTER_API_KEY?.trim();
@@ -17,20 +15,11 @@ export type ManagedCatalogModel = ReturnType<typeof managedDefinition> & {
 let cached: { at: number; models: ManagedCatalogModel[] } | undefined;
 let pending: Promise<ManagedCatalogModel[]> | undefined;
 const unhealthy = new Map<string, number>();
-let verified: Record<string, { status: string }> | undefined;
-function deploymentVerified(upstream: string) {
-  if (!process.env.VERCEL) return true;
-  if (!verified) {
-    try { verified = JSON.parse(readFileSync(join(process.cwd(), "managed-model-smoke.json"), "utf8")).models; }
-    catch { return false; }
-  }
-  return verified?.[upstream]?.status === "passed";
-}
 export function markModelUnhealthy(id: string) { unhealthy.set(id, Date.now() + 120_000); }
 export function modelHealthy(id: string) { return (unhealthy.get(id) ?? 0) < Date.now(); }
 
 export async function managedCatalog(): Promise<ManagedCatalogModel[]> {
-  if (cached && Date.now() - cached.at < 300_000) return cached.models.map(model => ({ ...model, available: deploymentVerified(model.upstreamModel) && modelHealthy(model.id) }));
+  if (cached && Date.now() - cached.at < 300_000) return cached.models;
   if (pending) return pending;
   pending = (async () => {
     const pages = await openRouterClient().models.list({ limit: 500, outputModalities: "text" }, { timeoutMs: 15_000 });
@@ -51,7 +40,7 @@ export async function managedCatalog(): Promise<ManagedCatalogModel[]> {
           toolCall: model.supportedParameters.includes("tools"), multimodal: model.architecture.inputModalities.includes("image"),
           attachments: model.architecture.inputModalities.includes("image"),
           context: model.contextLength ?? 16_000, output: model.topProvider.maxCompletionTokens ?? 8192,
-          inputCost, outputCost, requestCost, available: deploymentVerified(model.id) && modelHealthy(definition.id) });
+          inputCost, outputCost, requestCost, available: true });
       }
     }
     if (!models.length) throw new Error("The managed model catalog is temporarily unavailable.");
@@ -67,11 +56,13 @@ export async function managedCandidates(id: string, tools: boolean, images: bool
   if (!requested) throw new Error("This model is unavailable. Choose another model.");
   if (tools && !requested.toolCall) throw new Error("This model does not support connected actions.");
   if (images && !requested.attachments) throw new Error("This model cannot read images. Choose a vision model.");
-  const alternatives = models.filter(model => model.id !== id && model.tier === requested.tier &&
-    model.available && modelHealthy(model.id) && (!tools || model.toolCall) && (!images || model.attachments) &&
-    (requested.tier === "free" || model.outputCost <= Math.max(requested.outputCost * 1.5, 0.000003)))
-    .sort((a, b) => a.outputCost - b.outputCost);
-  const candidates = [...(requested.available ? [requested] : []), ...alternatives.slice(0, 2)];
-  if (!candidates.length) throw new Error("No healthy model in this tier is currently available. Retry shortly or use your own key.");
-  return candidates;
+  return [requested];
+}
+
+export async function managedPickerCatalog() {
+  const live = await managedCatalog();
+  return MANAGED_PICKER_MODELS.flatMap(seed => {
+    const model = live.find(item => item.upstreamModel === seed.upstreamModel);
+    return model ? [model] : [];
+  });
 }

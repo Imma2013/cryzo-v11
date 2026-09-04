@@ -102,6 +102,8 @@ export default function ProjectMarketing({ conversationId }: { conversationId: I
   const [aiModel, setAiModel] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
+  const [agentHistory, setAgentHistory] = useState<{ role: "user" | "assistant"; content: string }[]>([]);
+  const [confirmed, setConfirmed] = useState(false);
 
   const week = useMemo(() => {
     const first = startOfWeek(weekAnchor);
@@ -119,6 +121,7 @@ export default function ProjectMarketing({ conversationId }: { conversationId: I
     });
 
   const toggleChannel = (id: ChannelId) => {
+    setConfirmed(false);
     setChannels((current) =>
       current.includes(id)
         ? current.filter((channel) => channel !== id)
@@ -131,15 +134,19 @@ export default function ProjectMarketing({ conversationId }: { conversationId: I
   const uploadMedia = async (files: FileList | null) => {
     if (!files?.length) return;
     setComposerError(null);
+    setConfirmed(false);
     try {
       for (const file of Array.from(files).slice(0, 4)) {
-        if (file.size > 4_000_000) throw new Error("Use media below 4 MB for this upload route.");
-        const form = new FormData();
-        form.set("file", file);
-        form.set("conversationId", conversationId);
-        const response = await fetch("/api/social/media", { method: "POST", headers: { Authorization: `Bearer ${authToken}` }, body: form });
+        if (file.size > 500_000_000) throw new Error("Use media below 500 MB.");
+        const authorize = await fetch("/api/social/media", { method: "POST", headers: { Authorization: `Bearer ${authToken}`, "Content-Type": "application/json" }, body: JSON.stringify({ conversationId }) });
+        const permission = await authorize.json();
+        if (!authorize.ok || !permission.uploadUrl) throw new Error(permission.error || "Upload could not start.");
+        const upload = await fetch(permission.uploadUrl, { method: "POST", headers: { "Content-Type": file.type }, body: file });
+        if (!upload.ok) throw new Error("Upload failed.");
+        const { storageId } = await upload.json();
+        const response = await fetch("/api/social/media", { method: "POST", headers: { Authorization: `Bearer ${authToken}`, "Content-Type": "application/json" }, body: JSON.stringify({ conversationId, storageId, contentType: file.type, name: file.name }) });
         const data = await response.json();
-        if (!response.ok) throw new Error(data.error || "Upload failed.");
+        if (!response.ok) throw new Error(data.error || "Upload registration failed.");
         setMediaStorageIds(current => [...current, data.storageId]);
         setMediaPreviews(current => [...current, { url: data.url, type: file.type }]);
         setMediaNames((current) => [...current, file.name]);
@@ -154,6 +161,7 @@ export default function ProjectMarketing({ conversationId }: { conversationId: I
     setSaving(true);
     setComposerError(null);
     try {
+      if (status !== "draft" && !confirmed) throw new Error("Review the preview and confirm this exact post before publishing or scheduling.");
       const postId = await createPost({
         conversationId,
         requestKey: requestKey.current,
@@ -179,6 +187,7 @@ export default function ProjectMarketing({ conversationId }: { conversationId: I
       setMediaNames([]);
       setRedditCommunity("");
       setYoutubeTitle("");
+      setConfirmed(false);
     } catch (error) {
       setComposerError(error instanceof Error ? error.message : "Unable to save post");
     } finally {
@@ -197,11 +206,13 @@ export default function ProjectMarketing({ conversationId }: { conversationId: I
           "Content-Type": "application/json",
           Authorization: `Bearer ${authToken}`,
         },
-        body: JSON.stringify({ prompt: aiPrompt, channels, conversationId, requestKey: crypto.randomUUID() }),
+        body: JSON.stringify({ prompt: aiPrompt, channels, conversationId, requestKey: crypto.randomUUID(), history: agentHistory }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Unable to generate post");
       setAiDraft(data.text || "");
+      const assistantText = String(data.text || "");
+      setAgentHistory(current => [...current, { role: "user" as const, content: aiPrompt }, { role: "assistant" as const, content: assistantText }].slice(-8));
       setAiModel((data.fallbackUsed ? "Fallback: " : "") + (data.actualModel || ""));
     } catch (error) {
       setAiError(error instanceof Error ? error.message : "Unable to generate post");
@@ -279,6 +290,7 @@ export default function ProjectMarketing({ conversationId }: { conversationId: I
               onClick={() => {
                 setContent(aiDraft);
                 setComposerOpen(true);
+                setConfirmed(false);
               }}
               className="mt-4 text-xs font-semibold text-[#ff7550]"
             >
@@ -437,7 +449,7 @@ export default function ProjectMarketing({ conversationId }: { conversationId: I
             )}
             <textarea
               value={content}
-              onChange={(event) => setContent(event.target.value)}
+              onChange={(event) => { setContent(event.target.value); setConfirmed(false); }}
               placeholder="Write something worth stopping for..."
               className="mt-5 min-h-52 w-full resize-none rounded-2xl border border-zinc-700 bg-black p-4 text-base leading-7 outline-none placeholder:text-zinc-600 focus:border-[#ff7550]"
             />
@@ -505,20 +517,24 @@ export default function ProjectMarketing({ conversationId }: { conversationId: I
             </div>
             <fieldset className="mt-4 space-y-2 text-sm">
               <legend className="mb-2">When do you want to publish?</legend>
-              <label className="block"><input type="radio" checked={publishMode === "now"} onChange={() => setPublishMode("now")} /> Publish now</label>
-              <label className="block"><input type="radio" checked={publishMode === "scheduled"} disabled={access.monthlyPostLimit !== null} onChange={() => setPublishMode("scheduled")} /> Schedule for later</label>
+              <label className="block"><input type="radio" checked={publishMode === "now"} onChange={() => { setPublishMode("now"); setConfirmed(false); }} /> Publish now</label>
+              <label className="block"><input type="radio" checked={publishMode === "scheduled"} disabled={access.monthlyPostLimit !== null} onChange={() => { setPublishMode("scheduled"); setConfirmed(false); }} /> Schedule for later</label>
               {access.monthlyPostLimit !== null && <Link href="/chat/billing" className="block text-sky-400">Upgrade to Starter to schedule posts</Link>}
             </fieldset>
             <div className="mt-4">
               <label className="text-xs font-medium text-zinc-400">Publish time ({Intl.DateTimeFormat().resolvedOptions().timeZone})</label>
-              <input type="datetime-local" disabled={publishMode !== "scheduled"} value={scheduledFor} onChange={(event) => setScheduledFor(event.target.value)} className="mt-2 h-11 w-full rounded-xl border border-zinc-700 bg-black px-3 text-sm outline-none focus:border-[#ff7550]" />
+              <input type="datetime-local" disabled={publishMode !== "scheduled"} value={scheduledFor} onChange={(event) => { setScheduledFor(event.target.value); setConfirmed(false); }} className="mt-2 h-11 w-full rounded-xl border border-zinc-700 bg-black px-3 text-sm outline-none focus:border-[#ff7550]" />
+              <label className="mt-4 flex items-start gap-2 rounded-xl border border-zinc-800 bg-black/50 p-3 text-xs leading-5 text-zinc-300">
+                <input type="checkbox" checked={confirmed} onChange={event => setConfirmed(event.target.checked)} className="mt-1" />
+                I reviewed this exact copy, accounts, media, and publishing time. Editing any of them requires confirmation again.
+              </label>
             </div>
             {composerError && <p className="mt-3 text-xs text-red-400">{composerError}</p>}
             <div className="mt-6 flex flex-wrap justify-end gap-2">
               <button type="button" disabled={saving} onClick={() => void save("draft")} className="rounded-xl border border-zinc-700 px-4 py-2.5 text-sm font-semibold text-zinc-300">
                 Save draft
               </button>
-              <button type="button" disabled={saving || !content.trim() || channels.length === 0} onClick={() => void save(publishMode)} className="inline-flex items-center gap-2 rounded-xl bg-[#ff5f2e] px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-40">
+              <button type="button" disabled={saving || !confirmed || !content.trim() || channels.length === 0} onClick={() => void save(publishMode)} className="inline-flex items-center gap-2 rounded-xl bg-[#ff5f2e] px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-40">
                 {saving ? <Loader2 className="animate-spin" size={15} /> : <Send size={15} />}
                 {publishMode === "now" ? "Publish now" : "Schedule post"}
               </button>

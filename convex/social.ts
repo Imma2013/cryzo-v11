@@ -209,7 +209,7 @@ export const getAccess = query({
       };
     }
     if (args.conversationId) await requireProject(ctx, userId, args.conversationId);
-    const access = await socialAccess(ctx, userId, Date.now());
+    const access = await socialAccess(ctx, userId, args.now);
     return {
       allowed: true,
       plan: access.plan,
@@ -434,6 +434,9 @@ export const claimPost = internalMutation({
       error: undefined,
       updatedAt: Date.now(),
     });
+    for (const delivery of pending) {
+      await ctx.scheduler.runAfter(0, internal.socialWorker.publishDelivery, { deliveryId: delivery._id });
+    }
     return pending.map((delivery) => delivery._id);
   },
 });
@@ -480,9 +483,11 @@ export const claimDelivery = internalMutation({
       status: "publishing",
       attempts: delivery.attempts + 1,
       startedAt: Date.now(),
+      leaseExpiresAt: Date.now() + 300_000,
       error: undefined,
       updatedAt: Date.now(),
     });
+    await ctx.scheduler.runAfter(305_000, internal.social.expireDeliveryLease, { deliveryId: delivery._id });
     return true;
   },
 });
@@ -508,6 +513,7 @@ export const markDeliveryPublished = internalMutation({
       remoteUrl: args.remoteUrl,
       error: undefined,
       completedAt: now,
+      leaseExpiresAt: undefined,
       updatedAt: now,
     });
     await refreshPostStatus(ctx, delivery.postId);
@@ -534,6 +540,7 @@ export const markDeliveryFailed = internalMutation({
       toolSlug: args.toolSlug,
       providerLogId: args.providerLogId,
       completedAt: now,
+      leaseExpiresAt: undefined,
       updatedAt: now,
     });
     await refreshPostStatus(ctx, delivery.postId);
@@ -579,6 +586,17 @@ async function reservePost(ctx: MutationCtx, post: Doc<"socialPosts">) {
   else await ctx.db.insert("socialUsage", { userId: post.userId, period, reserved: 1 });
   await ctx.db.patch(post._id, { quotaPeriod: period });
 }
+export const expireDeliveryLease = internalMutation({
+  args: { deliveryId: v.id("socialDeliveries") }, returns: v.null(),
+  handler: async (ctx, args) => {
+    const delivery = await ctx.db.get(args.deliveryId);
+    if (!delivery || delivery.status !== "publishing" || !delivery.leaseExpiresAt || delivery.leaseExpiresAt > Date.now()) return null;
+    await ctx.db.patch(delivery._id, { status: "unknown", leaseExpiresAt: undefined,
+      error: "Publishing was interrupted after dispatch began. Check the network before retrying to avoid a duplicate post.", updatedAt: Date.now() });
+    await refreshPostStatus(ctx, delivery.postId);
+    return null;
+  },
+});
 export const listAccounts = query({
   args: { conversationId: v.id("conversations") }, returns: v.array(v.any()),
   handler: async (ctx, args) => {
@@ -624,6 +642,14 @@ export const registerMedia = mutation({
     if (!process.env.CRYZO_INTERNAL_API_SECRET || args.serviceKey !== process.env.CRYZO_INTERNAL_API_SECRET) throw new Error("Unauthorized.");
     const userId = await currentUserId(ctx);
     await requireProject(ctx, userId, args.conversationId);
+    const metadata = await ctx.storage.getMetadata(args.storageId);
+    if (!metadata || metadata.size > 500_000_000 || !metadata.contentType?.match(/^(image|video)\//)) throw new Error("Invalid or oversized media upload.");
+    if (metadata.contentType !== args.contentType) throw new Error("Media type does not match the upload.");
+    const existing = await ctx.db.query("socialMedia").withIndex("by_storage", q => q.eq("storageId", args.storageId)).unique();
+    if (existing) {
+      if (existing.userId !== userId || existing.conversationId !== args.conversationId) throw new Error("Media already belongs to another project.");
+      return null;
+    }
     await ctx.db.insert("socialMedia", { userId, conversationId: args.conversationId, storageId: args.storageId, contentType: args.contentType, name: args.name });
     return null;
   },
