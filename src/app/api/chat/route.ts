@@ -256,6 +256,17 @@ export async function POST(req: Request) {
       if (!allowed) throw new Error("no_integration_credits");
       const session = await getComposio().create(userId);
       tools = await session.tools();
+      for (const [name, definition] of Object.entries(tools)) {
+        const execute = definition.execute;
+        if (!execute) continue;
+        definition.execute = (async (input, options) => {
+          const charged = await authenticated.mutation(api.billing.deductIntegrationCredits, {
+            userId, amount: composioToolCreditCost(name), reason: "composio", description: "Connected action", toolName: name,
+          });
+          if (!charged.success) throw new Error("no_integration_credits");
+          return execute(input, options);
+        }) as typeof execute;
+      }
       sessionId = session.sessionId;
     }
     const started = Date.now();
@@ -282,13 +293,18 @@ export async function POST(req: Request) {
                 model: selected.model, system, messages: modelMessages, tools,
                 abortSignal: signal, maxRetries: 0, maxOutputTokens: outputLimit,
                 timeout: { totalMs: 180_000, chunkMs: 30_000 }, stopWhen: stepCountIs(6),
-                onStepFinish: async step => {
-                  for (const call of step.toolCalls) {
-                    await authenticated.mutation(api.billing.deductIntegrationCredits, {
-                      userId, amount: composioToolCreditCost(call.toolName), reason: "composio",
-                      description: "Connected action", toolName: call.toolName,
-                    });
+                prepareStep: async ({ messages: stepMessages, steps }) => {
+                  if (!managed || !profile || !runId) return {};
+                  let incurred = 0;
+                  for (const step of steps) {
+                    const reported = step.providerMetadata?.openrouter?.usage as { cost?: number } | undefined;
+                    incurred += reported?.cost ?? (await openRouterClient().generations.getGeneration({ id: step.response.id! }, { timeoutMs: 5000 })).data.totalCost;
                   }
+                  const bytes = Buffer.byteLength(system + JSON.stringify(stepMessages) + JSON.stringify(tools ?? {})) + (hasImages ? 16_000 : 0);
+                  if (bytes + outputLimit > profile.context) throw new Error("Connected action results exceed this model's context.");
+                  await convex.mutation(api.aiUsage.extendReservation, { serviceKey, runId,
+                    maxCostMicros: Math.ceil((incurred + bytes * profile.inputCost + outputLimit * profile.outputCost + profile.requestCost) * 1_000_000) });
+                  return {};
                 },
               });
               const reader = result.toUIMessageStream({

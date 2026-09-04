@@ -35,10 +35,11 @@ async function worker() {
     try {
       for (const prompt of ["Reply with a short greeting.", "Return one complete minimal HTML document for a dog website, under 100 words. No explanation."]) {
         const started = Date.now();
+        let streamError;
         const result = streamText({
           model: provider.chat(model.id, { usage: { include: true }, ...(model.supportedParameters.includes("reasoning") ? { reasoning: reasoningConfig(model.reasoning) } : {}) }),
           prompt, maxOutputTokens: Math.min(freePool.has(model.id) ? 8192 : 2048, model.topProvider.maxCompletionTokens ?? 2048),
-          maxRetries: 0, abortSignal: AbortSignal.timeout(45000), timeout: { chunkMs: 20000 }, onError: () => {},
+          maxRetries: 0, abortSignal: AbortSignal.timeout(45000), timeout: { chunkMs: 20000 }, onError: event => { streamError = event.error; },
         });
         let text = "", firstTokenMs = null;
         for await (const chunk of result.textStream) {
@@ -51,6 +52,7 @@ async function worker() {
         const usage = await result.usage;
         const cost = metadata?.openrouter?.usage?.cost;
         if (Number.isFinite(cost)) report.totalReportedCost += cost;
+        if (streamError) throw streamError;
         if (!text.trim() || ["error", "length"].includes(finishReason)) throw new Error("No complete streamed text: " + finishReason);
         checks.push({ firstTokenMs, finishReason, generationId: response.id, provider: metadata?.openrouter?.provider, usage, cost });
       }

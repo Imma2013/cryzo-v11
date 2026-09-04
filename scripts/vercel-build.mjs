@@ -10,6 +10,7 @@ if (process.env.VERCEL_ENV === "preview") {
   run("npm", ["run", "build"]);
 } else if (process.env.VERCEL_ENV === "production") {
   if (!process.env.CONVEX_DEPLOY_KEY || !process.env.CRYZO_INTERNAL_API_SECRET) throw new Error("Production deployment credentials are missing.");
+  run(process.execPath, ["scripts/smoke-managed-models.mjs"]);
   // Validate the frontend before changing the production backend.
   run("npm", ["run", "build"]);
   run(process.execPath, ["node_modules/convex/bin/main.js", "env", "set", "CRYZO_INTERNAL_API_SECRET", process.env.CRYZO_INTERNAL_API_SECRET], true);

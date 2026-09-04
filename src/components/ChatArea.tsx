@@ -103,7 +103,7 @@ export function ChatArea({
   const liveMessageIdsRef = useRef<Set<string>>(new Set());
   const openedStreamingMessagesRef = useRef<Set<string>>(new Set());
 
-  const { messages, setMessages, sendMessage, stop, status, error } = useChat({
+  const { messages, setMessages, sendMessage, stop, status, error, clearError } = useChat({
     id: conversationId,
     onData: part => {
       if (part.type !== "data-generation") return;
@@ -774,9 +774,12 @@ export function ChatArea({
                         <a href="/chat/billing?cycle=monthly" className="rounded-xl border border-zinc-700 bg-white p-4 text-black transition hover:bg-zinc-200">
                           <span className="text-sm font-semibold">View all plans</span>
                           <span className="mt-1 block text-2xl font-semibold">Monthly billing</span>
-                          <span className="mt-2 block text-xs leading-5 text-zinc-600">Compare included AI allowances. No automatic overage charges.</span>
-                        </a>
-                      </div>
+                            <span className="mt-2 block text-xs leading-5 text-zinc-600">Compare included AI allowances. No automatic overage charges.</span>
+                          </a>
+                        </div>
+                        <button type="button" className="mt-4 text-sm text-zinc-200 underline" onClick={() => {
+                          clearError(); setLocalError(null); window.dispatchEvent(new Event("cryzo:open-model-picker"));
+                        }}>Choose a free model or use my own key</button>
                     </div>
                   </div>
                 ) : (

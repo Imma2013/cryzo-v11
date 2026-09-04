@@ -38,7 +38,7 @@ export function managedDefinition(upstreamModel: string, name?: string): Managed
 }
 
 export const CRYZO_MANAGED_MODELS = seeds.map(([, name, upstream]) => managedDefinition(upstream, name));
-export const DEFAULT_MANAGED_MODEL_ID = "cryzo/nemotron-3.5-lightning-free";
+export const DEFAULT_MANAGED_MODEL_ID = "cryzo/ling-3-flash-free";
 export function normalizeManagedModelId(modelId?: string | null) {
   const aliases: Record<string, string> = { "cryzo/kimi-k3": "cryzo/moonshot-kimi-k3" };
   const raw = modelId?.trim();

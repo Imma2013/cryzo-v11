@@ -399,6 +399,10 @@ export function ModelPicker({
   };
 
   const apply = async () => {
+    if (providerId === "cryzo" && !catalog.providers?.cryzo?.models?.some(model => model.id === modelId && model.available !== false)) {
+      setFeedback({ type: "error", message: "Choose a model that has passed its streaming health check." });
+      return;
+    }
     if (!modelId.trim()) {
       setFeedback({ type: "error", message: "Choose or enter a model ID." });
       return;

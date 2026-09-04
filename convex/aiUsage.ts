@@ -101,6 +101,25 @@ export const settle = mutation({
   },
 });
 
+export const extendReservation = mutation({
+  args: { serviceKey: v.string(), runId: v.id("aiRuns"), maxCostMicros: v.number() },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    if (!process.env.CRYZO_INTERNAL_API_SECRET || args.serviceKey !== process.env.CRYZO_INTERNAL_API_SECRET) throw new Error("Unauthorized reservation.");
+    const run = await ctx.db.get(args.runId);
+    if (!run || run.status !== "running" || run.expiresAt <= Date.now()) throw new Error("Generation is no longer running.");
+    if (!Number.isSafeInteger(args.maxCostMicros) || args.maxCostMicros < 0) throw new Error("Invalid reservation.");
+    if (args.maxCostMicros <= run.reservedMicros) return null;
+    const access = await entitlement(ctx, run.userId);
+    const meter = await ctx.db.query("aiUsageMeters").withIndex("by_user_period", q => q.eq("userId", run.userId).eq("period", run.period)).unique();
+    const extra = args.maxCostMicros - run.reservedMicros;
+    if (!meter || (!access.owner && extra > access.allowance - meter.spentMicros - meter.reservedMicros)) throw new Error("no_message_credits");
+    await ctx.db.patch(run._id, { reservedMicros: args.maxCostMicros });
+    await ctx.db.patch(meter._id, { reservedMicros: meter.reservedMicros + extra });
+    return null;
+  },
+});
+
 export const expire = internalMutation({
   args: { runId: v.id("aiRuns") }, returns: v.null(),
   handler: async (ctx, args) => {
