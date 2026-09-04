@@ -1,3 +1,4 @@
+import type { ModelReasoning } from "@openrouter/sdk/models";
 import { OpenRouter } from "@openrouter/sdk";
 import { managedDefinition, CRYZO_MANAGED_MODELS } from "@/lib/ai/managed-models";
 
@@ -9,7 +10,7 @@ export function openRouterClient() {
 
 export type ManagedCatalogModel = ReturnType<typeof managedDefinition> & {
   context: number; output: number; inputCost: number; outputCost: number; requestCost: number;
-  attachments: boolean; available: boolean;
+  attachments: boolean; available: boolean; reasoningOptions?: ModelReasoning;
 };
 let cached: { at: number; models: ManagedCatalogModel[] } | undefined;
 let pending: Promise<ManagedCatalogModel[]> | undefined;
@@ -25,6 +26,7 @@ export async function managedCatalog(): Promise<ManagedCatalogModel[]> {
     const models: ManagedCatalogModel[] = [];
     for await (const page of pages) {
       for (const model of page.result.data) {
+        if (model.id.includes(":batch") || model.id.startsWith("~") || model.id.startsWith("openrouter/")) continue;
         const inputCost = Number(model.pricing.prompt), outputCost = Number(model.pricing.completion);
         if (![inputCost, outputCost].every(n => Number.isFinite(n) && n >= 0)) continue;
         if (!model.architecture.outputModalities.includes("text") || (model.contextLength ?? 0) < 16_000) continue;
@@ -33,7 +35,7 @@ export async function managedCatalog(): Promise<ManagedCatalogModel[]> {
         const requestCost = Number(model.pricing.request ?? 0);
         if (!Number.isFinite(requestCost) || requestCost < 0) continue;
         if (definition.tier === "free" && inputCost + outputCost + requestCost !== 0) continue;
-        models.push({ ...definition, reasoning: model.supportedParameters.includes("reasoning"),
+        models.push({ ...definition, reasoningOptions: model.reasoning, reasoning: model.supportedParameters.includes("reasoning"),
           toolCall: model.supportedParameters.includes("tools"), multimodal: model.architecture.inputModalities.includes("image"),
           attachments: model.architecture.inputModalities.includes("image"),
           context: model.contextLength ?? 16_000, output: model.topProvider.maxCompletionTokens ?? 8192,

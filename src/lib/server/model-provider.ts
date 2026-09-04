@@ -1,3 +1,4 @@
+import { reasoningConfig } from "@/lib/ai/reasoning-config";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { getProvider } from "@/lib/ai/models";
@@ -54,7 +55,7 @@ async function resolveManagedCryzoModel(requestedModel?: string) {
   return {
     model: provider.chat(managed.upstreamModel, {
       usage: { include: true },
-      ...(managed.reasoning ? { reasoning: { effort: "low" as const } } : {}),
+      ...(managed.reasoning ? { reasoning: reasoningConfig(managed.reasoningOptions) } : {}),
       extraBody: { provider: { allow_fallbacks: true } },
     }),
     providerId: "cryzo",

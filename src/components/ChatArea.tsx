@@ -645,6 +645,9 @@ export function ChatArea({
                           : "w-full max-w-full bg-transparent px-0 py-1 text-zinc-100 sm:w-auto sm:bg-zinc-800"
                       }`}
                     >
+                      {m.role === "assistant" && m.id === messages[messages.length - 1]?.id && isLoading && !m.parts?.some(part => part.type === "text" && part.text.trim()) && (
+                        <p role="status" className="text-zinc-400">{generationStatus || "Connecting to the model..."}</p>
+                      )}
                       {m.parts?.map((part, i) => {
                         if (part.type === "data-generation") {
                           const data = part.data as { status?: string; actualModelName?: string; fallbackUsed?: boolean };
@@ -760,18 +763,18 @@ export function ChatArea({
                       <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">Monthly plans</p>
                       <h2 id="credit-limit-title" className="mt-2 text-2xl font-semibold text-white">Keep building with Cryzo</h2>
                       <p className="mt-2 text-sm leading-6 text-zinc-400">
-                        Your included managed-model credits are used up. BYOK remains free, or upgrade for more monthly capacity.
+                        Your selected model requires paid AI allowance, or your included allowance is used up. Choose BYOK or upgrade.
                       </p>
                       <div className="mt-5 grid gap-3 sm:grid-cols-2">
                         <a href="/chat/billing?cycle=monthly" className="rounded-xl border border-zinc-700 bg-black p-4 transition hover:border-zinc-500">
                           <span className="text-sm font-semibold text-white">Starter</span>
                           <span className="mt-1 block text-2xl font-semibold text-white">$20<span className="text-sm font-normal text-zinc-500">/month</span></span>
-                          <span className="mt-2 block text-xs leading-5 text-zinc-400">100 message credits and 2,000 integration credits.</span>
+                          <span className="mt-2 block text-xs leading-5 text-zinc-400">$10 of managed AI usage and 2,000 integration credits.</span>
                         </a>
                         <a href="/chat/billing?cycle=monthly" className="rounded-xl border border-zinc-700 bg-white p-4 text-black transition hover:bg-zinc-200">
                           <span className="text-sm font-semibold">View all plans</span>
                           <span className="mt-1 block text-2xl font-semibold">Monthly billing</span>
-                          <span className="mt-2 block text-xs leading-5 text-zinc-600">Compare capacity or add a message-credit top-up.</span>
+                          <span className="mt-2 block text-xs leading-5 text-zinc-600">Compare included AI allowances. No automatic overage charges.</span>
                         </a>
                       </div>
                     </div>

@@ -8,7 +8,7 @@ export type ManagedModelDefinition = {
 };
 
 const seeds = [
-  ["cryzo/ling-3-flash-free", "Ling 3 Flash", "inclusionai/ling-3.0-flash:free"],
+  ["cryzo/ling-3-flash-free", "Ling 3.0 Flash Fin", "inclusionai/ling-3.0-flash-fin:free"],
   ["cryzo/nemotron-3.5-lightning-free", "Nemotron 3.5 Lightning", "nvidia/nemotron-3.5-lightning:free"],
   ["cryzo/nemotron-3-ultra-free", "Nemotron 3 Ultra", "nvidia/nemotron-3-ultra-550b-a55b:free"],
   ["cryzo/minimax-m3", "MiniMax M3", "minimax/minimax-m3"],
@@ -40,7 +40,9 @@ export function managedDefinition(upstreamModel: string, name?: string): Managed
 export const CRYZO_MANAGED_MODELS = seeds.map(([, name, upstream]) => managedDefinition(upstream, name));
 export const DEFAULT_MANAGED_MODEL_ID = "cryzo/nemotron-3.5-lightning-free";
 export function normalizeManagedModelId(modelId?: string | null) {
-  const id = modelId?.trim();
+  const aliases: Record<string, string> = { "cryzo/kimi-k3": "cryzo/moonshot-kimi-k3" };
+  const raw = modelId?.trim();
+  const id = raw ? aliases[raw] ?? raw : undefined;
   return id && (CRYZO_MANAGED_MODELS.some(model => model.id === id) || /^cryzo\/router\/[^/]+\/.+/.test(id))
     ? id : DEFAULT_MANAGED_MODEL_ID;
 }
