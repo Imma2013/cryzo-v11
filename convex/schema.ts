@@ -264,6 +264,7 @@ export default defineSchema({
     .index("by_status_and_scheduled", ["status", "scheduledFor"]),
 
   socialDeliveries: defineTable({
+    leaseExpiresAt: v.optional(v.number()),
     postId: v.id("socialPosts"),
     userId: v.id("users"),
     conversationId: v.optional(v.id("conversations")),
@@ -397,6 +398,8 @@ export default defineSchema({
   }).index("by_user_period", ["userId", "period"]),
 
   aiRuns: defineTable({
+    pendingCost: v.optional(v.boolean()),
+    generationIds: v.optional(v.array(v.string())),
     userId: v.id("users"), conversationId: v.id("conversations"),
     requestKey: v.string(), period: v.string(), day: v.string(),
     requestedModel: v.string(), actualModel: v.optional(v.string()),

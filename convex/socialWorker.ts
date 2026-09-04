@@ -4,6 +4,7 @@ import { Composio } from "@composio/core";
 import { v } from "convex/values";
 import { internalAction } from "./_generated/server";
 import { internal } from "./_generated/api";
+import { composioSocialSessionOptions } from "../src/lib/server/composio-social";
 
 const toolkits: Record<string, string> = { x: "twitter", reddit: "reddit", youtube: "youtube", tiktok: "tiktok", instagram: "instagram", facebook: "facebook" };
 function entries(value: unknown): [string, unknown][] {
@@ -16,9 +17,7 @@ function identifier(value: unknown, keys = ["post_id", "tweet_id", "video_id", "
 export const publishPost = internalAction({
   args: { postId: v.id("socialPosts") }, returns: v.null(),
   handler: async (ctx, args) => {
-    for (const deliveryId of await ctx.runMutation(internal.social.claimPost, args)) {
-      await ctx.scheduler.runAfter(0, internal.socialWorker.publishDelivery, { deliveryId });
-    }
+    await ctx.runMutation(internal.social.claimPost, args);
     return null;
   },
 });
@@ -32,8 +31,7 @@ export const publishDelivery = internalAction({
     try {
       if (!toolkit || !payload.delivery.connectedAccountId) throw new Error("Connect an approved account to this project before publishing.");
       const composio = new Composio();
-      const session = await composio.create(String(payload.post.userId), { toolkits: [toolkit],
-        connectedAccounts: { [toolkit]: payload.delivery.connectedAccountId } });
+      const session = await composio.create(String(payload.post.userId), composioSocialSessionOptions(toolkit, payload.delivery.connectedAccountId));
       const execute = async (slug: string, arguments_: Record<string, unknown>, publishes = true) => {
         toolSlug = slug;
         if (publishes) executionStarted = true;
@@ -102,7 +100,7 @@ export const checkTikTok = internalAction({
     const delivery = await ctx.runMutation(internal.social.claimPoll, args);
     if (!delivery) return null;
     try {
-      const session = await new Composio().create(String(delivery.userId), { toolkits: ["tiktok"], connectedAccounts: { tiktok: delivery.connectedAccountId! } });
+      const session = await new Composio().create(String(delivery.userId), composioSocialSessionOptions("tiktok", delivery.connectedAccountId!));
       const result = await session.execute("TIKTOK_FETCH_PUBLISH_STATUS", { publish_id: delivery.remotePostId });
       if (result.error) throw new Error(result.error);
       const status = entries(result.data).find(([key]) => key === "status")?.[1];

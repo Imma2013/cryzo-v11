@@ -5,6 +5,7 @@ import type { Id } from "../../../../../convex/_generated/dataModel";
 import { resolveServerModel } from "@/lib/server/model-provider";
 import { managedCandidates, openRouterClient } from "@/lib/server/openrouter";
 import { DEFAULT_MANAGED_MODEL_ID } from "@/lib/ai/managed-models";
+import { transientProviderFailure } from "@/lib/ai/request-intent";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 180;
@@ -19,7 +20,7 @@ export async function POST(req: Request) {
     if (!serviceKey) throw new Error("AI drafting is not configured.");
     const user = await fetchQuery(api.users.currentUser, {}, { token });
     if (!user) return Response.json({ error: "Sign in first." }, { status: 401 });
-    const { prompt, channels, conversationId, requestKey } = await req.json();
+    const { prompt, channels, conversationId, requestKey, history } = await req.json();
     if (typeof prompt !== "string" || !prompt.trim() || prompt.length > 4000 || typeof requestKey !== "string") throw new Error("Describe the post you want.");
     const project = await fetchQuery(api.conversations.get, { id: conversationId }, { token });
     if (!project) throw new Error("Project not found.");
@@ -27,12 +28,15 @@ export async function POST(req: Request) {
     const modelId = balance.plan === "free" ? DEFAULT_MANAGED_MODEL_ID : "cryzo/minimax-m3";
     const candidates = await managedCandidates(modelId, false, false);
     const system = "You are Cryzo Marketing. Draft social copy for human review. Never claim to have published anything. No fabricated facts, URLs or results. Return only the post copy.";
-    const input = "Project: " + project.title + "\nNetworks: " + (Array.isArray(channels) ? channels.join(", ") : "") + "\nRequest: " + prompt;
+    const safeHistory = Array.isArray(history) ? history.slice(-8).filter(item => item && ["user", "assistant"].includes(item.role) && typeof item.content === "string").map(item => `${item.role}: ${item.content.slice(0, 2000)}`).join("\n") : "";
+    const accounts = await fetchQuery(api.social.listAccounts, { conversationId }, { token });
+    const input = "Project: " + project.title + "\nConnected accounts: " + accounts.map(account => `${account.channel}:${account.name}`).join(", ") +
+      "\nNetworks: " + (Array.isArray(channels) ? channels.join(", ") : "") + (safeHistory ? "\nConversation:\n" + safeHistory : "") + "\nRequest: " + prompt;
     const maxCostMicros = Math.ceil(Math.max(...candidates.map(model => (system.length + input.length) * model.inputCost + 8192 * model.outputCost + model.requestCost)) * 1_000_000);
     runId = await fetchMutation(api.aiUsage.reserve, { conversationId, requestKey: "social:" + requestKey, modelId,
       freeModel: balance.plan === "free", maxCostMicros, serviceKey }, { token });
     const signal = AbortSignal.any([req.signal, AbortSignal.timeout(150_000)]);
-    for (const candidate of [candidates[0], candidates[0], ...candidates.slice(1)]) {
+    for (const [attempt, candidate] of [candidates[0], candidates[0]].entries()) {
       try {
         const selected = await resolveServerModel({ providerId: "cryzo", modelId: candidate.id });
         const result = await generateText({ model: selected.model, system, prompt: input,
@@ -48,8 +52,9 @@ export async function POST(req: Request) {
           actualModel: candidate.id, generationId: result.response.id,
           telemetry: { requestedModel: modelId, actualModel: candidate.id, usage: result.usage, finishReason: result.finishReason, reportedCost: cost } });
         settled = true;
-        return Response.json({ text, requestId, actualModel: candidate.name, fallbackUsed: candidate.id !== modelId });
-      } catch { if (signal.aborted) break; }
+        return Response.json({ text, requestId, actualModel: candidate.name, fallbackUsed: false,
+          proposal: { content: text, channels: Array.isArray(channels) ? channels : [], requiresConfirmation: true } });
+      } catch (error) { if (signal.aborted || attempt > 0 || !transientProviderFailure(error)) break; }
     }
     throw new Error("No model completed the draft. Please retry. No AI allowance was charged.");
   } catch (error) {

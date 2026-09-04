@@ -2,6 +2,7 @@ import { Composio } from "@composio/core";
 import { requireRequestUserId } from "@/lib/server/request-user";
 import { invalidateConnectionsCache } from "@/lib/composio-connection-cache";
 import { paginateApps, type CatalogApp } from "@/lib/catalog-pagination";
+import { socialAuthConfig } from "@/lib/server/composio-social";
 
 let composio: Composio | null = null;
 function getComposio() { return composio ??= new Composio(); }
@@ -89,10 +90,17 @@ export async function POST(req: Request) {
 
   const origin = new URL(req.url).origin;
   invalidateConnectionsCache(userId);
-  const session = await getComposio().create(userId);
-  const connectionRequest = await session.authorize(toolkit, {
+  const social = socialAuthConfig(toolkit);
+  if (social && !social.id) return Response.json({
+    error: `${toolkit} is awaiting its Cryzo OAuth approval. Configure ${social.environmentName} in Vercel after creating the auth config in Composio.`,
+  }, { status: 503 });
+  const connectionRequest = social?.id
+    ? await getComposio().connectedAccounts.link(userId, social.id, {
+        callbackUrl: origin + (returnTo && /^\/chat\/[a-zA-Z0-9]+$/.test(returnTo) ? returnTo : "/chat/apps"),
+      })
+    : await (await getComposio().create(userId)).authorize(toolkit, {
     callbackUrl: origin + (returnTo && /^\/chat\/[a-zA-Z0-9]+$/.test(returnTo) ? returnTo : "/chat/apps"),
-  });
+      });
 
   return Response.json({ redirectUrl: connectionRequest.redirectUrl });
 }

@@ -16,6 +16,7 @@ import { readFileSync } from "fs";
 import { join } from "path";
 import { resolveServerModel } from "@/lib/server/model-provider";
 import { readStreamPart } from "@/lib/server/stream-read";
+import { requestIntent, DISCUSSION_PROMPT, transientProviderFailure } from "@/lib/ai/request-intent";
 import { managedCandidates, markModelUnhealthy, openRouterClient } from "@/lib/server/openrouter";
 import type { Id } from "../../../../convex/_generated/dataModel";
 import { composioToolCreditCost } from "@/lib/billing/integration-costs";
@@ -200,7 +201,8 @@ export async function POST(req: Request) {
     const mode = body.chatMode === "plan" ? "plan" : "build";
     const lastUser = messages.filter(message => message.role === "user").pop();
     const lastText = messageText(lastUser);
-    const wantsTools = mode === "build" && shouldUseComposioTools(lastText);
+    const intent = requestIntent(lastText, mode);
+    const wantsTools = intent === "build" && shouldUseComposioTools(lastText);
     const hasImages = messages.some(message => message.parts?.some(part => part.type === "file"));
     const initial = await resolveServerModel({
       providerId: body.modelProvider, modelId: body.modelId, credentialMode: body.modelCredentialMode,
@@ -215,11 +217,11 @@ export async function POST(req: Request) {
     const recipe = pickDesignRecipe(lastText);
     const recipeBlock = recipe ? "\n\nDesign reference:\n" + loadRecipeContent(recipe) : "";
     let cloudAppId: string | undefined;
-    if (mode === "build") {
+    if (intent === "build") {
       const app = await authenticated.mutation(api.cloudAdmin.ensureForConversation, { conversationId, name: `Cryzo app ${conversationId.slice(-6)}` });
       cloudAppId = String(app.appId);
     }
-    const system = (mode === "plan" ? buildPlanPrompt(recipeBlock, platforms) :
+    const system = (intent === "discuss" ? (mode === "plan" ? buildPlanPrompt(recipeBlock, platforms) : DISCUSSION_PROMPT) :
       buildCryzoSystemPrompt({ useComposioTools: wantsTools, recipeBlock, projectPlatforms: platforms, cryzoCloudAppId: cloudAppId })) +
       buildCurrentProjectContext(artifacts);
     const modelMessages = await convertToModelMessages(messages);
@@ -275,8 +277,8 @@ export async function POST(req: Request) {
     const stream = createUIMessageStream({
       execute: async ({ writer }) => {
         writer.write({ type: "start", messageId: requestId });
-        writer.write({ type: "data-generation", data: { requestId, requestedModelId: initial.modelId, status: "connecting" } });
-        const attempts = managed ? [profiles[0], profiles[0], ...profiles.slice(1)] : [undefined];
+        writer.write({ type: "data-generation", data: { requestId, requestedModelId: initial.modelId, credentialSource: managed ? "cryzo" : body.modelCredentialMode, intent, status: "working" } });
+        const attempts = managed ? [profiles[0], profiles[0]] : [undefined, undefined];
         let lastError: unknown;
         let completed = false;
         try {
@@ -286,20 +288,26 @@ export async function POST(req: Request) {
             const selected = profile ? await resolveServerModel({ providerId: "cryzo", modelId: profile.id }) : initial;
             const abort = new AbortController();
             const signal = AbortSignal.any([totalSignal, abort.signal]);
-            let committed = false, text = "", firstTokenMs: number | undefined;
+            let committed = false, actionStarted = false, text = "", firstTokenMs: number | undefined;
             const buffered: UIMessageChunk[] = [];
-            const firstTokenTimer = setTimeout(() => abort.abort(new Error("Model did not produce text in time.")), 45_000);
+            const firstTokenTimer = setTimeout(() => abort.abort(new Error("The provider did not start a response in time. Retry this model.")), 60_000);
             try {
               const result = streamText({
                 model: selected.model, system, messages: modelMessages, tools,
                 abortSignal: signal, maxRetries: 0, maxOutputTokens: outputLimit,
                 timeout: { totalMs: 180_000, chunkMs: 30_000 }, stopWhen: stepCountIs(6),
+                onChunk: ({ chunk }) => {
+                  clearTimeout(firstTokenTimer);
+                  if (chunk.type === "tool-call") actionStarted = true;
+                },
                 prepareStep: async ({ messages: stepMessages, steps }) => {
                   if (!managed || !profile || !runId) return {};
                   let incurred = 0;
                   for (const step of steps) {
                     const reported = step.providerMetadata?.openrouter?.usage as { cost?: number } | undefined;
-                    incurred += reported?.cost ?? (await openRouterClient().generations.getGeneration({ id: step.response.id! }, { timeoutMs: 5000 })).data.totalCost;
+                    incurred += typeof reported?.cost === "number"
+                      ? reported.cost
+                      : (step.usage.inputTokens ?? 0) * profile.inputCost + (step.usage.outputTokens ?? 0) * profile.outputCost + profile.requestCost;
                   }
                   const bytes = Buffer.byteLength(system + JSON.stringify(stepMessages) + JSON.stringify(tools ?? {})) + (hasImages ? 16_000 : 0);
                   if (bytes + outputLimit > profile.context) throw new Error("Connected action results exceed this model's context.");
@@ -309,7 +317,7 @@ export async function POST(req: Request) {
                 },
               });
               const reader = result.toUIMessageStream({
-                sendStart: false, sendFinish: false, sendReasoning: false,
+                sendStart: false, sendFinish: false, sendReasoning: true,
                 onError: error => safeError(error),
               }).getReader();
               while (true) {
@@ -317,8 +325,9 @@ export async function POST(req: Request) {
                 if (next.done) break;
                 const part = next.value;
                 if (part.type === "error") throw new Error(part.errorText);
+                if (part.type === "reasoning-delta" || part.type === "text-delta" || part.type.startsWith("tool-")) clearTimeout(firstTokenTimer);
                 if (part.type === "text-delta") text += part.delta;
-                const visible = (part.type === "text-delta" && part.delta.trim().length > 0) || part.type.startsWith("tool-");
+                const visible = (part.type === "text-delta" && part.delta.trim().length > 0) || part.type === "reasoning-delta" || part.type.startsWith("tool-");
                 if (!committed && visible) {
                   committed = true;
                   firstTokenMs = Date.now() - started;
@@ -336,27 +345,32 @@ export async function POST(req: Request) {
               if (signal.aborted || !text.trim() || reason === "error" || reason === "length") throw new Error("The model did not finish a complete response.");
               const steps = await result.steps;
               let cost = 0;
+              let costPending = false;
               const generationIds: string[] = [];
               for (const step of steps) {
                 const generationId = step.response.id;
                 if (generationId) generationIds.push(generationId);
                 const usage = step.providerMetadata?.openrouter?.usage as { cost?: number } | undefined;
                 if (managed) {
+                  try {
                   if (typeof usage?.cost === "number" && Number.isFinite(usage.cost)) cost += usage.cost;
                   else if (generationId) {
                     const record = await openRouterClient().generations.getGeneration({ id: generationId }, { timeoutMs: 10_000 });
                     cost += record.data.totalCost;
                   } else throw new Error("Usage verification failed.");
+                  } catch { costPending = true; }
                 }
               }
               const telemetry = { requestedModel: initial.modelId, actualModel: selected.modelId, generationIds,
                 providerRoutes: steps.map(step => step.providerMetadata?.openrouter?.provider ?? null),
                 reportedCost: cost, firstTokenMs: firstTokenMs ?? null, durationMs: Date.now() - started, finishReason: reason,
-                usage: await result.totalUsage, fallback: selected.modelId !== initial.modelId };
+                usage: await result.totalUsage, fallback: false, credentialSource: managed ? "cryzo" : body.modelCredentialMode,
+                upstreamModel: selected.upstreamModelId, costPending };
               if (totalSignal.aborted) throw new Error("Generation was cancelled.");
-              await settle(true, Math.ceil(cost * 1_000_000), { actualModel: selected.modelId, generationId: generationIds.at(-1), telemetry });
+              if (costPending && runId) await convex.mutation(api.aiUsage.deferCost, { serviceKey, runId, generationIds, actualModel: selected.modelId, telemetry });
+              else await settle(true, Math.ceil(cost * 1_000_000), { actualModel: selected.modelId, generationId: generationIds.at(-1), telemetry });
               completed = true;
-              const config = parseCloudConfig(text);
+              const config = intent === "build" ? parseCloudConfig(text) : null;
               if (config) {
                 await authenticated.mutation(api.cloudAdmin.configureFromPublish, {
                   conversationId, name: config.name ?? "Cryzo app",
@@ -367,7 +381,7 @@ export async function POST(req: Request) {
               }
               console.info("[chat/complete]", JSON.stringify({ requestId, ...telemetry, cost }));
               writer.write({ type: "data-generation", data: { requestId, actualModelId: selected.modelId, actualModelName: profile?.name ?? selected.modelId,
-                fallbackUsed: selected.modelId !== initial.modelId, costMicros: Math.ceil(cost * 1_000_000), status: "completed" } });
+                fallbackUsed: false, costMicros: costPending ? null : Math.ceil(cost * 1_000_000), costPending, status: "completed" } });
               writer.write({ type: "finish", finishReason: "stop" });
               return;
             } catch (error) {
@@ -377,7 +391,7 @@ export async function POST(req: Request) {
               if (profile) markModelUnhealthy(profile.id);
               console.warn("[chat/attempt-failed]", JSON.stringify({ requestId, attempt, model: selected.modelId, committed, error: safeError(error) }));
               // Never replay a partial answer or a potentially executed tool.
-              if (committed || totalSignal.aborted) throw error;
+              if (committed || actionStarted || totalSignal.aborted || !transientProviderFailure(error) || attempt === attempts.length - 1) throw error;
               writer.write({ type: "data-generation", data: { requestId, status: "retrying", requestedModelId: initial.modelId } });
             }
           }

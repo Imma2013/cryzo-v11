@@ -7,21 +7,19 @@ export async function POST(req: Request) {
   if (!await requireRequestUserId(req)) return Response.json({ error: "Sign in first." }, { status: 401 });
   try {
     const token = req.headers.get("authorization")!.slice(7);
-    const form = await req.formData();
-    const file = form.get("file");
-    const conversationId = String(form.get("conversationId") || "") as Id<"conversations">;
-    if (!(file instanceof File) || file.size > 4_000_000 || !/^(image|video)\//.test(file.type)) {
-      return Response.json({ error: "Use an image or video below 4 MB." }, { status: 400 });
-    }
+    const body = await req.json() as { conversationId?: Id<"conversations">; storageId?: Id<"_storage">; contentType?: string; name?: string };
+    const conversationId = body.conversationId!;
+    if (!conversationId) throw new Error("A project is required.");
     await fetchQuery(api.artifacts.listByConversation, { conversationId }, { token });
+    if (!body.storageId) {
+      const uploadUrl = await fetchMutation(api.social.generateUploadUrl, {}, { token });
+      return Response.json({ uploadUrl });
+    }
+    if (!body.contentType?.match(/^(image|video)\//) || !body.name || body.name.length > 180) throw new Error("Invalid media.");
     const serviceKey = process.env.CRYZO_INTERNAL_API_SECRET;
     if (!serviceKey) throw new Error("Media uploads are not configured.");
-    const upload = await fetchMutation(api.social.generateUploadUrl, {}, { token });
-    const result = await fetch(upload, { method: "POST", headers: { "Content-Type": file.type }, body: file, signal: AbortSignal.timeout(30_000) });
-    if (!result.ok) throw new Error("Upload failed.");
-    const { storageId } = await result.json();
-    await fetchMutation(api.social.registerMedia, { conversationId, storageId, contentType: file.type, name: file.name, serviceKey }, { token });
-    const url = await fetchQuery(api.social.mediaUrl, { storageId }, { token });
-    return Response.json({ storageId, url });
-  } catch { return Response.json({ error: "Unable to upload media to this project." }, { status: 400 }); }
+    await fetchMutation(api.social.registerMedia, { conversationId, storageId: body.storageId, contentType: body.contentType, name: body.name, serviceKey }, { token });
+    const url = await fetchQuery(api.social.mediaUrl, { storageId: body.storageId }, { token });
+    return Response.json({ storageId: body.storageId, url });
+  } catch (error) { return Response.json({ error: error instanceof Error ? error.message : "Unable to upload media to this project." }, { status: 400 }); }
 }

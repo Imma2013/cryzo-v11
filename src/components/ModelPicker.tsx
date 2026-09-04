@@ -30,7 +30,6 @@ import {
   type ModelSelection,
 } from "@/lib/ai/models";
 import {
-  CRYZO_MANAGED_MODELS,
   normalizeManagedModelId,
   getManagedModel,
 } from "@/lib/ai/managed-models";
@@ -190,7 +189,8 @@ export function ModelPicker({
     } else if (selection.providerId !== providerId) {
       const saved = accountConnections.some((connection) => connection.providerId === providerId);
       setCredentialMode(saved ? "account" : "device");
-      setModelId("");
+      setModelId(providerId === "openrouter" && selection.providerId === "cryzo"
+        ? getManagedModel(selection.modelId).upstreamModel : "");
     }
   }, [providerId, accountConnections, selection.baseURL, selection.providerId]);
 
@@ -281,6 +281,10 @@ export function ModelPicker({
 
   const saveCredential = async () => {
     if (provider.id === "cryzo") return;
+    if (!modelId.trim()) {
+      setFeedback({ type: "error", message: "Select a model first, then save and use your key." });
+      return;
+    }
     setFeedback({ type: "saving", message: "Saving…" });
     setBusy(true);
     try {
@@ -315,6 +319,9 @@ export function ModelPicker({
               ? "Saved on this device"
               : "Saved for this session",
       });
+      onChange({ providerId, modelId: modelId.trim(), credentialMode: provider.local ? "device" : credentialMode,
+        baseURL: baseURL.trim() || provider.defaultBaseURL });
+      setOpen(false);
     } catch (error) {
       setFeedback({ type: "error", message: error instanceof Error ? error.message : "Unable to save API key" });
     } finally {
@@ -399,8 +406,8 @@ export function ModelPicker({
   };
 
   const apply = async () => {
-    if (providerId === "cryzo" && !catalog.providers?.cryzo?.models?.some(model => model.id === modelId && model.available !== false)) {
-      setFeedback({ type: "error", message: "Choose a model that has passed its streaming health check." });
+    if (providerId === "cryzo" && modelId !== selection.modelId && !catalog.providers?.cryzo?.models?.some(model => model.id === modelId)) {
+      setFeedback({ type: "error", message: "Choose a model from the current Cryzo catalog." });
       return;
     }
     if (!modelId.trim()) {
@@ -473,6 +480,7 @@ export function ModelPicker({
       >
         <ModelLogo provider={selectedProvider} modelId={selectedModelId} size={26} />
         <span className="max-w-32 truncate">{selectedModelName}</span>
+        <span className="text-[10px] text-zinc-500">{selectedProvider.id === "cryzo" ? "Included with Cryzo" : "Your key"}</span>
         <ChevronDown size={13} className="shrink-0" />
       </button>
 
@@ -627,7 +635,7 @@ export function ModelPicker({
                         className="inline-flex h-9 items-center gap-2 rounded-xl border border-zinc-700 px-3 text-xs font-medium text-zinc-200 hover:bg-zinc-800 disabled:opacity-50"
                       >
                         {busy && feedback.type === "saving" ? <Loader2 className="animate-spin" size={13} /> : <Server size={13} />}
-                        Save connection
+                        Save and use key
                       </button>
                       {!provider.local && (
                         <button

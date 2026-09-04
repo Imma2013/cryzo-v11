@@ -15,7 +15,9 @@ async function accounts(userId: string) {
     cursor = result.nextCursor || undefined;
   } while (cursor);
   return items.filter(item => item.toolkit.slug in channels).map(item => ({
-    id: item.id, channel: channels[item.toolkit.slug as keyof typeof channels], name: item.toolkit.slug,
+    id: item.id, channel: channels[item.toolkit.slug as keyof typeof channels],
+    name: item.alias?.trim() || String(item.state?.val?.username ?? item.state?.val?.email ?? item.toolkit.slug),
+    authConfigId: item.authConfig.id,
   }));
 }
 export async function GET(req: Request) {

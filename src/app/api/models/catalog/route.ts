@@ -1,5 +1,5 @@
 import { PROVIDERS } from "@/lib/ai/models";
-import { managedCatalog } from "@/lib/server/openrouter";
+import { managedPickerCatalog } from "@/lib/server/openrouter";
 
 export const dynamic = "force-dynamic";
 
@@ -74,7 +74,7 @@ export async function GET() {
       providers[definition.id] = normalizeProvider(definition.id, provider);
     }
 
-    const managed = await managedCatalog();
+    const managed = await managedPickerCatalog();
     providers.cryzo = { id: "cryzo", name: "Cryzo", api: null, env: [], models: managed.map(model => ({
       ...model, reasoning: Boolean(model.reasoning), toolCall: Boolean(model.toolCall), structuredOutput: false, releaseDate: null, lastUpdated: null,
     })) };
