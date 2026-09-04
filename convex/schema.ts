@@ -345,6 +345,7 @@ export default defineSchema({
     messageRolloverExpiresAt: v.optional(v.number()),
     messageTopUpCredits: v.optional(v.number()),
     messageTopUpExpiresAt: v.optional(v.number()),
+    managedTopUpConsumedMicros: v.optional(v.number()),
     integrationMonthlyCredits: v.optional(v.number()),
     integrationCreditsUsed: v.optional(v.number()),
     dailyCreditsUsed: v.optional(v.number()),
@@ -390,6 +391,7 @@ export default defineSchema({
   aiUsageMeters: defineTable({
     userId: v.id("users"), period: v.string(),
     spentMicros: v.number(), reservedMicros: v.number(),
+    topUpSpentMicros: v.optional(v.number()),
     freeRuns: v.number(), reservedRuns: v.number(),
     day: v.string(), dailyRuns: v.number(),
   }).index("by_user_period", ["userId", "period"]),

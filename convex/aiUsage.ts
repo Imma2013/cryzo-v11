@@ -16,7 +16,10 @@ async function entitlement(ctx: QueryCtx | MutationCtx, userId: Id<"users">) {
   const sub = await ctx.db.query("subscriptions").withIndex("by_user", q => q.eq("userId", userId)).unique();
   const active = sub && (sub.status === "active" || (sub.status === "canceled" && sub.currentPeriodEnd > Date.now()));
   const plan = owner ? "elite" : active ? (sub.plan === "pro" && (sub.messageMonthlyCredits ?? sub.monthlyCredits ?? 0) > 0 && (sub.messageMonthlyCredits ?? sub.monthlyCredits ?? 0) <= 100 ? "starter" : sub.plan) : "free";
-  return { plan, owner, allowance: owner ? 1_000_000_000_000 : AI_ALLOWANCE_MICROS[plan] ?? 0 };
+  const expiry = sub?.messageTopUpExpiresAt ?? sub?.topUpExpiresAt ?? 0;
+  // Honor previously purchased credits at their original $20 per 100 value.
+  const topUp = sub && expiry > Date.now() ? Math.max(0, Math.round((sub.messageTopUpCredits ?? sub.topUpCredits ?? 0) * 200_000) - (sub.managedTopUpConsumedMicros ?? 0)) : 0;
+  return { plan, owner, sub, topUp, allowance: owner ? 1_000_000_000_000 : AI_ALLOWANCE_MICROS[plan] ?? 0 };
 }
 
 const periodNow = () => new Date().toISOString().slice(0, 7);
@@ -31,8 +34,9 @@ export const balance = query({
     const access = await entitlement(ctx, userId);
     const period = periodNow();
     const meter = await ctx.db.query("aiUsageMeters").withIndex("by_user_period", q => q.eq("userId", userId).eq("period", period)).unique();
-    return { plan: access.plan, allowanceMicros: access.allowance, spentMicros: meter?.spentMicros ?? 0,
-      remainingMicros: Math.max(0, access.allowance - (meter?.spentMicros ?? 0) - (meter?.reservedMicros ?? 0)),
+    const allowance = access.allowance + access.topUp + (meter?.topUpSpentMicros ?? 0);
+    return { plan: access.plan, allowanceMicros: allowance, spentMicros: meter?.spentMicros ?? 0,
+      remainingMicros: Math.max(0, allowance - (meter?.spentMicros ?? 0) - (meter?.reservedMicros ?? 0)),
       freeRemaining: Math.max(0, 25 - (meter?.freeRuns ?? 0) - (meter?.reservedRuns ?? 0)),
       dailyRemaining: Math.max(0, 5 - (meter?.day === dayNow() ? meter.dailyRuns : 0) - (meter?.reservedRuns ?? 0)), period };
   },
@@ -65,7 +69,7 @@ export const reserve = mutation({
     const free = access.plan === "free" && !access.owner;
     const daily = meter.day === day ? meter.dailyRuns : 0;
     if (free && (meter.freeRuns >= 25 || daily >= 5)) throw new Error("no_message_credits");
-    if (!access.owner && args.maxCostMicros > access.allowance - meter.spentMicros - meter.reservedMicros) throw new Error("no_message_credits");
+    if (!access.owner && args.maxCostMicros > access.allowance + access.topUp + (meter.topUpSpentMicros ?? 0) - meter.spentMicros - meter.reservedMicros) throw new Error("no_message_credits");
     const id = await ctx.db.insert("aiRuns", { userId, conversationId: args.conversationId, requestKey: args.requestKey, period, day,
       requestedModel: args.modelId, status: "running", reservedMicros: args.maxCostMicros, free, expiresAt: Date.now() + 300_000, createdAt: Date.now() });
     await ctx.db.patch(meter._id, { reservedMicros: meter.reservedMicros + args.maxCostMicros, reservedRuns: meter.reservedRuns + (free ? 1 : 0), day, dailyRuns: daily });
@@ -80,9 +84,14 @@ async function settleRun(ctx: MutationCtx, runId: Id<"aiRuns">, success: boolean
   const meter = await ctx.db.query("aiUsageMeters").withIndex("by_user_period", q => q.eq("userId", run.userId).eq("period", run.period)).unique();
   // Provider costs can exceed an estimate; Cryzo absorbs any amount beyond the reserved ceiling.
   const cost = success ? Math.min(costMicros, run.reservedMicros) : 0;
+  const access = await entitlement(ctx, run.userId);
+  const monthlyRemaining = Math.max(0, access.allowance - ((meter?.spentMicros ?? 0) - (meter?.topUpSpentMicros ?? 0)));
+  const topUpCost = Math.min(access.topUp, Math.max(0, cost - monthlyRemaining));
+  if (topUpCost && access.sub) await ctx.db.patch(access.sub._id, { managedTopUpConsumedMicros: (access.sub.managedTopUpConsumedMicros ?? 0) + topUpCost });
   await ctx.db.patch(run._id, { status: success ? "completed" : "failed", costMicros: cost, ...detail });
   if (meter) await ctx.db.patch(meter._id, {
     spentMicros: meter.spentMicros + cost, reservedMicros: Math.max(0, meter.reservedMicros - run.reservedMicros),
+    topUpSpentMicros: (meter.topUpSpentMicros ?? 0) + topUpCost,
     reservedRuns: Math.max(0, meter.reservedRuns - (run.free ? 1 : 0)),
     freeRuns: meter.freeRuns + (success && run.free ? 1 : 0),
     dailyRuns: meter.dailyRuns + (success && run.free && meter.day === run.day ? 1 : 0),
@@ -113,7 +122,7 @@ export const extendReservation = mutation({
     const access = await entitlement(ctx, run.userId);
     const meter = await ctx.db.query("aiUsageMeters").withIndex("by_user_period", q => q.eq("userId", run.userId).eq("period", run.period)).unique();
     const extra = args.maxCostMicros - run.reservedMicros;
-    if (!meter || (!access.owner && extra > access.allowance - meter.spentMicros - meter.reservedMicros)) throw new Error("no_message_credits");
+    if (!meter || (!access.owner && extra > access.allowance + access.topUp + (meter.topUpSpentMicros ?? 0) - meter.spentMicros - meter.reservedMicros)) throw new Error("no_message_credits");
     await ctx.db.patch(run._id, { reservedMicros: args.maxCostMicros });
     await ctx.db.patch(meter._id, { reservedMicros: meter.reservedMicros + extra });
     return null;

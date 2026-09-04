@@ -5,6 +5,7 @@ function run(command, args, quiet = false) {
   if (result.status !== 0) throw new Error(quiet ? "Protected Convex configuration failed. Check deployment credentials." : command + " failed.");
 }
 run("npm", ["test"]);
+if (process.env.VERCEL_ENV === "preview" || process.env.VERCEL_ENV === "production") run(process.execPath, ["scripts/smoke-apps.mjs"]);
 if (process.env.VERCEL_ENV === "preview") {
   run(process.execPath, ["scripts/smoke-managed-models.mjs", ...(process.env.CRYZO_SMOKE_MODE === "critical" ? ["--critical-only"] : [])]);
   run("npm", ["run", "build"]);

@@ -23,6 +23,27 @@ beforeEach(() => { vi.stubEnv("CRYZO_INTERNAL_API_SECRET", serviceKey); vi.useFa
 afterEach(() => { vi.useRealTimers(); vi.unstubAllEnvs(); });
 
 describe("managed AI ledger", () => {
+  it("reserves multi-step costs atomically and settles exact reported usage once", async () => {
+    const { t, authed, conversationId, userId } = await setup();
+    await t.run(ctx => ctx.db.insert("subscriptions", { userId, plan: "starter", status: "active", currentPeriodEnd: Date.now() + 86400000, monthlyCredits: 100, creditsUsed: 0, rolloverCredits: 0, createdAt: Date.now(), updatedAt: Date.now() }));
+    const runId = await authed.mutation(api.aiUsage.reserve, { conversationId, requestKey: "paid", modelId: "paid", freeModel: false, maxCostMicros: 500000, serviceKey });
+    await t.mutation(api.aiUsage.extendReservation, { serviceKey, runId, maxCostMicros: 2000000 });
+    expect((await authed.query(api.aiUsage.balance, {})).remainingMicros).toBe(8000000);
+    await expect(t.mutation(api.aiUsage.extendReservation, { serviceKey, runId, maxCostMicros: 10000001 })).rejects.toThrow("no_message_credits");
+    await t.mutation(api.aiUsage.settle, { serviceKey, runId, success: true, costMicros: 1234567 });
+    await t.mutation(api.aiUsage.settle, { serviceKey, runId, success: true, costMicros: 1234567 });
+    expect((await authed.query(api.aiUsage.balance, {})).remainingMicros).toBe(8765433);
+  });
+  it("honors legacy purchased top-ups without replenishing spent top-ups next month", async () => {
+    const { t, authed, conversationId, userId } = await setup();
+    await t.run(ctx => ctx.db.insert("subscriptions", { userId, plan: "starter", status: "active", currentPeriodEnd: Date.now() + 90 * 86400000, monthlyCredits: 100, creditsUsed: 0, rolloverCredits: 0, messageTopUpCredits: 100, messageTopUpExpiresAt: Date.now() + 365 * 86400000, createdAt: Date.now(), updatedAt: Date.now() }));
+    expect((await authed.query(api.aiUsage.balance, {})).remainingMicros).toBe(30000000);
+    const runId = await authed.mutation(api.aiUsage.reserve, { conversationId, requestKey: "top-up", modelId: "paid", freeModel: false, maxCostMicros: 12000000, serviceKey });
+    await t.mutation(api.aiUsage.settle, { serviceKey, runId, success: true, costMicros: 12000000 });
+    expect((await authed.query(api.aiUsage.balance, {})).remainingMicros).toBe(18000000);
+    vi.setSystemTime(Date.now() + 32 * 86400000);
+    expect((await authed.query(api.aiUsage.balance, {})).remainingMicros).toBe(28000000);
+  });
   it("releases failed runs and rejects duplicate success settlement", async () => {
     const { t, authed, conversationId } = await setup();
     const input = { conversationId, requestKey: "r1", modelId: "free-model", freeModel: true, maxCostMicros: 0, serviceKey };

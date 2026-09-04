@@ -99,6 +99,7 @@ export default function ProjectMarketing({ conversationId }: { conversationId: I
   const [composerError, setComposerError] = useState<string | null>(null);
   const [aiPrompt, setAiPrompt] = useState("");
   const [aiDraft, setAiDraft] = useState("");
+  const [aiModel, setAiModel] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
 
@@ -201,6 +202,7 @@ export default function ProjectMarketing({ conversationId }: { conversationId: I
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Unable to generate post");
       setAiDraft(data.text || "");
+      setAiModel((data.fallbackUsed ? "Fallback: " : "") + (data.actualModel || ""));
     } catch (error) {
       setAiError(error instanceof Error ? error.message : "Unable to generate post");
     } finally {
@@ -271,6 +273,7 @@ export default function ProjectMarketing({ conversationId }: { conversationId: I
         {aiDraft && (
           <div className="mt-5 rounded-2xl border border-zinc-800 bg-black p-4">
             <p className="whitespace-pre-wrap text-sm leading-6 text-zinc-300">{aiDraft}</p>
+            {aiModel && <p className="mt-2 text-xs text-zinc-400">{aiModel}</p>}
             <button
               type="button"
               onClick={() => {

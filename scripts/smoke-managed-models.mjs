@@ -13,7 +13,8 @@ const models = [];
 for await (const page of pages) for (const model of page.result.data) {
   if (model.id.includes(":batch") || model.id.startsWith("~") || model.id.startsWith("openrouter/")) continue;
   if (process.argv.includes("--critical-only") && !freePool.has(model.id) && model.id !== "minimax/minimax-m3") continue;
-  if ((model.contextLength ?? 0) < 16000 || !model.architecture.outputModalities.includes("text")) continue;
+  if ((model.contextLength ?? 0) < 16000 || model.architecture.outputModalities.length !== 1 || model.architecture.outputModalities[0] !== "text") continue;
+  if (/guard|moderation|safety|embedding|rerank/i.test(model.id)) continue;
   if (model.id.endsWith(":free") && !freePool.has(model.id)) continue;
   models.push(model);
 }

@@ -15,6 +15,7 @@ import { api } from "../../../../convex/_generated/api";
 import { readFileSync } from "fs";
 import { join } from "path";
 import { resolveServerModel } from "@/lib/server/model-provider";
+import { readStreamPart } from "@/lib/server/stream-read";
 import { managedCandidates, markModelUnhealthy, openRouterClient } from "@/lib/server/openrouter";
 import type { Id } from "../../../../convex/_generated/dataModel";
 import { composioToolCreditCost } from "@/lib/billing/integration-costs";
@@ -312,7 +313,7 @@ export async function POST(req: Request) {
                 onError: error => safeError(error),
               }).getReader();
               while (true) {
-                const next = await reader.read();
+                const next = await readStreamPart(reader, signal);
                 if (next.done) break;
                 const part = next.value;
                 if (part.type === "error") throw new Error(part.errorText);

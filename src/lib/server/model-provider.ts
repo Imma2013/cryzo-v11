@@ -39,6 +39,7 @@ function cryzoHeaders() {
 
 async function resolveManagedCryzoModel(requestedModel?: string) {
   const definition = getManagedModel(requestedModel);
+  if (requestedModel && requestedModel !== definition.id && requestedModel !== "cryzo/kimi-k3") throw new Error("This model is no longer supported. Choose another model.");
   const managed = (await managedCatalog()).find(model => model.id === definition.id);
   if (!managed) throw new Error("This model is unavailable. Choose another model.");
   const apiKey = process.env.OPENROUTER_API_KEY?.trim();

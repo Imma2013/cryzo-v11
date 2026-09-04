@@ -227,14 +227,14 @@ export const listPosts = query({
     const userId = await getAuthUserId(ctx);
     if (!userId) return [];
     if (args.conversationId) await requireProject(ctx, userId, args.conversationId);
-    const posts = await ctx.db
-      .query("socialPosts")
-      .withIndex("by_project_and_scheduled", (q) => q.eq("conversationId", args.conversationId))
+    const posts = await (args.conversationId
+      ? ctx.db.query("socialPosts").withIndex("by_project_and_scheduled", q => q.eq("conversationId", args.conversationId))
+      : ctx.db.query("socialPosts").withIndex("by_user_and_scheduled", q => q.eq("userId", userId)))
       .order("desc")
       .take(250);
 
     return await Promise.all(
-      posts.filter(post => post.userId === userId).map(async (post) => ({
+      posts.filter(post => post.userId === userId && post.conversationId === args.conversationId).map(async (post) => ({
         ...post,
         deliveries: await deliveriesForPost(ctx, post._id),
         mediaUrls: (
