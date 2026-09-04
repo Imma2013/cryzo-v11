@@ -9,6 +9,7 @@
  */
 
 import type * as appBackends from "../appBackends.js";
+import type * as aiUsage from "../aiUsage.js";
 import type * as artifacts from "../artifacts.js";
 import type * as auth from "../auth.js";
 import type * as billing from "../billing.js";
@@ -33,6 +34,7 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  aiUsage: typeof aiUsage;
   appBackends: typeof appBackends;
   artifacts: typeof artifacts;
   auth: typeof auth;

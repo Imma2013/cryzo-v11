@@ -153,12 +153,11 @@ export default function ChatEmptyPage() {
               )}
             </div>
           </section>
-          <Link href="/chat/social" className="group rounded-2xl border border-[#ff5f2e]/30 bg-[#ff5f2e] p-5 text-white transition hover:-translate-y-0.5">
+          <aside className="rounded-2xl border border-zinc-800 bg-zinc-950 p-5 text-white">
             <CalendarDays size={24} />
-            <h2 className="mt-12 text-xl font-semibold">Plan your social week</h2>
-            <p className="mt-2 text-sm leading-6 text-orange-100/80">Create, schedule, and publish to seven networks with Cryzo Social.</p>
-            <span className="mt-5 inline-flex items-center gap-2 text-xs font-semibold">Open calendar <ArrowUpRight size={14} /></span>
-          </Link>
+            <h2 className="mt-12 text-xl font-semibold">Marketing for your project</h2>
+            <p className="mt-2 text-sm leading-6 text-zinc-400">Open any project and choose Dashboard, then Marketing to draft, preview and publish social posts.</p>
+          </aside>
         </div>
       </div>
     </div>

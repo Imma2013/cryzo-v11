@@ -1,7 +1,10 @@
+import { reasoningConfig } from "@/lib/ai/reasoning-config";
 import { createOpenAI } from "@ai-sdk/openai";
+import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { getProvider } from "@/lib/ai/models";
 import { getManagedModel } from "@/lib/ai/managed-models";
 import { resolveAccountProviderSecret } from "@/lib/server/provider-secrets";
+import { managedCatalog } from "@/lib/server/openrouter";
 
 export type ServerModelRequest = {
   providerId?: string;
@@ -34,22 +37,28 @@ function cryzoHeaders() {
   };
 }
 
-function resolveManagedCryzoModel(requestedModel?: string) {
-  const managed = getManagedModel(requestedModel);
+async function resolveManagedCryzoModel(requestedModel?: string) {
+  const definition = getManagedModel(requestedModel);
+  if (requestedModel && requestedModel !== definition.id && requestedModel !== "cryzo/kimi-k3") throw new Error("This model is no longer supported. Choose another model.");
+  const managed = (await managedCatalog()).find(model => model.id === definition.id);
+  if (!managed) throw new Error("This model is unavailable. Choose another model.");
   const apiKey = process.env.OPENROUTER_API_KEY?.trim();
 
   if (!apiKey) {
     throw new Error("OPENROUTER_API_KEY is not configured");
   }
 
-  const provider = createOpenAI({
-    baseURL: "https://openrouter.ai/api/v1",
+  const provider = createOpenRouter({
     apiKey,
     headers: cryzoHeaders(),
   });
 
   return {
-    model: provider.chat(managed.upstreamModel),
+    model: provider.chat(managed.upstreamModel, {
+      usage: { include: true },
+      ...(managed.reasoning ? { reasoning: reasoningConfig(managed.reasoningOptions) } : {}),
+      extraBody: { provider: { allow_fallbacks: true } },
+    }),
     providerId: "cryzo",
     modelId: managed.id,
     upstreamModelId: managed.upstreamModel,
@@ -58,6 +67,7 @@ function resolveManagedCryzoModel(requestedModel?: string) {
     creditMultiplier: managed.creditMultiplier,
     minimumPlan: managed.minimumPlan ?? "free",
     supportsTools: Boolean(managed.toolCall),
+    profile: managed,
   } as const;
 }
 
@@ -128,6 +138,7 @@ export async function resolveServerModel(request: ServerModelRequest) {
     creditMultiplier: 0,
     minimumPlan: "free" as const,
     supportsTools: true,
+    profile: undefined,
   };
 }
 

@@ -1,4 +1,5 @@
 import { PROVIDERS } from "@/lib/ai/models";
+import { managedCatalog } from "@/lib/server/openrouter";
 
 export const dynamic = "force-dynamic";
 
@@ -59,13 +60,11 @@ function normalizeProvider(providerId: string, provider: CatalogProvider) {
 export async function GET() {
   try {
     const response = await fetch(MODELS_URL, {
+      signal: AbortSignal.timeout(8_000),
       headers: { Accept: "application/json" },
       next: { revalidate: 60 * 30 },
-    });
-    if (!response.ok) {
-      throw new Error(`models.dev returned ${response.status}`);
-    }
-    const catalog = (await response.json()) as Record<string, CatalogProvider>;
+    }).catch(() => null);
+    const catalog = (response?.ok ? await response.json() : {}) as Record<string, CatalogProvider>;
     const providers: Record<string, ReturnType<typeof normalizeProvider>> = {};
 
     for (const definition of PROVIDERS) {
@@ -75,6 +74,10 @@ export async function GET() {
       providers[definition.id] = normalizeProvider(definition.id, provider);
     }
 
+    const managed = await managedCatalog();
+    providers.cryzo = { id: "cryzo", name: "Cryzo", api: null, env: [], models: managed.map(model => ({
+      ...model, reasoning: Boolean(model.reasoning), toolCall: Boolean(model.toolCall), structuredOutput: false, releaseDate: null, lastUpdated: null,
+    })) };
     return Response.json({
       source: MODELS_URL,
       fetchedAt: Date.now(),

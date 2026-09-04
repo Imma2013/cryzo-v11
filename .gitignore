@@ -12,6 +12,7 @@
 
 # testing
 /coverage
+/managed-model-smoke.json
 
 # next.js
 /.next/

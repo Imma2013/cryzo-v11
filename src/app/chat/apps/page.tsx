@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useAuthToken } from "@convex-dev/auth/react";
 import {
   CheckCircle2,
@@ -15,7 +15,6 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/providers/AuthProvider";
 import {
-  INITIAL_APP_CONNECTIONS,
   type AppConnection,
 } from "@/lib/composio-apps";
 import {
@@ -79,7 +78,7 @@ const DEVELOPER_APPS = [
 export default function AppsPage() {
   const { userId, isLoading } = useAuth();
   const authToken = useAuthToken();
-  const [toolkits, setToolkits] = useState<Toolkit[]>(INITIAL_APP_CONNECTIONS);
+  const [toolkits, setToolkits] = useState<Toolkit[]>([]);
   const [checkedConnections, setCheckedConnections] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [busyToolkit, setBusyToolkit] = useState<string | null>(null);
@@ -99,38 +98,43 @@ export default function AppsPage() {
     message?: string;
   }>({ type: "idle" });
 
-  const filtered = useMemo(() => {
-    if (!search.trim()) return toolkits;
-    const q = search.toLowerCase();
-    return toolkits.filter((toolkit) => toolkit.name.toLowerCase().includes(q));
-  }, [toolkits, search]);
+  const [category, setCategory] = useState("");
+  const [connectionFilter, setConnectionFilter] = useState("");
+  const [categories, setCategories] = useState<{ id: string; name: string }[]>([]);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [totalItems, setTotalItems] = useState(0);
+  const [catalogError, setCatalogError] = useState<string | null>(null);
+  const requestRef = useRef(0);
+  const filtered = toolkits;
 
-  const fetchConnections = useCallback(async (forceRefresh = false) => {
+  const fetchConnections = useCallback(async (forceRefresh = false, cursor?: string) => {
     if (!userId || !authToken) return;
-
+    const request = ++requestRef.current;
     setRefreshing(true);
+    setCatalogError(null);
     try {
-      const params = new URLSearchParams();
+      const params = new URLSearchParams({ query: search, category, connection: connectionFilter });
       if (forceRefresh) params.set("refresh", "1");
-      const query = params.toString() ? `?${params.toString()}` : "";
-      const res = await fetch(`/api/connections${query}`, {
-        cache: "no-store",
-        headers: { Authorization: `Bearer ${authToken}` },
+      if (cursor) params.set("cursor", cursor);
+      const res = await fetch("/api/connections?" + params, {
+        cache: "no-store", headers: { Authorization: `Bearer ${authToken}` },
       });
-      if (!res.ok) throw new Error(`Connections request failed: ${res.status}`);
       const data = await res.json();
-      const nextToolkits = data.toolkits ?? [];
-      setToolkits(nextToolkits.length > 0 ? nextToolkits : INITIAL_APP_CONNECTIONS);
+      if (!res.ok) throw new Error(data.error || "Unable to load apps.");
+      if (request !== requestRef.current) return;
+      const items = data.items ?? [];
+      setToolkits(current => cursor
+        ? [...new Map([...current, ...items].map(item => [item.slug, item])).values()]
+        : items);
+      setNextCursor(data.nextCursor ?? null);
+      setTotalItems(data.totalItems ?? items.length);
+      setCategories(data.categories ?? []);
     } catch (error) {
-      console.warn("Failed to refresh app connections", error);
-      setToolkits((current) =>
-        current.length > 0 ? current : INITIAL_APP_CONNECTIONS,
-      );
+      if (request === requestRef.current) setCatalogError(error instanceof Error ? error.message : "Unable to load apps.");
     } finally {
-      setCheckedConnections(true);
-      setRefreshing(false);
+      if (request === requestRef.current) { setCheckedConnections(true); setRefreshing(false); }
     }
-  }, [authToken, userId]);
+  }, [authToken, userId, search, category, connectionFilter]);
 
   useEffect(() => {
     setDeveloperTokens({
@@ -169,7 +173,8 @@ export default function AppsPage() {
       setBusyToolkit(storedPending);
     }
 
-    void fetchConnections(Boolean(storedPending));
+    const timer = window.setTimeout(() => void fetchConnections(Boolean(storedPending)), 250);
+    return () => { window.clearTimeout(timer); requestRef.current++; };
   }, [fetchConnections, isLoading, userId]);
 
   useEffect(() => {
@@ -551,7 +556,7 @@ export default function AppsPage() {
             </p>
           </div>
 
-          {toolkits.length > 0 && (
+          {(
             <div className="relative mt-4">
               <Search
                 size={16}
@@ -567,9 +572,19 @@ export default function AppsPage() {
             </div>
           )}
 
+          <div className="mt-3 flex flex-wrap gap-3">
+            <select aria-label="App category" value={category} onChange={event => setCategory(event.target.value)} className="rounded-lg border border-zinc-800 bg-zinc-950 p-2 text-sm">
+              <option value="">All categories</option>
+              {categories.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
+            </select>
+            <select aria-label="Connection status" value={connectionFilter} onChange={event => setConnectionFilter(event.target.value)} className="rounded-lg border border-zinc-800 bg-zinc-950 p-2 text-sm">
+              <option value="">All apps</option><option value="connected">Connected</option><option value="disconnected">Not connected</option>
+            </select>
+          </div>
+          {catalogError && <div role="alert" className="mt-4 rounded-lg border border-red-900 p-4 text-sm text-red-300">{catalogError} <button onClick={() => void fetchConnections(true)} className="ml-3 underline">Retry</button></div>}
           {filtered.length === 0 ? (
             <p className="py-20 text-center text-sm text-zinc-500">
-              {search ? "No apps match your search." : "No apps available."}
+              {refreshing ? "Loading apps..." : catalogError ? "The catalog could not be loaded." : "No apps match your filters."}
             </p>
           ) : (
             <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -642,6 +657,10 @@ export default function AppsPage() {
               })}
             </div>
           )}
+          <div className="mt-5 text-center text-sm text-zinc-400">
+            <p>Showing {toolkits.length} of {totalItems} integrations</p>
+            {nextCursor && <button disabled={refreshing} onClick={() => void fetchConnections(false, nextCursor)} className="mt-3 rounded-lg border border-zinc-700 px-5 py-2 text-white disabled:opacity-50">Show more</button>}
+          </div>
           {refreshing && (
             <div className="mt-3 flex items-center justify-center gap-2 text-xs text-zinc-600">
               <Loader2 size={12} className="animate-spin" />

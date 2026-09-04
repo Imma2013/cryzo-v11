@@ -54,8 +54,9 @@ const PLANS: PlanDefinition[] = [
     tagline: "Build without counting projects.",
     features: [
       "Unlimited projects",
-      "25 managed-AI message credits",
+      "5 free generations daily, 25 monthly",
       "Bring your own AI keys",
+      "1 social account, 10 publish-now posts monthly",
       "GitHub sync and code export",
       "Deploy with your own Vercel or Netlify",
       "Native mobile source and store-readiness scans",
@@ -72,11 +73,11 @@ const PLANS: PlanDefinition[] = [
     tagline: "More managed AI and connected actions.",
     features: [
       "Everything in Free",
-      "100 managed-AI message credits",
+      "$10 managed AI spend included",
       "2,000 integration credits",
       "Remove Cryzo branding on managed hosting",
       "Managed custom domains",
-      "Message-credit top-ups",
+      "7 social accounts and post scheduling",
     ],
     icon: <Sparkles size={17} />,
   },
@@ -90,7 +91,7 @@ const PLANS: PlanDefinition[] = [
     tagline: "Ship web and native apps with Cryzo handling the boring parts.",
     features: [
       "Everything in Starter",
-      "250 managed-AI message credits",
+      "$25 managed AI spend included",
       "10,000 integration credits",
       "Managed iOS and Android builds",
       "App Store and Google Play submission",
@@ -109,7 +110,7 @@ const PLANS: PlanDefinition[] = [
     tagline: "For builders running larger products and workflows.",
     features: [
       "Everything in Builder",
-      "500 managed-AI message credits",
+      "$50 managed AI spend included",
       "20,000 integration credits",
       "More managed build capacity",
       "Priority job capacity",
@@ -127,7 +128,7 @@ const PLANS: PlanDefinition[] = [
     tagline: "Top credits and support for people going all in.",
     features: [
       "Everything in Pro",
-      "1,200 managed-AI message credits",
+      "$100 managed AI spend included",
       "50,000 integration credits",
       "Highest managed capacity",
       "Priority support",
@@ -166,6 +167,7 @@ export default function BillingPage() {
     api.billing.getSubscription,
     userId ? { userId } : "skip",
   );
+  const aiBalance = useQuery(api.aiUsage.balance, userId ? {} : "skip");
   const history = useQuery(
     api.billing.getCreditHistory,
     userId ? { userId } : "skip",
@@ -173,7 +175,7 @@ export default function BillingPage() {
 
   const recentHistory = useMemo(() => history?.slice(0, 16) || [], [history]);
 
-  if (!subscription) {
+  if (!subscription || !aiBalance) {
     return (
       <div className="flex h-full items-center justify-center bg-black">
         <Loader2 className="animate-spin text-zinc-500" size={24} />
@@ -183,9 +185,9 @@ export default function BillingPage() {
 
   const plan = subscription.plan;
   const isPaid = plan !== "free";
-  const messageTotal = Math.max(1, subscription.messageMonthlyCredits || 25);
+  const messageTotal = plan === "free" ? 25 : aiBalance.allowanceMicros / 1_000_000;
   const integrationTotal = Math.max(1, subscription.integrationMonthlyCredits || 100);
-  const messageUsed = subscription.messageCreditsUsed || 0;
+  const messageUsed = plan === "free" ? 25 - aiBalance.freeRemaining : aiBalance.spentMicros / 1_000_000;
   const integrationUsed = subscription.integrationCreditsUsed || 0;
   const topUpPrice = (selectedTopUp / 100) * 20;
 
@@ -273,14 +275,12 @@ export default function BillingPage() {
             </div>
             <h1 className="mt-2 text-3xl font-semibold tracking-tight sm:text-4xl">Build freely. Pay for managed power.</h1>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
-              Projects, BYOK models, source export and DIY deployments are not the meter. Cryzo charges message credits for managed premium AI and integration credits for connected tool actions.
+              Projects, BYOK models, source export and DIY deployments are not the meter. Managed AI uses an included dollar allowance at reported provider cost. Integration credits for connected actions are separate. No automatic overage charges.
             </p>
           </div>
           {isPaid && (
             <div className="flex gap-2">
-              <button type="button" onClick={() => setTopUpOpen(true)} className="inline-flex h-10 items-center gap-2 rounded-xl bg-white px-4 text-sm font-medium text-black hover:bg-zinc-200">
-                <Plus size={15} /> Add message credits
-              </button>
+
               <button type="button" onClick={() => void handleManage()} className="inline-flex h-10 items-center gap-2 rounded-xl border border-zinc-800 px-4 text-sm text-zinc-300 hover:border-zinc-600 hover:text-white">
                 {loadingAction === "manage" ? <Loader2 className="animate-spin" size={15} /> : <CreditCard size={15} />} Manage
               </button>
@@ -309,18 +309,19 @@ export default function BillingPage() {
             </div>
             <p className="mt-5 text-sm text-zinc-400">
               {plan === "free"
-                ? `${formatCredits(subscription.dailyCreditsRemaining)} managed premium credits available today, ${formatCredits(subscription.freeMonthlyRemaining)} left this month.`
+                ? `${aiBalance.dailyRemaining} free generations available today, ${aiBalance.freeRemaining} left this month.`
                 : `${subscription.billingCycle === "yearly" ? "Yearly" : "Monthly"} billing · renews ${new Date(subscription.currentPeriodEnd).toLocaleDateString()}.`}
             </p>
           </div>
 
           <MeterCard
             icon={<Bot size={17} />}
-            title="Message credits"
-            remaining={subscription.messageCreditsRemaining || 0}
+            title={plan === "free" ? "Free generations" : "Managed AI allowance"}
+            dollars={plan !== "free"}
+            remaining={plan === "free" ? aiBalance.freeRemaining : aiBalance.remainingMicros / 1_000_000}
             used={messageUsed}
             total={messageTotal}
-            note="Cryzo-managed models spend these. BYOK models cost 0."
+            note="Exact reported cost, including reasoning. Failed, empty and cancelled generations are not charged. Allowance resets monthly (UTC)."
           />
 
           <MeterCard
@@ -334,8 +335,8 @@ export default function BillingPage() {
         </section>
 
         <section className="grid gap-3 sm:grid-cols-3">
-          <RuleCard icon={<Zap size={17} />} title="Managed models" text="MiniMax M3 and Kimi K3 use message credits based on request scope." />
-          <RuleCard icon={<Bot size={17} />} title="Bring your own key" text="0 Cryzo message credits. You pay OpenAI, Anthropic, NVIDIA or another provider directly." />
+          <RuleCard icon={<Zap size={17} />} title="Managed models" text="Model costs follow reported input, output and reasoning usage, not arbitrary credit multipliers." />
+          <RuleCard icon={<Bot size={17} />} title="Bring your own key" text="No Cryzo AI allowance is spent. Your own provider bills you directly." />
           <RuleCard icon={<Globe2 size={17} />} title="Unlimited projects" text="Build, export, sync to GitHub and DIY-deploy as many projects as you want." />
         </section>
 
@@ -375,7 +376,7 @@ export default function BillingPage() {
 
                   <div className="my-5 border-t border-zinc-800" />
                   <div className="space-y-2 text-sm">
-                    <div><strong>{formatCredits(item.messageCredits)}</strong> <span className="text-zinc-500">message credits /mo</span></div>
+                    <div><strong>{item.id === "free" ? "25 generations" : "$" + item.monthlyPrice / 2}</strong> <span className="text-zinc-500">{item.id === "free" ? "/ month, max 5 daily" : "AI allowance / month"}</span></div>
                     <div><strong>{formatCredits(item.integrationCredits)}</strong> <span className="text-zinc-500">integration credits /mo</span></div>
                   </div>
                   <div className="my-5 border-t border-zinc-800" />
@@ -412,10 +413,10 @@ export default function BillingPage() {
           <div className="rounded-2xl border border-zinc-800 bg-zinc-950 p-5">
             <div className="flex items-start justify-between gap-4">
               <div>
-                <div className="flex items-center gap-2 text-sm font-medium"><Plus size={15} /> Message-credit top-ups</div>
-                <p className="mt-2 max-w-xl text-sm leading-6 text-zinc-500">Paid plans can add message credits in 100-credit increments. Top-ups expire after 12 months. Integration credits reset with the plan instead of using these top-ups.</p>
+                <div className="flex items-center gap-2 text-sm font-medium"><Plus size={15} /> No surprise bills</div>
+                <p className="mt-2 max-w-xl text-sm leading-6 text-zinc-500">When your AI allowance runs out, choose a higher plan or bring your own key. We do not silently downgrade your model or charge automatic overages.</p>
               </div>
-              <button type="button" onClick={() => setTopUpOpen(true)} disabled={!isPaid} className="shrink-0 rounded-xl border border-zinc-700 px-3 py-2 text-xs font-medium text-zinc-200 hover:bg-zinc-900 disabled:cursor-not-allowed disabled:opacity-30">Add credits</button>
+
             </div>
           </div>
           <div className="rounded-2xl border border-zinc-800 bg-zinc-950 p-5">
@@ -487,6 +488,7 @@ function MeterCard({
   used,
   total,
   note,
+  dollars = false,
 }: {
   icon: React.ReactNode;
   title: string;
@@ -494,13 +496,14 @@ function MeterCard({
   used: number;
   total: number;
   note: string;
+  dollars?: boolean;
 }) {
   return (
     <div className="rounded-2xl border border-zinc-800 bg-zinc-950 p-5">
       <div className="flex items-center gap-2 text-sm font-medium text-zinc-300">{icon} {title}</div>
       <div className="mt-3 flex items-end justify-between gap-3">
-        <p className="text-2xl font-semibold">{formatCredits(remaining)} <span className="text-sm font-normal text-zinc-600">left</span></p>
-        <span className="text-xs text-zinc-600">{formatCredits(used)} / {formatCredits(total)} used</span>
+        <p className="text-2xl font-semibold">{dollars ? "$" + remaining.toFixed(2) : formatCredits(remaining)} <span className="text-sm font-normal text-zinc-600">left</span></p>
+        <span className="text-xs text-zinc-600">{dollars ? "$" + used.toFixed(2) : formatCredits(used)} / {dollars ? "$" + total.toFixed(2) : formatCredits(total)} used</span>
       </div>
       <div className="mt-3 h-2 overflow-hidden rounded-full bg-zinc-900">
         <div className="h-full rounded-full bg-white" style={{ width: `${percent(used, total)}%` }} />
