@@ -218,6 +218,10 @@ export default defineSchema({
 
   socialPosts: defineTable({
     userId: v.id("users"),
+    conversationId: v.optional(v.id("conversations")),
+    requestKey: v.optional(v.string()),
+    quotaPeriod: v.optional(v.string()),
+    scheduledByUser: v.optional(v.boolean()),
     content: v.string(),
     channels: v.array(
       v.union(
@@ -244,6 +248,8 @@ export default defineSchema({
         redditCommunity: v.optional(v.string()),
         youtubeTitle: v.optional(v.string()),
         tiktokPrivacy: v.optional(v.string()),
+        facebookPageId: v.optional(v.string()),
+        youtubePrivacy: v.optional(v.string()),
       }),
     ),
     error: v.optional(v.string()),
@@ -252,12 +258,17 @@ export default defineSchema({
     updatedAt: v.number(),
   })
     .index("by_user_and_scheduled", ["userId", "scheduledFor"])
+    .index("by_project_and_scheduled", ["conversationId", "scheduledFor"])
+    .index("by_project_and_request", ["conversationId", "requestKey"])
     .index("by_user_and_created", ["userId", "createdAt"])
     .index("by_status_and_scheduled", ["status", "scheduledFor"]),
 
   socialDeliveries: defineTable({
     postId: v.id("socialPosts"),
     userId: v.id("users"),
+    conversationId: v.optional(v.id("conversations")),
+    connectedAccountId: v.optional(v.string()),
+    pollingAttempts: v.optional(v.number()),
     channel: v.union(
       v.literal("x"),
       v.literal("linkedin"),
@@ -289,6 +300,18 @@ export default defineSchema({
   })
     .index("by_post", ["postId"])
     .index("by_user_and_status", ["userId", "status", "updatedAt"]),
+
+  socialAccounts: defineTable({
+    userId: v.id("users"), conversationId: v.id("conversations"),
+    channel: v.string(), connectedAccountId: v.string(), name: v.string(),
+  }).index("by_project", ["conversationId"]).index("by_user", ["userId"]),
+  socialUsage: defineTable({
+    userId: v.id("users"), period: v.string(), reserved: v.number(),
+  }).index("by_user_period", ["userId", "period"]),
+  socialMedia: defineTable({
+    userId: v.id("users"), conversationId: v.id("conversations"), storageId: v.id("_storage"),
+    contentType: v.string(), name: v.string(),
+  }).index("by_storage", ["storageId"]),
 
   subscriptions: defineTable({
     userId: v.id("users"),
@@ -363,5 +386,23 @@ export default defineSchema({
     eventType: v.string(),
     createdAt: v.number(),
   }).index("by_event", ["eventId"]),
+
+  aiUsageMeters: defineTable({
+    userId: v.id("users"), period: v.string(),
+    spentMicros: v.number(), reservedMicros: v.number(),
+    freeRuns: v.number(), reservedRuns: v.number(),
+    day: v.string(), dailyRuns: v.number(),
+  }).index("by_user_period", ["userId", "period"]),
+
+  aiRuns: defineTable({
+    userId: v.id("users"), conversationId: v.id("conversations"),
+    requestKey: v.string(), period: v.string(), day: v.string(),
+    requestedModel: v.string(), actualModel: v.optional(v.string()),
+    status: v.union(v.literal("running"), v.literal("completed"), v.literal("failed")),
+    reservedMicros: v.number(), costMicros: v.optional(v.number()),
+    free: v.boolean(), expiresAt: v.number(), createdAt: v.number(),
+    generationId: v.optional(v.string()), telemetry: v.optional(v.any()),
+  }).index("by_user_request", ["userId", "requestKey"])
+    .index("by_user_status", ["userId", "status"]),
 });
 

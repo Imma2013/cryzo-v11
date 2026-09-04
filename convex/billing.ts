@@ -794,3 +794,13 @@ export const isStripeEventProcessed = query({
     return Boolean(existing);
   },
 });
+export async function chargeSocialDelivery(ctx: MutationCtx, userId: Id<"users">, channel: string) {
+  if (await isInternalTester(ctx, userId)) return true;
+  const now = Date.now();
+  const sub = await ensureSubscription(ctx, userId, now);
+  const credits = computeCredits(sub, now);
+  if (credits.integrationCreditsRemaining < 1) return false;
+  await ctx.db.patch(sub._id, { integrationMonthlyCredits: credits.integrationMonthlyCredits, integrationCreditsUsed: credits.integrationCreditsUsed + 1, updatedAt: now });
+  await insertLedger(ctx, { userId, creditType: "integration", amount: -1, balance: credits.integrationCreditsRemaining - 1, reason: "social-delivery", description: "Publish to " + channel, toolName: channel });
+  return true;
+}

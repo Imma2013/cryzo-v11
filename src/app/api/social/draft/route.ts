@@ -1,100 +1,62 @@
 import { generateText } from "ai";
 import { fetchMutation, fetchQuery } from "convex/nextjs";
 import { api } from "../../../../../convex/_generated/api";
+import type { Id } from "../../../../../convex/_generated/dataModel";
 import { resolveServerModel } from "@/lib/server/model-provider";
+import { managedCandidates, openRouterClient } from "@/lib/server/openrouter";
+import { DEFAULT_MANAGED_MODEL_ID } from "@/lib/ai/managed-models";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
-
-function tokenFrom(req: Request) {
-  const authorization = req.headers.get("authorization");
-  return authorization?.startsWith("Bearer ")
-    ? authorization.slice("Bearer ".length).trim()
-    : "";
-}
-
+export const maxDuration = 180;
 export async function POST(req: Request) {
   const requestId = crypto.randomUUID();
-  const token = tokenFrom(req);
-  if (!token) return Response.json({ error: "unauthorized" }, { status: 401 });
-
-  const user = await fetchQuery(api.users.currentUser, {}, { token });
-  if (!user) return Response.json({ error: "unauthorized" }, { status: 401 });
-
-  const subscription = await fetchQuery(
-    api.billing.getSubscription,
-    { userId: user._id },
-    { token },
-  );
-  if (subscription.messageCreditsRemaining < 1) {
-    return Response.json({ error: "no_message_credits" }, { status: 402 });
-  }
-
-  const { prompt, channels }: { prompt?: string; channels?: string[] } =
-    await req.json();
-  const request = prompt?.trim() || "";
-  if (!request || request.length > 4000) {
-    return Response.json({ error: "Describe the post you want." }, { status: 400 });
-  }
-
-  const resolved = await resolveServerModel({
-    providerId: "cryzo",
-    modelId: "cryzo/minimax-m3",
-    credentialMode: "cryzo",
-    authToken: token,
-  });
-  let text = "";
-  let lastError: unknown;
-  for (let attempt = 1; attempt <= 2; attempt += 1) {
-    try {
-      const result = await generateText({
-        model: resolved.model,
-        system:
-          "You are Cryzo Social. Write a polished social post ready for review. Adapt naturally to the selected networks, keep claims grounded, avoid fake links and hashtags, and return only the post copy.",
-        prompt: `Networks: ${(channels || []).join(", ")}\nRequest: ${request}`,
-        maxOutputTokens: 900,
-      });
-      text = result.text.trim();
-      if (text) break;
-      lastError = new Error("The model returned an empty draft.");
-    } catch (error) {
-      lastError = error;
+  const token = req.headers.get("authorization")?.replace(/^Bearer /, "") ?? "";
+  if (!token) return Response.json({ error: "Sign in first." }, { status: 401 });
+  const serviceKey = process.env.CRYZO_INTERNAL_API_SECRET;
+  let runId: Id<"aiRuns"> | undefined;
+  let settled = false;
+  try {
+    if (!serviceKey) throw new Error("AI drafting is not configured.");
+    const user = await fetchQuery(api.users.currentUser, {}, { token });
+    if (!user) return Response.json({ error: "Sign in first." }, { status: 401 });
+    const { prompt, channels, conversationId, requestKey } = await req.json();
+    if (typeof prompt !== "string" || !prompt.trim() || prompt.length > 4000 || typeof requestKey !== "string") throw new Error("Describe the post you want.");
+    const project = await fetchQuery(api.conversations.get, { id: conversationId }, { token });
+    if (!project) throw new Error("Project not found.");
+    const balance = await fetchQuery(api.aiUsage.balance, {}, { token });
+    const modelId = balance.plan === "free" ? DEFAULT_MANAGED_MODEL_ID : "cryzo/minimax-m3";
+    const candidates = await managedCandidates(modelId, false, false);
+    const system = "You are Cryzo Marketing. Draft social copy for human review. Never claim to have published anything. No fabricated facts, URLs or results. Return only the post copy.";
+    const input = "Project: " + project.title + "\nNetworks: " + (Array.isArray(channels) ? channels.join(", ") : "") + "\nRequest: " + prompt;
+    const maxCostMicros = Math.ceil(Math.max(...candidates.map(model => (system.length + input.length) * model.inputCost + 8192 * model.outputCost + model.requestCost)) * 1_000_000);
+    runId = await fetchMutation(api.aiUsage.reserve, { conversationId, requestKey: "social:" + requestKey, modelId,
+      freeModel: balance.plan === "free", maxCostMicros, serviceKey }, { token });
+    const signal = AbortSignal.any([req.signal, AbortSignal.timeout(150_000)]);
+    for (const candidate of [candidates[0], candidates[0], ...candidates.slice(1)]) {
+      try {
+        const selected = await resolveServerModel({ providerId: "cryzo", modelId: candidate.id });
+        const result = await generateText({ model: selected.model, system, prompt: input,
+          maxOutputTokens: Math.min(8192, candidate.output), maxRetries: 0,
+          abortSignal: AbortSignal.any([signal, AbortSignal.timeout(35000)]) });
+        const text = result.text.trim();
+        if (!text || result.finishReason === "length" || result.finishReason === "error") throw new Error("No complete draft returned.");
+        const reported = result.providerMetadata?.openrouter?.usage as { cost?: number } | undefined;
+        const cost = reported?.cost ?? (await openRouterClient().generations.getGeneration({ id: result.response.id }, { timeoutMs: 5000 })).data.totalCost;
+        if (!Number.isFinite(cost) || cost < 0) throw new Error("Unable to verify usage.");
+        if (signal.aborted) throw new Error("Draft generation cancelled.");
+        await fetchMutation(api.aiUsage.settle, { serviceKey, runId, success: true, costMicros: Math.ceil(cost * 1_000_000),
+          actualModel: candidate.id, generationId: result.response.id,
+          telemetry: { requestedModel: modelId, actualModel: candidate.id, usage: result.usage, finishReason: result.finishReason, reportedCost: cost } });
+        settled = true;
+        return Response.json({ text, requestId, actualModel: candidate.name, fallbackUsed: candidate.id !== modelId });
+      } catch { if (signal.aborted) break; }
     }
-    console.warn("[social-draft] retry", {
-      requestId,
-      attempt,
-      modelId: resolved.modelId,
-    });
+    throw new Error("No model completed the draft. Please retry. No AI allowance was charged.");
+  } catch (error) {
+    return Response.json({ error: error instanceof Error ? error.message : "Unable to create draft.", requestId }, { status: 502 });
+  } finally {
+    if (runId && !settled && serviceKey) await fetchMutation(api.aiUsage.settle, { serviceKey, runId, success: false, costMicros: 0 }).catch(() => undefined);
   }
-
-  if (!text) {
-    console.error("[social-draft] failed", {
-      requestId,
-      modelId: resolved.modelId,
-      error: lastError instanceof Error ? lastError.message : String(lastError),
-    });
-    return Response.json(
-      {
-        error: `Cryzo could not create a draft. Try again and reference ${requestId} if it repeats.`,
-        requestId,
-      },
-      { status: 502 },
-    );
-  }
-
-  await fetchMutation(
-    api.billing.deductMessageCredits,
-    {
-      userId: user._id,
-      amount: 1,
-      reason: "social_ai",
-      description: "Generated social post",
-      providerId: resolved.providerId,
-      modelId: resolved.modelId,
-    },
-    { token },
-  );
-
-  return Response.json({ text, requestId });
 }
+
 

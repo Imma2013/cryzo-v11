@@ -1,129 +1,78 @@
 import { Composio } from "@composio/core";
-import {
-  INITIAL_APP_CONNECTIONS,
-  SELECTED_COMPOSIO_APPS,
-} from "@/lib/composio-apps";
-import {
-  getCachedConnections,
-  invalidateConnectionsCache,
-  setCachedConnections,
-} from "@/lib/composio-connection-cache";
 import { requireRequestUserId } from "@/lib/server/request-user";
+import { invalidateConnectionsCache } from "@/lib/composio-connection-cache";
+import { paginateApps, type CatalogApp } from "@/lib/catalog-pagination";
 
 let composio: Composio | null = null;
-
-function getComposio() {
-  if (!composio) composio = new Composio();
-  return composio;
-}
-
+function getComposio() { return composio ??= new Composio(); }
 export const dynamic = "force-dynamic";
+type Toolkit = { slug: string; name: string; no_auth?: boolean;
+  meta?: { logo?: string; description?: string; categories?: { id?: string; slug?: string; name: string }[] } };
+let cache: { items: Toolkit[]; expires: number; staleUntil: number } | undefined;
+let pending: Promise<Toolkit[]> | undefined;
 
-function proxiedLogo(logo?: string) {
-  if (!logo) return undefined;
-  return `/api/connections/logo?url=${encodeURIComponent(logo)}`;
-}
-
-function fallbackLogo(domain?: string) {
-  if (!domain) return undefined;
-  return proxiedLogo(
-    `https://www.google.com/s2/favicons?domain=${domain}&sz=64`,
-  );
-}
-
-function domainFromAppUrl(appUrl?: string) {
-  if (!appUrl) return undefined;
-  try {
-    return new URL(appUrl).hostname.replace(/^www\./, "");
-  } catch {
-    return undefined;
-  }
-}
-
-async function fetchAllToolkits(
-  session: Awaited<ReturnType<Composio["create"]>>,
-) {
-  const allItems: any[] = [];
-  let cursor: string | undefined;
-
-  // Tool Router catalog pages are capped at 50 by Composio.
-  for (let page = 0; page < 100; page += 1) {
-    const result: any = await session.toolkits({ limit: 50, cursor });
-    allItems.push(...(result.items || []));
-
-    const nextCursor = result.nextCursor ?? result.next_cursor;
-    if (!nextCursor || nextCursor === cursor) break;
-    cursor = nextCursor;
-  }
-
-  return Array.from(
-    new Map(allItems.map((toolkit) => [toolkit.slug, toolkit])).values(),
-  );
+// Shared metadata is cached; connection identities are fetched for the authenticated user only.
+async function catalog(): Promise<Toolkit[]> {
+  if (cache && cache.expires > Date.now()) return cache.items;
+  if (pending) return pending;
+  pending = (async () => {
+    try {
+      const key = process.env.COMPOSIO_API_KEY;
+      if (!key) throw new Error("Apps are not configured.");
+      const all = new Map<string, Toolkit>(), seen = new Set<string>();
+      let cursor: string | undefined;
+      do {
+        const params = new URLSearchParams({ limit: "1000", sort_by: "alphabetically", managed_by: "all" });
+        if (cursor) params.set("cursor", cursor);
+        const response = await fetch("https://backend.composio.dev/api/v3.1/toolkits?" + params, {
+          headers: { "x-api-key": key }, signal: AbortSignal.timeout(15000), cache: "no-store",
+        });
+        if (!response.ok) throw new Error("The app catalog is temporarily unavailable.");
+        const data = await response.json() as { items: Toolkit[]; next_cursor?: string };
+        if (!Array.isArray(data.items)) throw new Error("Invalid app catalog response.");
+        for (const item of data.items) all.set(item.slug, item);
+        cursor = data.next_cursor || undefined;
+        if (cursor && seen.has(cursor)) throw new Error("App catalog pagination stalled.");
+        if (cursor) seen.add(cursor);
+      } while (cursor);
+      if (!all.size) throw new Error("The app catalog returned no apps.");
+      const items = [...all.values()];
+      cache = { items, expires: Date.now() + 60_000, staleUntil: Date.now() + 300_000 };
+      return items;
+    } catch (error) {
+      if (cache && cache.staleUntil > Date.now()) return cache.items;
+      throw error;
+    } finally { pending = undefined; }
+  })();
+  return pending;
 }
 
 export async function GET(req: Request) {
   const userId = await requireRequestUserId(req);
-  if (!userId) {
-    return Response.json({ error: "unauthorized" }, { status: 401 });
-  }
-
-  const { searchParams } = new URL(req.url);
-  const forceRefresh = searchParams.get("refresh") === "1";
-  const cached = getCachedConnections(userId);
-  if (!forceRefresh && cached) return Response.json(cached);
-
+  if (!userId) return Response.json({ error: "unauthorized" }, { status: 401 });
   try {
-    const session = await getComposio().create(userId);
-    const items = await fetchAllToolkits(session);
-    const known = new Map(SELECTED_COMPOSIO_APPS.map((app) => [app.slug, app]));
-
-    const toolkits = items
-      .map((toolkit: any) => {
-        const fallback = known.get(toolkit.slug);
-        const meta = toolkit.meta ?? {};
-        const connectedAccount =
-          toolkit.connection?.connectedAccount ??
-          toolkit.connectedAccount ??
-          toolkit.connected_account;
-        const status = String(connectedAccount?.status ?? "").toUpperCase();
-        const noAuth =
-          toolkit.isNoAuth ??
-          toolkit.is_no_auth ??
-          toolkit.noAuth ??
-          meta.isNoAuth ??
-          false;
-        const requiresAuth = !noAuth;
-        const appUrl = meta.appUrl ?? meta.app_url;
-        const domain = fallback?.domain ?? domainFromAppUrl(appUrl);
-
-        return {
-          slug: toolkit.slug,
-          name: toolkit.name || fallback?.name || toolkit.slug,
-          domain,
-          logo:
-            proxiedLogo(meta.logo ?? toolkit.logo) ?? fallbackLogo(domain),
-          isConnected: requiresAuth
-            ? toolkit.connection?.isActive ??
-              (status === "ACTIVE" || status === "CONNECTED")
-            : true,
-          connectedAccountId: connectedAccount?.id,
-          available: toolkit.enabled ?? true,
-          requiresAuth,
-        };
-      })
-      .sort((a: any, b: any) => {
-        if (a.isConnected !== b.isConnected) return a.isConnected ? -1 : 1;
-        return a.name.localeCompare(b.name);
-      });
-
-    const result = {
-      toolkits: toolkits.length > 0 ? toolkits : INITIAL_APP_CONNECTIONS,
-    };
-    setCachedConnections(userId, result);
-    return Response.json(result);
+    const items = await catalog();
+    const accounts = new Map<string, string>(), seen = new Set<string>();
+    let cursor: string | undefined;
+    do {
+      const result = await getComposio().connectedAccounts.list({ userIds: [userId], statuses: ["ACTIVE"], limit: 100, cursor });
+      for (const account of result.items) accounts.set(account.toolkit.slug, account.id);
+      cursor = result.nextCursor || undefined;
+      if (cursor && seen.has(cursor)) throw new Error("Connection pagination stalled.");
+      if (cursor) seen.add(cursor);
+    } while (cursor);
+    const apps: CatalogApp[] = items.map(item => ({
+      slug: item.slug, name: item.name, description: item.meta?.description ?? "",
+      categories: (item.meta?.categories ?? []).map(category => ({ id: category.id ?? category.slug ?? category.name, name: category.name })),
+      logo: item.meta?.logo ? "/api/connections/logo?url=" + encodeURIComponent(item.meta.logo) : undefined,
+      requiresAuth: !item.no_auth, available: true,
+      isConnected: accounts.has(item.slug), connectedAccountId: accounts.get(item.slug),
+    }));
+    const result = paginateApps(apps, new URL(req.url).searchParams);
+    return Response.json({ ...result, toolkits: result.items });
   } catch (error) {
-    console.error("[connections/catalog]", error);
-    return Response.json({ toolkits: INITIAL_APP_CONNECTIONS });
+    console.warn("[connections/catalog]", error instanceof Error ? error.message : "Catalog unavailable");
+    return Response.json({ error: "Unable to load apps. Please retry.", items: [], nextCursor: null, totalItems: 0 }, { status: 502 });
   }
 }
 
@@ -133,7 +82,7 @@ export async function POST(req: Request) {
     return Response.json({ error: "unauthorized" }, { status: 401 });
   }
 
-  const { toolkit }: { toolkit?: string } = await req.json();
+  const { toolkit, returnTo }: { toolkit?: string; returnTo?: string } = await req.json();
   if (!toolkit || toolkit.length > 120) {
     return Response.json({ error: "invalid_toolkit" }, { status: 400 });
   }
@@ -142,7 +91,7 @@ export async function POST(req: Request) {
   invalidateConnectionsCache(userId);
   const session = await getComposio().create(userId);
   const connectionRequest = await session.authorize(toolkit, {
-    callbackUrl: origin + "/chat/apps",
+    callbackUrl: origin + (returnTo && /^\/chat\/[a-zA-Z0-9]+$/.test(returnTo) ? returnTo : "/chat/apps"),
   });
 
   return Response.json({ redirectUrl: connectionRequest.redirectUrl });

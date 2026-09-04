@@ -84,6 +84,7 @@ export function ChatArea({
   const [input, setInput] = useState("");
   const [localLoading, setLocalLoading] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
+  const [generationStatus, setGenerationStatus] = useState<string | null>(null);
   const [optimisticMode, setOptimisticMode] = useState<{
     conversationId: string;
     mode: ChatMode;
@@ -104,6 +105,18 @@ export function ChatArea({
 
   const { messages, setMessages, sendMessage, stop, status, error } = useChat({
     id: conversationId,
+    onData: part => {
+      if (part.type !== "data-generation") return;
+      const data = part.data as { status?: string; actualModelName?: string; fallbackUsed?: boolean };
+      if (data.status === "retrying") setGenerationStatus("The model did not respond. Trying a healthy model...");
+      else if (data.actualModelName) setGenerationStatus(data.fallbackUsed ? "Using " + data.actualModelName + " as a fallback." : data.actualModelName);
+      else setGenerationStatus("Connecting to the model...");
+    },
+    onFinish: ({ message, isAbort, isError }) => {
+      if (!isAbort && !isError && !message.parts.some(part => part.type === "text" && part.text.trim())) {
+        setLocalError("The model returned no text. Your prompt is saved; retry or choose another model. No AI allowance was charged.");
+      }
+    },
     transport: new DefaultChatTransport({
       api: "/api/chat",
       body: {
@@ -118,6 +131,15 @@ export function ChatArea({
     optimisticMode?.conversationId === conversationId
       ? optimisticMode.mode
       : conversation?.chatMode ?? "build";
+
+  useEffect(() => {
+    if (status !== "streaming" && status !== "submitted") return;
+    const timer = window.setTimeout(() => {
+      stop();
+      setLocalError("The response timed out. Your prompt is saved. Please retry or choose another model.");
+    }, 250_000);
+    return () => window.clearTimeout(timer);
+  }, [status, stop]);
 
   const savedProviderId =
     conversation?.modelProvider || DEFAULT_MODEL_SELECTION.providerId;
@@ -500,6 +522,9 @@ export function ChatArea({
         await runLocalModel(text, fileParts, mode, selection);
         return;
       }
+      if (!authToken) { setLocalError("Your sign-in session is still loading. Please try again."); return; }
+      setLocalError(null);
+      setGenerationStatus("Connecting to the model...");
 
       const modelApiKey =
         selection.credentialMode === "device"
@@ -518,7 +543,7 @@ export function ChatArea({
             modelCredentialMode: selection.credentialMode,
             modelBaseUrl,
             modelApiKey,
-            authToken: selection.credentialMode === "account" ? authToken : undefined,
+            authToken,
           },
         },
       );
@@ -548,7 +573,7 @@ export function ChatArea({
   const isLoading =
     status === "streaming" || status === "submitted" || localLoading;
   const errorText = localError || error?.message || "";
-  const isCreditError = /no_(message_)?credits|402/i.test(errorText);
+  const isCreditError = /no_(message_)?credits|starter_required|402/i.test(errorText);
   const initialMessageSentRef = useRef(false);
 
   const stopAll = useCallback(() => {
@@ -558,7 +583,7 @@ export function ChatArea({
   }, [stop]);
 
   useEffect(() => {
-    if (initialMessageSentRef.current) return;
+    if (initialMessageSentRef.current || !authToken) return;
     if (loadedMessages === undefined || messages.length > 0) return;
 
     const initialMessage = takeInitialChatMessage(conversationId);
@@ -570,7 +595,7 @@ export function ChatArea({
       initialMessage.files,
       initialMessage.chatMode,
     );
-  }, [conversationId, loadedMessages, messages.length, sendPreparedMessage]);
+  }, [authToken, conversationId, loadedMessages, messages.length, sendPreparedMessage]);
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-black">
@@ -621,6 +646,11 @@ export function ChatArea({
                       }`}
                     >
                       {m.parts?.map((part, i) => {
+                        if (part.type === "data-generation") {
+                          const data = part.data as { status?: string; actualModelName?: string; fallbackUsed?: boolean };
+                          if (data.status !== "completed") return null;
+                          return <div key={i} className="mt-2 text-xs text-zinc-400">{data.actualModelName}{data.fallbackUsed ? " (fallback model used)" : ""}</div>;
+                        }
                         if (part.type === "text") {
                           const {
                             cleanText,
@@ -718,7 +748,7 @@ export function ChatArea({
               {isLoading && messages[messages.length - 1]?.role === "user" && (
                 <div className="flex gap-3">
                   <div className="py-1 text-[15px] leading-7 text-zinc-400 sm:rounded-lg sm:bg-zinc-800 sm:px-4 sm:py-3 sm:text-sm sm:leading-normal">
-                    Thinking...
+                    {generationStatus || "Connecting to the model..."}
                   </div>
                 </div>
               )}

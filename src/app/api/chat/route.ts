@@ -2,6 +2,10 @@ import { Composio } from "@composio/core";
 import { VercelProvider } from "@composio/vercel";
 import {
   streamText,
+  createUIMessageStream,
+  createUIMessageStreamResponse,
+  type ToolSet,
+  type UIMessageChunk,
   stepCountIs,
   convertToModelMessages,
   type UIMessage,
@@ -11,7 +15,8 @@ import { api } from "../../../../convex/_generated/api";
 import { readFileSync } from "fs";
 import { join } from "path";
 import { resolveServerModel } from "@/lib/server/model-provider";
-import { classifyCreditCost, describeCreditCharge } from "@/lib/stripe";
+import { managedCandidates, markModelUnhealthy, openRouterClient } from "@/lib/server/openrouter";
+import type { Id } from "../../../../convex/_generated/dataModel";
 import { composioToolCreditCost } from "@/lib/billing/integration-costs";
 import {
   buildCryzoSystemPrompt,
@@ -165,393 +170,217 @@ function buildCurrentProjectContext(artifacts: any[]) {
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
-const MODEL_TOTAL_TIMEOUT_MS = 240_000;
-const MODEL_CHUNK_TIMEOUT_MS = 45_000;
-const MANAGED_MAX_OUTPUT_TOKENS = 8_192;
-
-function streamLimits(providerId: string) {
-  return {
-    maxRetries: providerId === "cryzo" ? 2 : 1,
-    timeout: {
-      totalMs: MODEL_TOTAL_TIMEOUT_MS,
-      chunkMs: MODEL_CHUNK_TIMEOUT_MS,
-    },
-    ...(providerId === "cryzo"
-      ? { maxOutputTokens: MANAGED_MAX_OUTPUT_TOKENS }
-      : {}),
-  };
-}
-
-function chatStreamError(
-  error: unknown,
-  requestId: string,
-  model: { providerId: string; modelId: string; upstreamModelId: string },
-) {
-  const message = error instanceof Error ? error.message : String(error);
-  console.error(
-    "[chat/stream-error]",
-    JSON.stringify({
-      requestId,
-      providerId: model.providerId,
-      modelId: model.modelId,
-      upstreamModelId: model.upstreamModelId,
-      message,
-    }),
-  );
-  return /abort|timeout|timed out/i.test(message)
-    ? `The model stopped responding, so Cryzo ended this run safely. Completed files were preserved. Retry this message or choose another model. Reference: ${requestId}`
-    : `Cryzo could not establish a complete response from this model. Your prompt and completed files were preserved. Retry this message or choose another model. Reference: ${requestId}`;
+function safeError(error: unknown) {
+  return (error instanceof Error ? error.message : String(error)).replace(/sk-[\w-]+/g, "[redacted]").slice(0, 500);
 }
 
 export async function POST(req: Request) {
   const requestId = crypto.randomUUID();
+  let runId: Id<"aiRuns"> | undefined;
+  const serviceKey = process.env.CRYZO_INTERNAL_API_SECRET ?? "";
+  const settle = async (success: boolean, costMicros = 0, detail: { actualModel?: string; generationId?: string; telemetry?: unknown } = {}) => {
+    if (!runId) return;
+    await convex.mutation(api.aiUsage.settle, { serviceKey, runId, success, costMicros, ...detail });
+  };
   try {
-    const {
-      messages,
-      conversationId,
-      userId,
-      composioSessionId,
-      chatMode,
-      projectPlatforms,
-      modelProvider,
-      modelId,
-      modelCredentialMode,
-      modelBaseUrl,
-      modelApiKey,
-      authToken,
-    } = (await req.json()) as {
-      messages: UIMessage[];
-      conversationId?: string;
-      userId: string;
-      composioSessionId: string | null;
-      chatMode?: "build" | "plan";
-      projectPlatforms?: ProjectPlatform[];
-      modelProvider?: string;
-      modelId?: string;
-      modelCredentialMode?: "cryzo" | "device" | "account";
-      modelBaseUrl?: string;
-      modelApiKey?: string;
-      authToken?: string;
-    };
-
-    const mode = chatMode === "plan" ? "plan" : "build";
-    const lastUserMsg = messages.filter((message) => message.role === "user").pop();
-    const lastUserText = messageText(lastUserMsg);
-    const resolved = await resolveServerModel({
-      providerId: modelProvider,
-      modelId,
-      credentialMode: modelCredentialMode,
-      modelApiKey,
-      modelBaseUrl,
-      authToken,
+    const body = await req.json();
+    const messages = body.messages as UIMessage[];
+    if (!Array.isArray(messages) || !messages.length || messages.length > 200) {
+      return Response.json({ error: "Invalid conversation.", requestId }, { status: 400 });
+    }
+    const authenticated = authedConvexClient(body.authToken);
+    const user = authenticated && await authenticated.query(api.users.currentUser, {});
+    if (!authenticated || !user) return Response.json({ error: "Sign in to continue.", requestId }, { status: 401 });
+    const userId = user._id;
+    const conversationId = body.conversationId as Id<"conversations">;
+    if (!conversationId) return Response.json({ error: "A project is required." }, { status: 400 });
+    // This authenticated query also checks project ownership.
+    const artifacts = await authenticated.query(api.artifacts.listByConversation, { conversationId });
+    const mode = body.chatMode === "plan" ? "plan" : "build";
+    const lastUser = messages.filter(message => message.role === "user").pop();
+    const lastText = messageText(lastUser);
+    const wantsTools = mode === "build" && shouldUseComposioTools(lastText);
+    const hasImages = messages.some(message => message.parts?.some(part => part.type === "file"));
+    const initial = await resolveServerModel({
+      providerId: body.modelProvider, modelId: body.modelId, credentialMode: body.modelCredentialMode,
+      modelApiKey: body.modelApiKey, modelBaseUrl: body.modelBaseUrl, authToken: body.authToken,
     });
-    console.info(
-      "[chat/start]",
-      JSON.stringify({
-        requestId,
-        providerId: resolved.providerId,
-        modelId: resolved.modelId,
-        upstreamModelId: resolved.upstreamModelId,
-        mode,
-        hasAttachments: hasAttachedContent(messages),
-      }),
-    );
-
-    if (resolved.minimumPlan === "starter" && userId) {
-      const subscription = await convex.query(api.billing.getSubscription, {
-        userId: userId as any,
-      });
-      if (subscription.plan === "free") {
-        return Response.json(
-          {
-            error: "starter_required",
-            modelId: resolved.modelId,
-          },
-          { status: 402 },
-        );
-      }
+    const managed = initial.providerId === "cryzo";
+    if (managed && !serviceKey) throw new Error("Managed generation is not configured.");
+    if (wantsTools && !initial.supportsTools) throw new Error("Choose a model that supports connected actions.");
+    const profiles = managed ? await managedCandidates(initial.modelId, wantsTools, hasImages) : [];
+    const project = await authenticated.query(api.conversations.get, { id: conversationId });
+    const platforms = normalizeProjectPlatforms(body.projectPlatforms?.length ? body.projectPlatforms : project?.projectPlatforms?.length ? project.projectPlatforms : inferProjectPlatforms(lastText, ["web"], false));
+    const recipe = pickDesignRecipe(lastText);
+    const recipeBlock = recipe ? "\n\nDesign reference:\n" + loadRecipeContent(recipe) : "";
+    let cloudAppId: string | undefined;
+    if (mode === "build") {
+      const app = await authenticated.mutation(api.cloudAdmin.ensureForConversation, { conversationId, name: `Cryzo app ${conversationId.slice(-6)}` });
+      cloudAppId = String(app.appId);
     }
-
-    const baseMessageCharge = resolved.usesCryzoCredits
-      ? classifyCreditCost({
-          text: lastUserText,
-          mode,
-          hasFiles: hasAttachedContent(messages),
-        })
-      : 0;
-    const messageCharge = Number(
-      (baseMessageCharge * resolved.creditMultiplier).toFixed(2),
-    );
-
-    if (messageCharge > 0 && userId) {
-      const hasCredits = await convex.query(api.billing.hasMessageCredits, {
-        userId: userId as any,
-        amount: messageCharge,
-      });
-      if (!hasCredits) {
-        return Response.json(
-          {
-            error: "no_message_credits",
-            required: messageCharge,
-            modelId: resolved.modelId,
-          },
-          { status: 402 },
-        );
-      }
-    }
-
-    let storedProjectPlatforms: ProjectPlatform[] | null = null;
-    if (!projectPlatforms?.length && conversationId && userId) {
-      try {
-        const stored = await convex.query(
-          api.conversations.getProjectPlatformsForChat,
-          {
-            id: conversationId as any,
-            userId: userId as any,
-          },
-        );
-        if (Array.isArray(stored) && stored.length > 0) {
-          storedProjectPlatforms = stored as ProjectPlatform[];
-        }
-      } catch (error) {
-        console.warn("Unable to load stored project platform; inferring from prompt", error);
-      }
-    }
-
-    const resolvedProjectPlatforms = projectPlatforms?.length
-      ? normalizeProjectPlatforms(projectPlatforms)
-      : storedProjectPlatforms?.length
-        ? normalizeProjectPlatforms(storedProjectPlatforms)
-        : inferProjectPlatforms(lastUserText, ["web"], false);
-
-    let cryzoCloudAppId: string | undefined;
-    let currentProjectContext = "";
-    const authenticatedConvex = authedConvexClient(authToken);
-    if (conversationId && authenticatedConvex) {
-      try {
-        const artifacts = await authenticatedConvex.query(api.artifacts.listByConversation, {
-          conversationId: conversationId as any,
-        });
-        currentProjectContext = buildCurrentProjectContext(artifacts as any[]);
-      } catch (error) {
-        console.warn("Unable to load current project source for model context", error);
-      }
-    }
-
-    if (mode === "build" && conversationId && authenticatedConvex) {
-      try {
-        const cloudApp = await authenticatedConvex.mutation(
-          api.cloudAdmin.ensureForConversation,
-          {
-            conversationId: conversationId as any,
-            name: `Cryzo app ${conversationId.slice(-6)}`,
-          },
-        );
-        cryzoCloudAppId = String(cloudApp.appId);
-      } catch (error) {
-        console.warn("Unable to initialize Cryzo Cloud namespace", error);
-      }
-    }
-
-    const syncGeneratedCloudConfig = async (text: string) => {
-      if (!conversationId || !authenticatedConvex) return;
-      const config = parseCloudConfig(text);
-      if (!config) return;
-      const entities = (config.entities || [])
-        .filter((entity) => entity.name?.trim())
-        .map((entity) => ({
-          name: entity.name!.trim(),
-          fields: entity.fields,
-          access: entity.access,
-        }));
-      try {
-        await authenticatedConvex.mutation(api.cloudAdmin.configureFromPublish, {
-          conversationId: conversationId as any,
-          name: config.name?.trim() || `Cryzo app ${conversationId.slice(-6)}`,
-          entities,
-          authProviders: (config.auth?.providers || []).filter(Boolean),
-        } as any);
-      } catch (error) {
-        console.warn("Unable to apply generated Cryzo Cloud config", error);
-      }
-    };
-
-    const recipeSlug = pickDesignRecipe(lastUserText);
-    const recipeContent = recipeSlug ? loadRecipeContent(recipeSlug) : "";
-    const recipeBlock = recipeContent
-      ? `\n\n## ACTIVE DESIGN RECIPE — FOLLOW AS BINDING GUIDANCE (selected: ${recipeSlug})\n${recipeContent}\n\nCRITICAL: The recipe controls composition, typography attitude, palette behavior, section structure, imagery approach, and CTA styling. Adapt it to the active project platform rather than forcing desktop web patterns into a mobile app.`
-      : "";
-
+    const system = (mode === "plan" ? buildPlanPrompt(recipeBlock, platforms) :
+      buildCryzoSystemPrompt({ useComposioTools: wantsTools, recipeBlock, projectPlatforms: platforms, cryzoCloudAppId: cloudAppId })) +
+      buildCurrentProjectContext(artifacts);
     const modelMessages = await convertToModelMessages(messages);
-
-    let charged = false;
-    const chargeCompletedMessage = async () => {
-      if (charged || messageCharge <= 0 || !userId) return;
-      charged = true;
-      await convex.mutation(api.billing.deductMessageCredits, {
-        userId: userId as any,
-        amount: messageCharge,
-        reason: "message",
-        description: describeCreditCharge(messageCharge),
-        providerId: resolved.providerId,
-        modelId: resolved.modelId,
-      });
-    };
-
-    const completeRun = async (text: string) => {
-      if (!text.trim()) {
-        console.warn("[chat/empty-completion]", JSON.stringify({ requestId }));
-        return;
+    const inputUpperBound = Buffer.byteLength(system + JSON.stringify(modelMessages)) + (hasImages ? 16_000 : 0);
+    let outputLimit = 8192;
+    if (managed) {
+      const balance = await authenticated.query(api.aiUsage.balance, {});
+      if (initial.minimumPlan === "starter" && balance.plan === "free") {
+        return Response.json({ error: "starter_required", requestId }, { status: 402 });
       }
-      await syncGeneratedCloudConfig(text || "");
-      await chargeCompletedMessage();
-      console.info(
-        "[chat/complete]",
-        JSON.stringify({
-          requestId,
-          providerId: resolved.providerId,
-          modelId: resolved.modelId,
-        }),
-      );
-    };
-
-    const responseHeaders = {
-      "x-cryzo-request-id": requestId,
-      "x-cryzo-model-provider": resolved.providerId,
-      "x-cryzo-model-id": resolved.modelId,
-      "x-cryzo-billing-tier": resolved.billingTier,
-      "x-cryzo-message-credits": String(messageCharge),
-    };
-
-    if (mode === "plan") {
-      const result = streamText({
-        model: resolved.model,
-        ...streamLimits(resolved.providerId),
-        system: buildPlanPrompt(recipeBlock, resolvedProjectPlatforms) + currentProjectContext,
-        messages: modelMessages,
-        stopWhen: stepCountIs(5),
-        onFinish: async ({ text }) => {
-          await completeRun(text || "");
-        },
-      });
-
-      return result.toUIMessageStreamResponse({
-        onError: (error) => chatStreamError(error, requestId, resolved),
-        headers: {
-          ...(composioSessionId
-            ? { "x-composio-session-id": composioSessionId }
-            : {}),
-          ...responseHeaders,
-        },
-      });
-    }
-
-    const askedForExternalAction = shouldUseComposioTools(lastUserText);
-    if (askedForExternalAction && !resolved.supportsTools) {
-      return Response.json(
-        {
-          error: "model_tools_unsupported",
-          message: `${resolved.modelId} cannot run connected actions. Select a tool-capable model before asking Cryzo to publish, send, or configure an external service.`,
-          requestId,
-        },
-        { status: 400 },
-      );
-    }
-    const useComposioTools = askedForExternalAction;
-    if (useComposioTools && userId) {
-      const hasIntegrationCredits = await convex.query(
-        api.billing.hasIntegrationCredits,
-        { userId: userId as any, amount: 1 },
-      );
-      if (!hasIntegrationCredits) {
-        return Response.json(
-          { error: "no_integration_credits", required: 1 },
-          { status: 402 },
-        );
+      // A byte is a conservative token bound for text. Reserve the largest
+      // eligible single attempt; failed attempts are absorbed by Cryzo.
+      const eligible = profiles.filter(profile => profile.context > inputUpperBound + 1024);
+      if (!eligible.length) throw new Error("This conversation exceeds the model context. Start a new chat or choose a larger-context model.");
+      profiles.splice(0, profiles.length, ...eligible);
+      for (const profile of profiles) {
+        outputLimit = Math.min(outputLimit, profile.output, profile.context - inputUpperBound - 512);
+        if (profile.tier === "premium") {
+          const available = balance.remainingMicros / 1_000_000 - inputUpperBound * profile.inputCost - profile.requestCost;
+          if (profile.outputCost > 0) outputLimit = Math.min(outputLimit, Math.floor(available / profile.outputCost));
+        }
       }
+      if (outputLimit < 1024) return Response.json({ error: "no_message_credits", requestId }, { status: 402 });
+      const maxCostMicros = Math.ceil(Math.max(...profiles.map(profile =>
+        inputUpperBound * profile.inputCost + outputLimit * profile.outputCost + profile.requestCost)) * 1_000_000);
+      runId = await authenticated.mutation(api.aiUsage.reserve, {
+        conversationId, requestKey: `${conversationId}:${lastUser?.id ?? requestId}`,
+        modelId: initial.modelId, freeModel: initial.billingTier === "free", maxCostMicros, serviceKey: serviceKey!,
+      });
     }
-
-    const systemPrompt = buildCryzoSystemPrompt({
-      useComposioTools,
-      recipeBlock,
-      projectPlatforms: resolvedProjectPlatforms,
-      cryzoCloudAppId,
-    }) + currentProjectContext;
-
-    let responseSessionId = composioSessionId;
-    let result;
-
-    if (useComposioTools) {
-      const client = getComposio();
-      const session = await client.create(userId || "anonymous");
-      const tools = await session.tools();
-      responseSessionId = session.sessionId;
-      result = streamText({
-        model: resolved.model,
-        ...streamLimits(resolved.providerId),
-        system: systemPrompt,
-        messages: modelMessages,
-        tools,
-        stopWhen: stepCountIs(10),
-        onStepFinish: async (step) => {
-          if (!userId) return;
-          const calls = Array.isArray((step as any).toolCalls)
-            ? ((step as any).toolCalls as Array<{ toolName?: string }>)
-            : [];
-          for (const call of calls) {
-            const amount = composioToolCreditCost(call.toolName);
-            await convex.mutation(api.billing.deductIntegrationCredits, {
-              userId: userId as any,
-              amount,
-              reason: "composio",
-              description: call.toolName
-                ? `Executed ${call.toolName}`
-                : "Executed external tool",
-              toolName: call.toolName,
-            });
+    let tools: ToolSet | undefined;
+    let sessionId = body.composioSessionId;
+    if (wantsTools) {
+      const allowed = await authenticated.query(api.billing.hasIntegrationCredits, { userId, amount: 1 });
+      if (!allowed) throw new Error("no_integration_credits");
+      const session = await getComposio().create(userId);
+      tools = await session.tools();
+      sessionId = session.sessionId;
+    }
+    const started = Date.now();
+    const totalSignal = AbortSignal.any([req.signal, AbortSignal.timeout(240_000)]);
+    const stream = createUIMessageStream({
+      execute: async ({ writer }) => {
+        writer.write({ type: "start", messageId: requestId });
+        writer.write({ type: "data-generation", data: { requestId, requestedModelId: initial.modelId, status: "connecting" } });
+        const attempts = managed ? [profiles[0], profiles[0], ...profiles.slice(1)] : [undefined];
+        let lastError: unknown;
+        let completed = false;
+        try {
+          for (let attempt = 0; attempt < attempts.length; attempt++) {
+            if (totalSignal.aborted) throw new Error("Generation timed out or was cancelled.");
+            const profile = attempts[attempt];
+            const selected = profile ? await resolveServerModel({ providerId: "cryzo", modelId: profile.id }) : initial;
+            const abort = new AbortController();
+            const signal = AbortSignal.any([totalSignal, abort.signal]);
+            let committed = false, text = "", firstTokenMs: number | undefined;
+            const buffered: UIMessageChunk[] = [];
+            const firstTokenTimer = setTimeout(() => abort.abort(new Error("Model did not produce text in time.")), 45_000);
+            try {
+              const result = streamText({
+                model: selected.model, system, messages: modelMessages, tools,
+                abortSignal: signal, maxRetries: 0, maxOutputTokens: outputLimit,
+                timeout: { totalMs: 180_000, chunkMs: 30_000 }, stopWhen: stepCountIs(6),
+                onStepFinish: async step => {
+                  for (const call of step.toolCalls) {
+                    await authenticated.mutation(api.billing.deductIntegrationCredits, {
+                      userId, amount: composioToolCreditCost(call.toolName), reason: "composio",
+                      description: "Connected action", toolName: call.toolName,
+                    });
+                  }
+                },
+              });
+              const reader = result.toUIMessageStream({
+                sendStart: false, sendFinish: false, sendReasoning: false,
+                onError: error => safeError(error),
+              }).getReader();
+              while (true) {
+                const next = await reader.read();
+                if (next.done) break;
+                const part = next.value;
+                if (part.type === "error") throw new Error(part.errorText);
+                if (part.type === "text-delta") text += part.delta;
+                const visible = (part.type === "text-delta" && part.delta.trim().length > 0) || part.type.startsWith("tool-");
+                if (!committed && visible) {
+                  committed = true;
+                  firstTokenMs = Date.now() - started;
+                  clearTimeout(firstTokenTimer);
+                  writer.write({ type: "data-generation", data: { requestId, requestedModelId: initial.modelId, actualModelId: selected.modelId,
+                    actualModelName: profile?.name ?? selected.modelId, fallbackUsed: selected.modelId !== initial.modelId, status: "streaming" } });
+                  for (const chunk of buffered) writer.write(chunk);
+                  buffered.length = 0;
+                }
+                if (committed) writer.write(part);
+                else buffered.push(part);
+              }
+              clearTimeout(firstTokenTimer);
+              const reason = await result.finishReason;
+              if (signal.aborted || !text.trim() || reason === "error" || reason === "length") throw new Error("The model did not finish a complete response.");
+              const steps = await result.steps;
+              let cost = 0;
+              const generationIds: string[] = [];
+              for (const step of steps) {
+                const generationId = step.response.id;
+                if (generationId) generationIds.push(generationId);
+                const usage = step.providerMetadata?.openrouter?.usage as { cost?: number } | undefined;
+                if (managed) {
+                  if (typeof usage?.cost === "number" && Number.isFinite(usage.cost)) cost += usage.cost;
+                  else if (generationId) {
+                    const record = await openRouterClient().generations.getGeneration({ id: generationId }, { timeoutMs: 10_000 });
+                    cost += record.data.totalCost;
+                  } else throw new Error("Usage verification failed.");
+                }
+              }
+              const telemetry = { requestedModel: initial.modelId, actualModel: selected.modelId, generationIds,
+                providerRoutes: steps.map(step => step.providerMetadata?.openrouter?.provider ?? null),
+                reportedCost: cost, firstTokenMs: firstTokenMs ?? null, durationMs: Date.now() - started, finishReason: reason,
+                usage: await result.totalUsage, fallback: selected.modelId !== initial.modelId };
+              if (totalSignal.aborted) throw new Error("Generation was cancelled.");
+              await settle(true, Math.ceil(cost * 1_000_000), { actualModel: selected.modelId, generationId: generationIds.at(-1), telemetry });
+              completed = true;
+              const config = parseCloudConfig(text);
+              if (config) {
+                await authenticated.mutation(api.cloudAdmin.configureFromPublish, {
+                  conversationId, name: config.name ?? "Cryzo app",
+                  entities: (config.entities ?? []).filter(entity => entity.name).map(entity => ({
+                    name: entity.name!, fields: entity.fields, access: entity.access,
+                  })), authProviders: (config.auth?.providers ?? []).filter((provider): provider is "password" | "google" => provider === "password" || provider === "google"),
+                }).catch(error => console.warn("[chat/cloud-config]", safeError(error)));
+              }
+              console.info("[chat/complete]", JSON.stringify({ requestId, ...telemetry, cost }));
+              writer.write({ type: "data-generation", data: { requestId, actualModelId: selected.modelId, actualModelName: profile?.name ?? selected.modelId,
+                fallbackUsed: selected.modelId !== initial.modelId, costMicros: Math.ceil(cost * 1_000_000), status: "completed" } });
+              writer.write({ type: "finish", finishReason: "stop" });
+              return;
+            } catch (error) {
+              clearTimeout(firstTokenTimer);
+              abort.abort();
+              lastError = error;
+              if (profile) markModelUnhealthy(profile.id);
+              console.warn("[chat/attempt-failed]", JSON.stringify({ requestId, attempt, model: selected.modelId, committed, error: safeError(error) }));
+              // Never replay a partial answer or a potentially executed tool.
+              if (committed || totalSignal.aborted) throw error;
+              writer.write({ type: "data-generation", data: { requestId, status: "retrying", requestedModelId: initial.modelId } });
+            }
           }
-        },
-        onFinish: async ({ text }) => {
-          await completeRun(text || "");
-        },
-      });
-    } else {
-      result = streamText({
-        model: resolved.model,
-        ...streamLimits(resolved.providerId),
-        system: systemPrompt,
-        messages: modelMessages,
-        stopWhen: stepCountIs(10),
-        onFinish: async ({ text }) => {
-          await completeRun(text || "");
-        },
-      });
-    }
-
-    return result.toUIMessageStreamResponse({
-      onError: (error) => chatStreamError(error, requestId, resolved),
-      headers: {
-        ...(responseSessionId
-          ? { "x-composio-session-id": responseSessionId }
-          : {}),
-        ...responseHeaders,
-        "x-cryzo-integration-credits": useComposioTools ? "metered" : "0",
-        ...(cryzoCloudAppId ? { "x-cryzo-cloud-app-id": cryzoCloudAppId } : {}),
+          throw lastError ?? new Error("No healthy model is available.");
+        } finally {
+          if (!completed) await settle(false).catch(error => console.error("[chat/release]", safeError(error)));
+        }
       },
+      onError: () => `The model could not finish this response. No AI allowance was charged. Your prompt and completed files are preserved. Retry or select another model. Reference: ${requestId}`,
     });
+    return createUIMessageStreamResponse({ stream, headers: {
+      "x-cryzo-request-id": requestId, "x-cryzo-model-id": initial.modelId,
+      ...(sessionId ? { "x-composio-session-id": sessionId } : {}),
+      ...(cloudAppId ? { "x-cryzo-cloud-app-id": cloudAppId } : {}),
+    } });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Model request failed";
-    const status =
-      message.includes("session") || message.includes("saved")
-        ? 401
-        : message.includes("API key") ||
-            message.includes("Choose") ||
-            message.includes("base URL") ||
-            message.includes("Local providers") ||
-            message.includes("is not configured")
-          ? 400
-          : 500;
+    await settle(false).catch(() => {});
+    const message = safeError(error);
     console.error("[chat/start-error]", JSON.stringify({ requestId, message }));
+    const status = /credits|starter_required/.test(message) ? 402 : /already|running/.test(message) ? 409 : 400;
     return Response.json({ error: message, requestId }, { status });
   }
 }

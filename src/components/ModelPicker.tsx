@@ -32,6 +32,7 @@ import {
 import {
   CRYZO_MANAGED_MODELS,
   normalizeManagedModelId,
+  getManagedModel,
 } from "@/lib/ai/managed-models";
 import { ModelLogo, ProviderLogo } from "@/components/ProviderLogo";
 
@@ -40,6 +41,7 @@ export type CatalogModel = {
   name: string;
   reasoning?: boolean;
   toolCall?: boolean;
+  available?: boolean;
   attachments?: boolean;
   context?: number | null;
   output?: number | null;
@@ -128,6 +130,8 @@ export function ModelPicker({
   const [savedDevice, setSavedDevice] = useState(false);
   const [search, setSearch] = useState("");
   const [catalog, setCatalog] = useState<CatalogResponse>({});
+  const [catalogError, setCatalogError] = useState("");
+  const [catalogRetry, setCatalogRetry] = useState(0);
   const [catalogLoading, setCatalogLoading] = useState(false);
   const [accountConnections, setAccountConnections] = useState<AccountConnection[]>([]);
   const [feedback, setFeedback] = useState<Feedback>({ type: "idle" });
@@ -193,13 +197,16 @@ export function ModelPicker({
   useEffect(() => {
     if (!open || Object.keys(catalog.providers || {}).length > 0) return;
     setCatalogLoading(true);
+    setCatalogError("");
     fetch("/api/models/catalog", { cache: "no-store" })
       .then(async (response) => {
         const data = (await response.json()) as CatalogResponse;
-        if (response.ok) setCatalog(data);
+        if (!response.ok) throw new Error("The model catalog is unavailable. Please retry.");
+        setCatalog(data);
       })
+      .catch(error => setCatalogError(error instanceof Error ? error.message : "Unable to load models."))
       .finally(() => setCatalogLoading(false));
-  }, [open, catalog.providers]);
+  }, [open, catalog.providers, catalogRetry]);
 
   useEffect(() => {
     if (!open || !authToken) return;
@@ -217,18 +224,18 @@ export function ModelPicker({
   const providerModels = useMemo<CatalogModel[]>(() => {
     if (provider.id === "cryzo") {
       const query = search.trim().toLowerCase();
-      return CRYZO_MANAGED_MODELS.filter(
+      return (catalog.providers?.cryzo?.models ?? []).filter(
         (model) =>
           !query ||
           model.name.toLowerCase().includes(query) ||
-          model.description.toLowerCase().includes(query) ||
-          model.providerName.toLowerCase().includes(query),
+          model.id.toLowerCase().includes(query),
       ).map((model) => ({
         id: model.id,
         name: model.name,
         reasoning: model.reasoning,
         toolCall: model.toolCall,
-        attachments: model.multimodal,
+        attachments: model.attachments,
+        context: model.context, inputCost: model.inputCost, outputCost: model.outputCost,
       }));
     }
 
@@ -662,7 +669,8 @@ export function ModelPicker({
                 </div>
 
                 <section className="mt-3 space-y-2">
-                  {catalogLoading && provider.id !== "cryzo" && !provider.local && (
+                  {catalogError && <div role="alert" className="rounded-xl border border-red-900 p-3 text-sm text-red-300">{catalogError} <button onClick={() => setCatalogRetry(value => value + 1)} className="underline">Retry</button></div>}
+                  {catalogLoading && !provider.local && (
                     <div className="flex items-center gap-2 rounded-xl border border-zinc-800 px-3 py-4 text-xs text-zinc-500">
                       <Loader2 className="animate-spin" size={14} /> Loading model catalog…
                     </div>
@@ -671,12 +679,12 @@ export function ModelPicker({
                   {provider.id === "cryzo" ? (
                     providerModels.map((model) => {
                       const active = modelId === model.id;
-                      const managed = CRYZO_MANAGED_MODELS.find((item) => item.id === model.id);
-                      if (!managed) return null;
+                      const managed = getManagedModel(model.id);
                       return (
                         <button
                           key={model.id}
                           type="button"
+                          disabled={model.available === false}
                           onClick={() => setModelId(model.id)}
                           className={`w-full rounded-xl border p-3 text-left transition-colors ${
                             active ? "border-zinc-500 bg-zinc-900" : "border-zinc-800 bg-black/40 hover:border-zinc-700"
@@ -687,7 +695,7 @@ export function ModelPicker({
                               <ModelLogo provider={provider} modelId={model.id} size={34} />
                               <div className="min-w-0">
                                 <div className="flex flex-wrap items-center gap-2">
-                                  <span className="text-sm font-medium text-white">{managed.name}</span>
+                                  <span className="text-sm font-medium text-white">{model.name}{model.available === false ? " (temporarily unavailable)" : ""}</span>
                                   <ModelBadge tone={managed.tier === "free" ? "free" : "premium"}>
                                     {managed.badge}
                                   </ModelBadge>
@@ -695,7 +703,7 @@ export function ModelPicker({
                                     <ModelBadge>Starter</ModelBadge>
                                   )}
                                 </div>
-                                <p className="mt-1 text-xs text-zinc-500">{managed.providerName} · {managed.description}</p>
+                                <p className="mt-1 text-xs text-zinc-400">{formatContext(model.context)}{managed.tier === "premium" && model.inputCost != null && model.outputCost != null ? ` · $${(model.inputCost * 1_000_000).toFixed(2)} input / $${(model.outputCost * 1_000_000).toFixed(2)} output per 1M tokens` : ""}</p>
                               </div>
                             </div>
                             {active && <CheckCircle2 className="shrink-0 text-white" size={17} />}
@@ -750,7 +758,7 @@ export function ModelPicker({
             <footer className="flex items-center justify-between gap-3 border-t border-zinc-800 bg-black/40 px-4 py-3 sm:px-5">
               <div className="min-w-0 text-xs text-zinc-500">
                 {provider.id === "cryzo" ? (
-                  <span className="inline-flex items-center gap-1.5"><Sparkles size={13} /> Managed premium · usage-based message credits</span>
+                  <span className="inline-flex items-center gap-1.5"><Sparkles size={13} /> Managed AI · exact usage from your dollar allowance</span>
                 ) : (
                   <span>BYOK · unlimited app creation · 0 Cryzo message credits</span>
                 )}
