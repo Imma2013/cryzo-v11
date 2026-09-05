@@ -10,6 +10,14 @@ type ComposioExecution = {
   data: unknown;
   error?: string;
   logId: string;
+  // Some providers (notably LinkedIn) return the created resource identifier
+  // in response metadata instead of the JSON body.
+  response?: {
+    status?: number;
+    headers?: Record<string, string>;
+  };
+  headers?: Record<string, string>;
+  status?: number;
 };
 
 async function callComposio<T>(body: Record<string, unknown>): Promise<T> {
@@ -42,6 +50,30 @@ function entries(value: unknown): [string, unknown][] {
 }
 function identifier(value: unknown, keys = ["post_id", "tweet_id", "video_id", "media_id", "id"]) {
   return entries(value).find(([key, value]) => keys.includes(key) && (typeof value === "string" || typeof value === "number"))?.[1]?.toString();
+}
+
+function linkedinIdentifier(result: ComposioExecution) {
+  const dataId = identifier(result.data);
+  if (dataId) return dataId;
+
+  const metadataId = identifier(result, [
+    "x-restli-id",
+    "x_restli_id",
+    "xRestliId",
+    "shareUrn",
+    "share_urn",
+    "activity",
+    "entityUrn",
+    "urn",
+  ]);
+  if (metadataId) return metadataId;
+
+  const headers = result.response?.headers ?? result.headers;
+  return Object.entries(headers ?? {}).find(([key, value]) =>
+    ["x-restli-id", "x_restli_id", "xrestliid"].includes(key.toLowerCase()) &&
+    typeof value === "string" &&
+    value.length > 0,
+  )?.[1];
 }
 export const publishPost = internalAction({
   args: { postId: v.id("socialPosts") }, returns: v.null(),
@@ -207,7 +239,9 @@ export const publishDelivery = internalAction({
         await ctx.scheduler.runAfter(5000, internal.socialWorker.checkTikTok, args);
         return null;
       }
-      const id = identifier(result.data);
+      const id = toolkit === "linkedin"
+        ? linkedinIdentifier(result)
+        : identifier(result.data);
       if (!id) throw new Error("The platform returned no post ID. Review the network before retrying.");
       await ctx.runMutation(internal.social.markDeliveryPublished, { deliveryId: args.deliveryId, toolSlug: toolSlug!, providerLogId: result.logId, remotePostId: id });
     } catch (error) {
