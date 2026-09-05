@@ -127,10 +127,30 @@ export const publishDelivery = internalAction({
           ...(images.length ? { images } : {}),
         });
       } else if (toolkit === "youtube") {
-        if (!video || urls.length !== 1) throw new Error("YouTube requires exactly one video.");
-        const file = await composio.files.upload({ file: urls[0], toolSlug: "YOUTUBE_UPLOAD_VIDEO", toolkitSlug: toolkit });
-        result = await execute("YOUTUBE_UPLOAD_VIDEO", { title: options.youtubeTitle || content.split("\n")[0].slice(0,100),
-          description: content, tags: [], categoryId: "22", privacyStatus: options.youtubePrivacy || "public", videoFilePath: file });
+        const videoIndex = mediaTypes.findIndex((type) => type.startsWith("video/"));
+        const thumbnailIndex = mediaTypes.findIndex((type) => type.startsWith("image/"));
+        if (videoIndex < 0) throw new Error("YouTube requires exactly one video.");
+        const file = await composio.files.upload({
+          file: urls[videoIndex],
+          toolSlug: "YOUTUBE_UPLOAD_VIDEO",
+          toolkitSlug: toolkit,
+        });
+        result = await execute("YOUTUBE_UPLOAD_VIDEO", {
+          title: options.youtubeTitle || content.split("\n")[0].slice(0, 100),
+          description: content,
+          tags: [],
+          categoryId: "22",
+          privacyStatus: options.youtubePrivacy || "public",
+          videoFilePath: file,
+        });
+        const videoId = identifier(result.data, ["video_id", "id"]);
+        if (!videoId) throw new Error("YouTube did not return the uploaded video ID.");
+        if (thumbnailIndex >= 0) {
+          await execute("YOUTUBE_UPDATE_THUMBNAIL", {
+            videoId,
+            thumbnailUrl: urls[thumbnailIndex],
+          }, false);
+        }
       } else {
         if (!video || urls.length !== 1) throw new Error("TikTok requires exactly one video.");
         result = await execute("TIKTOK_PUBLISH_VIDEO", { video_url: urls[0], caption: content, privacy_level: options.tiktokPrivacy });
