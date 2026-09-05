@@ -18,11 +18,7 @@ import { ToolCallDisplay } from "./ToolCallDisplay";
 import { ArtifactBadge } from "./ArtifactBadge";
 import AgentPlan from "@/components/ui/agent-plan";
 import { parseArtifacts } from "@/lib/workspace/artifact-parser";
-import {
-  finishStreamingArtifactStream,
-  getCompletedStreamingActions,
-  processStreamingArtifactText,
-} from "@/lib/workspace/streaming-runtime";
+import { processStreamingArtifactText } from "@/lib/workspace/streaming-runtime";
 import {
   filesToUIParts,
   takeInitialChatMessage,
@@ -35,7 +31,6 @@ import {
   type ModelSelection,
 } from "@/lib/ai/models";
 import { buildLocalSystemPrompt } from "@/lib/ai/local-prompt";
-import { normalizeManagedModelId } from "@/lib/ai/managed-models";
 import type { ElementInfo } from "./workspace/LivePreview";
 import { Id } from "../../convex/_generated/dataModel";
 
@@ -84,7 +79,6 @@ export function ChatArea({
   const [input, setInput] = useState("");
   const [localLoading, setLocalLoading] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
-  const [generationStatus, setGenerationStatus] = useState<string | null>(null);
   const [optimisticMode, setOptimisticMode] = useState<{
     conversationId: string;
     mode: ChatMode;
@@ -103,20 +97,8 @@ export function ChatArea({
   const liveMessageIdsRef = useRef<Set<string>>(new Set());
   const openedStreamingMessagesRef = useRef<Set<string>>(new Set());
 
-  const { messages, setMessages, sendMessage, stop, status, error, clearError } = useChat({
+  const { messages, setMessages, sendMessage, stop, status, error } = useChat({
     id: conversationId,
-    onData: part => {
-      if (part.type !== "data-generation") return;
-      const data = part.data as { status?: string; actualModelName?: string; fallbackUsed?: boolean };
-      if (data.status === "retrying") setGenerationStatus("Retrying the same model...");
-      else if (data.status === "continuing") setGenerationStatus("Continuing the build...");
-      else setGenerationStatus("Working...");
-    },
-    onFinish: ({ message, isAbort, isError }) => {
-      if (!isAbort && !isError && !message.parts.some(part => part.type === "text" && part.text.trim())) {
-        setLocalError("The model returned no text. Your prompt is saved; retry or choose another model. No AI allowance was charged.");
-      }
-    },
     transport: new DefaultChatTransport({
       api: "/api/chat",
       body: {
@@ -132,27 +114,12 @@ export function ChatArea({
       ? optimisticMode.mode
       : conversation?.chatMode ?? "build";
 
-  useEffect(() => {
-    if (status !== "streaming" && status !== "submitted") return;
-    const timer = window.setTimeout(() => {
-      stop();
-      setLocalError("The response timed out. Your prompt is saved. Please retry or choose another model.");
-    }, 250_000);
-    return () => window.clearTimeout(timer);
-  }, [status, stop]);
-
-  const savedProviderId =
-    conversation?.modelProvider || DEFAULT_MODEL_SELECTION.providerId;
-  const savedModelId = conversation?.modelId || DEFAULT_MODEL_SELECTION.modelId;
   const modelSelection: ModelSelection =
     optimisticModel?.conversationId === conversationId
       ? optimisticModel.selection
       : {
-          providerId: savedProviderId,
-          modelId:
-            savedProviderId === "cryzo"
-              ? normalizeManagedModelId(savedModelId)
-              : savedModelId,
+          providerId: conversation?.modelProvider || DEFAULT_MODEL_SELECTION.providerId,
+          modelId: conversation?.modelId || DEFAULT_MODEL_SELECTION.modelId,
           credentialMode:
             conversation?.modelCredentialMode || DEFAULT_MODEL_SELECTION.credentialMode,
           baseURL: conversation?.modelBaseUrl,
@@ -232,15 +199,12 @@ export function ChatArea({
 
   // Feed the currently-generated assistant message directly into the browser
   // runtime. This intentionally bypasses the Convex persistence round-trip for
-  // live preview; Convex still stores the completed artifact below. A continued
-  // generation can arrive as more than one AI SDK text part, so treat all text
-  // parts in the assistant message as one cumulative build stream.
+  // live preview; Convex still stores the completed artifact below.
   useEffect(() => {
     const latestAssistant = [...messages]
       .reverse()
       .find((message) => message.role === "assistant");
     if (!latestAssistant) return;
-    if (latestAssistant.parts.some(part => part.type === "data-generation" && (part.data as { intent?: string }).intent === "discuss")) return;
 
     if (status === "streaming" || status === "submitted" || localLoading) {
       liveMessageIdsRef.current.add(latestAssistant.id);
@@ -248,14 +212,19 @@ export function ChatArea({
 
     if (!liveMessageIdsRef.current.has(latestAssistant.id)) return;
 
-    const streamedText = textFromMessage(latestAssistant);
-    const hasStreamingArtifact = streamedText
-      ? processStreamingArtifactText(
+    let hasStreamingArtifact = false;
+    for (const part of latestAssistant.parts ?? []) {
+      if (part.type !== "text") continue;
+      if (
+        processStreamingArtifactText(
           String(conversationId),
           latestAssistant.id,
-          streamedText,
+          part.text,
         )
-      : false;
+      ) {
+        hasStreamingArtifact = true;
+      }
+    }
 
     if (
       hasStreamingArtifact &&
@@ -266,33 +235,11 @@ export function ChatArea({
     }
   }, [messages, status, localLoading, conversationId, onArtifactCreated]);
 
-  const runtimeStatusRef = useRef(status);
-  useEffect(() => {
-    const previous = runtimeStatusRef.current;
-    runtimeStatusRef.current = status;
-    const generationEnded =
-      (previous === "streaming" || previous === "submitted") &&
-      (status === "ready" || status === "error");
-    if (!generationEnded) return;
-
-    const latestAssistant = [...messages]
-      .reverse()
-      .find((message) => message.role === "assistant");
-    if (!latestAssistant || !liveMessageIdsRef.current.has(latestAssistant.id)) return;
-
-    finishStreamingArtifactStream(
-      String(conversationId),
-      latestAssistant.id,
-      status === "error" ? error?.message : undefined,
-    );
-  }, [conversationId, error?.message, messages, status]);
-
-  // Persist completed artifacts and per-file checkpoints. Database writes stay
-  // outside the execution queue so they never delay the live preview.
+  // Persist only completed artifacts. Persistence is deliberately decoupled
+  // from live execution so database latency cannot hold up the preview.
   useEffect(() => {
     for (const message of messages) {
       if (message.role !== "assistant") continue;
-      if (message.parts.some(part => part.type === "data-generation" && (part.data as { intent?: string }).intent === "discuss")) continue;
 
       for (const part of message.parts ?? []) {
         if (part.type !== "text") continue;
@@ -302,29 +249,13 @@ export function ChatArea({
           if (savedArtifactsRef.current.has(artifact.id)) continue;
 
           savedArtifactsRef.current.add(artifact.id);
-          void createArtifact({
+          createArtifact({
             conversationId,
             artifactId: artifact.id,
             title: artifact.title,
             actions: artifact.actions,
           });
           onArtifactCreated?.();
-        }
-
-        if (artifacts.length === 0) {
-          const checkpoints = getCompletedStreamingActions(part.text);
-          checkpoints.forEach((action, index) => {
-            const checkpointId = `${message.id}-checkpoint-${index}`;
-            if (savedArtifactsRef.current.has(checkpointId)) return;
-
-            savedArtifactsRef.current.add(checkpointId);
-            void createArtifact({
-              conversationId,
-              artifactId: checkpointId,
-              title: "Build checkpoint",
-              actions: [action],
-            });
-          });
         }
       }
     }
@@ -521,9 +452,6 @@ export function ChatArea({
         await runLocalModel(text, fileParts, mode, selection);
         return;
       }
-      if (!authToken) { setLocalError("Your sign-in session is still loading. Please try again."); return; }
-      setLocalError(null);
-      setGenerationStatus("Working...");
 
       const modelApiKey =
         selection.credentialMode === "device"
@@ -542,7 +470,7 @@ export function ChatArea({
             modelCredentialMode: selection.credentialMode,
             modelBaseUrl,
             modelApiKey,
-            authToken,
+            authToken: selection.credentialMode === "account" ? authToken : undefined,
           },
         },
       );
@@ -571,8 +499,6 @@ export function ChatArea({
 
   const isLoading =
     status === "streaming" || status === "submitted" || localLoading;
-  const errorText = localError || error?.message || "";
-  const isCreditError = /no_(message_)?credits|starter_required|402/i.test(errorText);
   const initialMessageSentRef = useRef(false);
 
   const stopAll = useCallback(() => {
@@ -582,7 +508,7 @@ export function ChatArea({
   }, [stop]);
 
   useEffect(() => {
-    if (initialMessageSentRef.current || !authToken) return;
+    if (initialMessageSentRef.current) return;
     if (loadedMessages === undefined || messages.length > 0) return;
 
     const initialMessage = takeInitialChatMessage(conversationId);
@@ -594,7 +520,7 @@ export function ChatArea({
       initialMessage.files,
       initialMessage.chatMode,
     );
-  }, [authToken, conversationId, loadedMessages, messages.length, sendPreparedMessage]);
+  }, [conversationId, loadedMessages, messages.length, sendPreparedMessage]);
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-black">
@@ -644,15 +570,7 @@ export function ChatArea({
                           : "w-full max-w-full bg-transparent px-0 py-1 text-zinc-100 sm:w-auto sm:bg-zinc-800"
                       }`}
                     >
-                      {m.role === "assistant" && m.id === messages[messages.length - 1]?.id && isLoading && !m.parts?.some(part => part.type === "text" && part.text.trim()) && (
-                        <p role="status" className="text-xs text-zinc-500 animate-pulse">{generationStatus || "Working..."}</p>
-                      )}
                       {m.parts?.map((part, i) => {
-                        if (part.type === "data-generation") {
-                          const data = part.data as { status?: string; actualModelName?: string; fallbackUsed?: boolean };
-                          if (data.status !== "completed") return null;
-                          return <div key={i} className="mt-2 text-xs text-zinc-400">{data.actualModelName}{data.fallbackUsed ? " (fallback model used)" : ""}</div>;
-                        }
                         if (part.type === "text") {
                           const {
                             cleanText,
@@ -749,53 +667,29 @@ export function ChatArea({
 
               {isLoading && messages[messages.length - 1]?.role === "user" && (
                 <div className="flex gap-3">
-                  <div role="status" className="py-1 text-xs text-zinc-500 animate-pulse">
-                    {generationStatus || "Working..."}
+                  <div className="py-1 text-[15px] leading-7 text-zinc-400 sm:rounded-lg sm:bg-zinc-800 sm:px-4 sm:py-3 sm:text-sm sm:leading-normal">
+                    Thinking...
                   </div>
                 </div>
               )}
 
               {(error || localError) &&
-                (isCreditError ? (
-                  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm">
-                    <div role="dialog" aria-modal="true" aria-labelledby="credit-limit-title" className="w-full max-w-lg rounded-2xl border border-zinc-700 bg-zinc-950 p-6 shadow-2xl">
-                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">Monthly plans</p>
-                      <h2 id="credit-limit-title" className="mt-2 text-2xl font-semibold text-white">Keep building with Cryzo</h2>
-                      <p className="mt-2 text-sm leading-6 text-zinc-400">
-                        Your selected model requires paid AI allowance, or your included allowance is used up. Choose BYOK or upgrade.
-                      </p>
-                      <div className="mt-5 grid gap-3 sm:grid-cols-2">
-                        <a href="/chat/billing?cycle=monthly" className="rounded-xl border border-zinc-700 bg-black p-4 transition hover:border-zinc-500">
-                          <span className="text-sm font-semibold text-white">Starter</span>
-                          <span className="mt-1 block text-2xl font-semibold text-white">$20<span className="text-sm font-normal text-zinc-500">/month</span></span>
-                          <span className="mt-2 block text-xs leading-5 text-zinc-400">$10 of managed AI usage and 2,000 integration credits.</span>
-                        </a>
-                        <a href="/chat/billing?cycle=monthly" className="rounded-xl border border-zinc-700 bg-white p-4 text-black transition hover:bg-zinc-200">
-                          <span className="text-sm font-semibold">View all plans</span>
-                          <span className="mt-1 block text-2xl font-semibold">Monthly billing</span>
-                            <span className="mt-2 block text-xs leading-5 text-zinc-600">Compare included AI allowances. No automatic overage charges.</span>
-                          </a>
-                        </div>
-                        <button type="button" className="mt-4 text-sm text-zinc-200 underline" onClick={() => {
-                          clearError(); setLocalError(null); window.dispatchEvent(new Event("cryzo:open-model-picker"));
-                        }}>Choose a free model or use my own key</button>
-                    </div>
+                (error?.message?.includes("no_credits") || error?.message?.includes("402") ? (
+                  <div className="rounded-xl border border-yellow-800 bg-yellow-900/20 px-4 py-3 text-sm text-yellow-300">
+                    <p className="font-medium">Out of credits</p>
+                    <p className="mt-1 text-yellow-400/80">
+                      You&apos;ve used all your available credits.
+                    </p>
+                    <a
+                      href="/chat/billing"
+                      className="mt-2 inline-block rounded bg-white px-3 py-1.5 text-xs font-medium text-black hover:bg-zinc-200"
+                    >
+                      View Plans & Top Up
+                    </a>
                   </div>
                 ) : (
-                  <div className="rounded-xl border border-red-800 bg-red-900/20 px-4 py-3 text-sm text-red-300">
-                    <p>Error: {localError || error?.message}</p>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        void sendPreparedMessage(
-                          "Continue the interrupted build from the latest saved project files. Finish any missing files, preserve completed work, install dependencies if needed, and start the preview.",
-                        )
-                      }
-                      disabled={isLoading}
-                      className="mt-3 rounded-lg bg-white px-3 py-2 text-xs font-semibold text-black hover:bg-zinc-200 disabled:opacity-50"
-                    >
-                      Continue build
-                    </button>
+                  <div className="rounded-xl border border-red-800 bg-red-900/20 px-4 py-3 text-sm text-red-400">
+                    Error: {localError || error?.message}
                   </div>
                 ))}
 
