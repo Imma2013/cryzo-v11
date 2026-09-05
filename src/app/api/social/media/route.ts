@@ -34,11 +34,10 @@ export async function POST(req: Request) {
       return Response.json({ uploadUrl });
     }
 
-    if (
-      !body.contentType?.match(/^(image|video)//) ||
-      !body.name ||
-      body.name.length > 180
-    ) {
+    const validContentType =
+      body.contentType?.startsWith("image/") ||
+      body.contentType?.startsWith("video/");
+    if (!validContentType || !body.name || body.name.length > 180) {
       throw new Error("Invalid media.");
     }
 
