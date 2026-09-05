@@ -1,12 +1,41 @@
 "use node";
 
-import { Composio } from "@composio/core";
 import { v } from "convex/values";
 import { internalAction } from "./_generated/server";
 import { internal } from "./_generated/api";
-import { composioSocialSessionOptions } from "../src/lib/server/composio-social";
 
 const toolkits: Record<string, string> = { x: "twitter", reddit: "reddit", youtube: "youtube", tiktok: "tiktok", instagram: "instagram", facebook: "facebook", linkedin: "linkedin" };
+
+type ComposioExecution = {
+  data: unknown;
+  error?: string;
+  logId: string;
+};
+
+async function callComposio<T>(body: Record<string, unknown>): Promise<T> {
+  const secret = process.env.CRYZO_INTERNAL_API_SECRET;
+  if (!secret) throw new Error("Social publishing is not configured.");
+
+  const origin = (
+    process.env.CRYZO_APP_URL ||
+    process.env.SITE_URL ||
+    "https://www.cryzo.me"
+  ).replace(/\/$/, "");
+  const response = await fetch(`${origin}/api/internal/social/composio`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${secret}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(120_000),
+  });
+  const payload = (await response.json()) as { result?: T; error?: string };
+  if (!response.ok || payload.result === undefined) {
+    throw new Error(payload.error || "Composio execution failed.");
+  }
+  return payload.result;
+}
 function entries(value: unknown): [string, unknown][] {
   if (!value || typeof value !== "object") return [];
   return Object.entries(value).flatMap(([key, child]) => [[key, child] as [string, unknown], ...entries(child)]);
@@ -33,12 +62,17 @@ export const publishDelivery = internalAction({
     let toolSlug: string | undefined;
     try {
       if (!toolkit || !payload.delivery.connectedAccountId) throw new Error("Connect an approved account in Marketing before publishing.");
-      const composio = new Composio();
-      const session = await composio.create(String(payload.post.userId), composioSocialSessionOptions(toolkit, payload.delivery.connectedAccountId));
       const execute = async (slug: string, arguments_: Record<string, unknown>, publishes = true) => {
         toolSlug = slug;
         if (publishes) executionStarted = true;
-        const result = await session.execute(slug, arguments_);
+        const result = await callComposio<ComposioExecution>({
+          operation: "execute",
+          userId: String(payload.post.userId),
+          toolkit,
+          connectedAccountId: payload.delivery.connectedAccountId,
+          toolSlug: slug,
+          arguments: arguments_,
+        });
         logId = result.logId;
         if (result.error) {
           explicitProviderFailure = true;
@@ -55,7 +89,12 @@ export const publishDelivery = internalAction({
         const ids = [];
         if (video) throw new Error("X video uploads are not enabled. Use images or a text post.");
         for (const url of urls) {
-          const media = await composio.files.upload({ file: url, toolSlug: "TWITTER_UPLOAD_MEDIA", toolkitSlug: toolkit });
+          const media = await callComposio<unknown>({
+            operation: "upload",
+            toolkit,
+            toolSlug: "TWITTER_UPLOAD_MEDIA",
+            file: url,
+          });
           const uploaded = await execute("TWITTER_UPLOAD_MEDIA", { media, media_category: "tweet_image" }, false);
           const id = identifier(uploaded.data, ["media_id", "id"]);
           if (!id) throw new Error("X did not confirm the media upload.");
@@ -120,10 +159,11 @@ export const publishDelivery = internalAction({
         }
         const images = [];
         for (const url of urls) {
-          images.push(await composio.files.upload({
-            file: url,
+          images.push(await callComposio<unknown>({
+            operation: "upload",
+            toolkit,
             toolSlug: "LINKEDIN_CREATE_LINKED_IN_POST",
-            toolkitSlug: toolkit,
+            file: url,
           }));
         }
         result = await execute("LINKEDIN_CREATE_LINKED_IN_POST", {
@@ -136,10 +176,11 @@ export const publishDelivery = internalAction({
         const videoIndex = mediaTypes.findIndex((type) => type.startsWith("video/"));
         const thumbnailIndex = mediaTypes.findIndex((type) => type.startsWith("image/"));
         if (videoIndex < 0) throw new Error("YouTube requires exactly one video.");
-        const file = await composio.files.upload({
-          file: urls[videoIndex],
+        const file = await callComposio<unknown>({
+          operation: "upload",
+          toolkit,
           toolSlug: "YOUTUBE_UPLOAD_VIDEO",
-          toolkitSlug: toolkit,
+          file: urls[videoIndex],
         });
         result = await execute("YOUTUBE_UPLOAD_VIDEO", {
           title: options.youtubeTitle || content.split("\n")[0].slice(0, 100),
@@ -187,8 +228,14 @@ export const checkTikTok = internalAction({
     const delivery = await ctx.runMutation(internal.social.claimPoll, args);
     if (!delivery) return null;
     try {
-      const session = await new Composio().create(String(delivery.userId), composioSocialSessionOptions("tiktok", delivery.connectedAccountId!));
-      const result = await session.execute("TIKTOK_FETCH_PUBLISH_STATUS", { publish_id: delivery.remotePostId });
+      const result = await callComposio<ComposioExecution>({
+        operation: "execute",
+        userId: String(delivery.userId),
+        toolkit: "tiktok",
+        connectedAccountId: delivery.connectedAccountId!,
+        toolSlug: "TIKTOK_FETCH_PUBLISH_STATUS",
+        arguments: { publish_id: delivery.remotePostId },
+      });
       if (result.error) throw new Error(result.error);
       const status = entries(result.data).find(([key]) => key === "status")?.[1];
       if (status === "PUBLISH_COMPLETE") {
