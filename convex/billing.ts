@@ -10,7 +10,7 @@ const FREE_DAILY_MESSAGE_CREDITS = 5;
 const INTERNAL_TESTER_CREDITS = 1_000_000_000;
 const INTERNAL_TESTER_FALLBACK_EMAIL = "lloyd.ebnchenge@gmail.com";
 
-async function isInternalTester(
+export async function isInternalTester(
   ctx: QueryCtx | MutationCtx,
   userId: Id<"users">,
 ) {

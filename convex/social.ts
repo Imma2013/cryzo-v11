@@ -11,9 +11,8 @@ import {
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 
-import { chargeSocialDelivery } from "./billing";
+import { chargeSocialDelivery, isInternalTester } from "./billing";
 
-const OWNER_EMAIL = "lloyd.ebnchenge@gmail.com";
 const FREE_MONTHLY_POSTS = 10;
 const FREE_CHANNELS_PER_POST = 1;
 
@@ -73,16 +72,15 @@ async function socialAccess(
   userId: Id<"users">,
   now: number,
 ) {
-  const [user, subscription] = await Promise.all([
+  const [user, subscription, internalTester] = await Promise.all([
     ctx.db.get(userId),
     ctx.db
       .query("subscriptions")
       .withIndex("by_user", (q) => q.eq("userId", userId))
       .unique(),
+    isInternalTester(ctx, userId),
   ]);
-  const owner =
-    Boolean(user?.isAdmin) ||
-    user?.email?.trim().toLowerCase() === OWNER_EMAIL;
+  const owner = Boolean(user?.isAdmin) || internalTester;
   const paid =
     owner ||
     Boolean(
