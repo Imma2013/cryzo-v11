@@ -148,7 +148,6 @@ export default function ProjectMarketing() {
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
   const [agentHistory, setAgentHistory] = useState<{ role: "user" | "assistant"; content: string }[]>([]);
-  const [confirmed, setConfirmed] = useState(false);
   const activeProjectId = sourceProjectId || projects?.[0]?._id || "";
 
   useEffect(() => {
@@ -256,7 +255,7 @@ export default function ProjectMarketing() {
     });
 
   const toggleChannel = (id: ChannelId) => {
-    setConfirmed(false);
+    
     setChannels((current) =>
       current.includes(id)
         ? current.filter((channel) => channel !== id)
@@ -273,7 +272,7 @@ export default function ProjectMarketing() {
     if (!files?.length) return;
     if (surface === "agent") setAiError(null);
     else setComposerError(null);
-    setConfirmed(false);
+    
     try {
       for (const file of Array.from(files).slice(0, Math.max(0, 10 - mediaStorageIds.length))) {
         if (file.size > 500_000_000) throw new Error("Use media below 500 MB.");
@@ -308,7 +307,7 @@ export default function ProjectMarketing() {
     setMediaStorageIds((current) => current.filter((_, itemIndex) => itemIndex !== index));
     setMediaPreviews((current) => current.filter((_, itemIndex) => itemIndex !== index));
     setMediaNames((current) => current.filter((_, itemIndex) => itemIndex !== index));
-    setConfirmed(false);
+    
   };
 
   const save = async (status: "draft" | "scheduled" | "now") => {
@@ -316,7 +315,6 @@ export default function ProjectMarketing() {
     setSaving(true);
     setComposerError(null);
     try {
-      if (status !== "draft" && !confirmed) throw new Error("Review the preview and confirm this exact post before publishing or scheduling.");
       const postId = await createPost({
         conversationId: activeProjectId
           ? (activeProjectId as Id<"conversations">)
@@ -359,7 +357,7 @@ export default function ProjectMarketing() {
       setRedditCommunity("");
       setYoutubeTitle("");
       setLinkedinAuthorUrn("");
-      setConfirmed(false);
+      
     } catch (error) {
       setComposerError(error instanceof Error ? error.message : "Unable to save post");
     } finally {
@@ -529,8 +527,8 @@ export default function ProjectMarketing() {
               type="button"
               onClick={() => {
                 setContent(aiDraft);
+                setPublishMode("now");
                 setComposerOpen(true);
-                setConfirmed(false);
               }}
               className="mt-4 text-xs font-semibold text-[#ff7550]"
             >
@@ -559,7 +557,7 @@ export default function ProjectMarketing() {
             </Link>
             <button
               type="button"
-              onClick={() => setComposerOpen(true)}
+              onClick={() => { setPublishMode("now"); setComposerOpen(true); }}
               className="rounded-xl bg-white px-4 py-2.5 text-sm font-semibold text-black"
             >
               Create post
@@ -777,7 +775,7 @@ export default function ProjectMarketing() {
                           ...current,
                           [channel]: event.target.value,
                         }));
-                        setConfirmed(false);
+                        
                       }}
                       className="mt-2 h-11 w-full rounded-xl border border-zinc-700 bg-black px-3 text-sm text-white outline-none focus:border-[#ff7550]"
                     >
@@ -805,7 +803,7 @@ export default function ProjectMarketing() {
             )}
             <textarea
               value={content}
-              onChange={(event) => { setContent(event.target.value); setConfirmed(false); }}
+              onChange={(event) => { setContent(event.target.value);  }}
               placeholder="Write something worth stopping for..."
               className="mt-5 min-h-52 w-full resize-none rounded-2xl border border-zinc-700 bg-black p-4 text-base leading-7 outline-none placeholder:text-zinc-600 focus:border-[#ff7550]"
             />
@@ -839,7 +837,7 @@ export default function ProjectMarketing() {
                   disabled={targetsLoading}
                   onChange={(event) => {
                     setFacebookPageId(event.target.value);
-                    setConfirmed(false);
+                    
                   }}
                   className="mt-2 h-11 w-full rounded-xl border border-zinc-700 bg-black px-3 text-sm text-white outline-none focus:border-[#ff7550]"
                 >
@@ -863,7 +861,7 @@ export default function ProjectMarketing() {
                     disabled={targetsLoading}
                     onChange={(event) => {
                       setInstagramUserId(event.target.value);
-                      setConfirmed(false);
+                      
                     }}
                     className="mt-2 h-11 w-full rounded-xl border border-zinc-700 bg-black px-3 text-sm text-white outline-none focus:border-[#ff7550]"
                   >
@@ -889,7 +887,7 @@ export default function ProjectMarketing() {
                           | "story"
                           | "carousel",
                       );
-                      setConfirmed(false);
+                      
                     }}
                     className="mt-2 h-11 w-full rounded-xl border border-zinc-700 bg-black px-3 text-sm text-white outline-none focus:border-[#ff7550]"
                   >
@@ -932,7 +930,7 @@ export default function ProjectMarketing() {
                     value={linkedinAuthorUrn}
                     onChange={(event) => {
                       setLinkedinAuthorUrn(event.target.value);
-                      setConfirmed(false);
+                      
                     }}
                     placeholder="Optional · defaults to your profile"
                     className="mt-2 h-11 w-full rounded-xl border border-zinc-700 bg-black px-3 text-sm outline-none focus:border-[#ff7550]"
@@ -944,7 +942,7 @@ export default function ProjectMarketing() {
                     value={linkedinVisibility}
                     onChange={(event) => {
                       setLinkedinVisibility(event.target.value);
-                      setConfirmed(false);
+                      
                     }}
                     className="mt-2 h-11 w-full rounded-xl border border-zinc-700 bg-black px-3 text-sm outline-none focus:border-[#ff7550]"
                   >
@@ -993,37 +991,98 @@ export default function ProjectMarketing() {
                 ))}
               </div>
             </section>
-            <fieldset className="mt-4 space-y-2 text-sm">
-              <legend className="mb-2">When do you want to publish?</legend>
-              <label className="block"><input type="radio" checked={publishMode === "now"} onChange={() => { setPublishMode("now"); setConfirmed(false); }} /> Publish now</label>
-              <label className="block"><input type="radio" checked={publishMode === "scheduled"} disabled={!access.canSchedule} onChange={() => { setPublishMode("scheduled"); setConfirmed(false); }} /> Schedule for later</label>
-              {!access.canSchedule && <Link href="/chat/billing" className="block text-sky-400">Upgrade to Starter to schedule posts</Link>}
+            <fieldset className="mt-6 border-t border-zinc-800 pt-6">
+              <legend className="mb-4 text-base font-medium">
+                When do you want to publish?
+              </legend>
+              <div className="space-y-4 text-sm">
+                <label className="flex cursor-pointer items-center gap-3">
+                  <input
+                    type="radio"
+                    name="publish-time"
+                    checked={publishMode === "now"}
+                    onChange={() => setPublishMode("now")}
+                    className="h-5 w-5 accent-[#1677ff]"
+                  />
+                  <span>Publish now</span>
+                </label>
+                <label className={`flex items-center gap-3 ${access.canSchedule ? "cursor-pointer" : "cursor-not-allowed text-zinc-500"}`}>
+                  <input
+                    type="radio"
+                    name="publish-time"
+                    checked={publishMode === "scheduled"}
+                    disabled={!access.canSchedule}
+                    onChange={() => setPublishMode("scheduled")}
+                    className="h-5 w-5 accent-[#1677ff]"
+                  />
+                  <span>Schedule for later</span>
+                </label>
+                {!access.canSchedule && (
+                  <p className="pl-8 text-sm text-zinc-500">
+                    To schedule posts in advance,{" "}
+                    <Link href="/chat/billing" className="text-[#8b5cf6] underline underline-offset-2">
+                      Upgrade plan
+                    </Link>
+                  </p>
+                )}
+              </div>
             </fieldset>
-            <div className="mt-4">
-              <label className="text-xs font-medium text-zinc-400">Publish time ({Intl.DateTimeFormat().resolvedOptions().timeZone})</label>
-              <input type="datetime-local" disabled={publishMode !== "scheduled"} value={scheduledFor} onChange={(event) => { setScheduledFor(event.target.value); setConfirmed(false); }} className="mt-2 h-11 w-full rounded-xl border border-zinc-700 bg-black px-3 text-sm outline-none focus:border-[#ff7550]" />
-              <label className="mt-4 flex items-start gap-2 rounded-xl border border-zinc-800 bg-black/50 p-3 text-xs leading-5 text-zinc-300">
-                <input type="checkbox" checked={confirmed} onChange={event => setConfirmed(event.target.checked)} className="mt-1" />
-                I reviewed this exact copy, accounts, media, and publishing time. Editing any of them requires confirmation again.
-              </label>
-            </div>
-            {composerError && <p className="mt-3 text-xs text-red-400">{composerError}</p>}
-            <div className="mt-6 flex flex-wrap justify-end gap-2">
-              <button type="button" disabled={saving} onClick={() => void save("draft")} className="rounded-xl border border-zinc-700 px-4 py-2.5 text-sm font-semibold text-zinc-300">
-                Save draft
+            {publishMode === "scheduled" && access.canSchedule && (
+              <div className="mt-5 pl-8">
+                <label className="text-sm font-medium">
+                  Choose a date and time
+                  <span className="mt-1 block text-xs font-normal text-zinc-500">
+                    {Intl.DateTimeFormat().resolvedOptions().timeZone}
+                  </span>
+                </label>
+                <input
+                  type="datetime-local"
+                  value={scheduledFor}
+                  onChange={(event) => setScheduledFor(event.target.value)}
+                  className="mt-3 h-11 w-full rounded-xl border border-zinc-700 bg-black px-3 text-sm outline-none focus:border-[#1677ff]"
+                />
+              </div>
+            )}
+            {composerError && (
+              <p role="alert" className="mt-4 text-sm text-red-400">
+                {composerError}
+              </p>
+            )}
+            <div className="-mx-5 -mb-5 mt-7 flex flex-wrap items-center justify-between gap-4 border-t border-zinc-700 bg-black/30 px-5 py-4 sm:-mx-7 sm:-mb-7 sm:px-7">
+              <button
+                type="button"
+                disabled={saving}
+                onClick={() => void save("draft")}
+                className="text-sm font-medium text-[#1677ff] disabled:opacity-50"
+              >
+                Save as draft
               </button>
-              <button type="button" disabled={
-                  saving ||
-                  !confirmed ||
-                  !content.trim() ||
-                  channels.length === 0 ||
-                  channels.some((channel) => !accountSelections[channel]) ||
-                  (channels.includes("facebook") && !facebookPageId) ||
-                  (channels.includes("instagram") && !instagramUserId)
-                } onClick={() => void save(publishMode)} className="inline-flex items-center gap-2 rounded-xl bg-[#ff5f2e] px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-40">
-                {saving ? <Loader2 className="animate-spin" size={15} /> : <Send size={15} />}
-                {publishMode === "now" ? "Publish now" : "Schedule post"}
-              </button>
+              <div className="ml-auto flex flex-wrap items-center justify-end gap-4">
+                <div className="hidden items-center gap-2 text-sm text-zinc-400 sm:flex">
+                  <span>Publishing to:</span>
+                  <span className="font-medium text-white">
+                    {channels.map((channel) => CHANNELS.find((item) => item.id === channel)?.label ?? channel).join(", ")}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  disabled={
+                    saving ||
+                    !content.trim() ||
+                    channels.length === 0 ||
+                    channels.some((channel) => !accountSelections[channel]) ||
+                    (channels.includes("facebook") && !facebookPageId) ||
+                    (channels.includes("instagram") && !instagramUserId)
+                  }
+                  onClick={() => void save(publishMode)}
+                  className="inline-flex items-center gap-2 rounded-full bg-[#1677ff] px-6 py-3 text-sm font-semibold text-white disabled:opacity-40"
+                >
+                  {saving ? <Loader2 className="animate-spin" size={15} /> : <Send size={15} />}
+                  {publishMode === "now"
+                    ? `Publish (${channels.length})`
+                    : `Schedule (${channels.length})`}
+                </button>
+              </div>
             </div>
           </div>
         </div>
