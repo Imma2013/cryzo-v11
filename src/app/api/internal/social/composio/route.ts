@@ -60,6 +60,16 @@ function validSlug(value: unknown) {
   );
 }
 
+function publicErrorMessage(message: string) {
+  if (/credits depleted|http_depleted|["']?status["']?\s*:\s*402/i.test(message)) {
+    return "Cryzo's Composio delivery credits are depleted. Add credits in Composio, then retry.";
+  }
+  if (/no composio api key|api key.*not provided/i.test(message)) {
+    return "Composio is not configured in the Vercel runtime.";
+  }
+  return message;
+}
+
 export async function POST(request: Request) {
   if (!authorized(request)) {
     return Response.json({ error: "Unauthorized." }, { status: 401 });
@@ -129,6 +139,6 @@ export async function POST(request: Request) {
       toolSlug: body.toolSlug,
       error: message,
     });
-    return Response.json({ error: message }, { status: 502 });
+    return Response.json({ error: publicErrorMessage(message) }, { status: 502 });
   }
 }
