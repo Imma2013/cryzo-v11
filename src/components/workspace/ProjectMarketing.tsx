@@ -10,6 +10,8 @@ import {
   Clock3,
   ImagePlus,
   Loader2,
+  Plus,
+  RotateCcw,
   Send,
   Sparkles,
   Trash2,
@@ -19,6 +21,7 @@ import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { useAuth } from "@/providers/AuthProvider";
 import ProjectSocialAccounts from "./ProjectSocialAccounts";
+import SocialPostPreview from "./SocialPostPreview";
 
 const CHANNELS = [
   { id: "x", label: "X", color: "bg-white text-black" },
@@ -40,10 +43,14 @@ type DeliveryStatus =
   | "failed"
   | "unknown";
 type SocialDelivery = {
+  _id?: Id<"socialDeliveries">;
   channel: ChannelId;
   status: DeliveryStatus;
   error?: string;
   remoteUrl?: string;
+  toolSlug?: string;
+  providerLogId?: string;
+  attempts?: number;
 };
 type SocialAccount = {
   _id: Id<"socialAccounts">;
@@ -66,6 +73,7 @@ type SocialPost = {
   status: "draft" | "scheduled" | "publishing" | "published" | "failed";
   error?: string;
   deliveries?: SocialDelivery[];
+  mediaUrls?: string[];
 };
 
 function startOfWeek(date: Date) {
@@ -95,8 +103,10 @@ export default function ProjectMarketing() {
   );
   const createPost = useMutation(api.social.createPost);
   const publishNow = useMutation(api.social.publishNow);
+  const retryDelivery = useMutation(api.social.retryDelivery);
   const removePost = useMutation(api.social.removePost);
   const requestKey = useRef(crypto.randomUUID());
+  const aiMediaInputRef = useRef<HTMLInputElement>(null);
   const [publishMode, setPublishMode] = useState<"now" | "scheduled">("now");
   const [mediaPreviews, setMediaPreviews] = useState<{ url: string; type: string }[]>([]);
 
@@ -256,9 +266,13 @@ export default function ProjectMarketing() {
     );
   };
 
-  const uploadMedia = async (files: FileList | null) => {
+  const uploadMedia = async (
+    files: FileList | null,
+    surface: "composer" | "agent" = "composer",
+  ) => {
     if (!files?.length) return;
-    setComposerError(null);
+    if (surface === "agent") setAiError(null);
+    else setComposerError(null);
     setConfirmed(false);
     try {
       for (const file of Array.from(files).slice(0, Math.max(0, 10 - mediaStorageIds.length))) {
@@ -284,8 +298,17 @@ export default function ProjectMarketing() {
         setMediaNames((current) => [...current, file.name]);
       }
     } catch (error) {
-      setComposerError(error instanceof Error ? error.message : "Media upload failed");
+      const message = error instanceof Error ? error.message : "Media upload failed";
+      if (surface === "agent") setAiError(message);
+      else setComposerError(message);
     }
+  };
+
+  const removeMedia = (index: number) => {
+    setMediaStorageIds((current) => current.filter((_, itemIndex) => itemIndex !== index));
+    setMediaPreviews((current) => current.filter((_, itemIndex) => itemIndex !== index));
+    setMediaNames((current) => current.filter((_, itemIndex) => itemIndex !== index));
+    setConfirmed(false);
   };
 
   const save = async (status: "draft" | "scheduled" | "now") => {
@@ -445,12 +468,49 @@ export default function ProjectMarketing() {
             drafts and publishing still work without one.
           </p>
         )}
-        <textarea
-          value={aiPrompt}
-          onChange={(event) => setAiPrompt(event.target.value)}
-          placeholder="Announce our new product with a confident, playful tone..."
-          className="mt-5 min-h-32 w-full resize-none rounded-2xl border border-zinc-700 bg-black p-4 text-sm outline-none placeholder:text-zinc-600 focus:border-[#ff7550]"
-        />
+        <div className="relative mt-5 rounded-2xl border border-zinc-700 bg-black focus-within:border-[#ff7550]">
+          <textarea
+            value={aiPrompt}
+            onChange={(event) => setAiPrompt(event.target.value)}
+            placeholder="Announce our new product with a confident, playful tone..."
+            className="min-h-32 w-full resize-none rounded-2xl bg-transparent p-4 pb-14 text-sm outline-none placeholder:text-zinc-600"
+          />
+          <input
+            ref={aiMediaInputRef}
+            type="file"
+            accept="image/*,video/*"
+            multiple
+            className="hidden"
+            onChange={(event) => {
+              void uploadMedia(event.target.files, "agent");
+              event.currentTarget.value = "";
+            }}
+          />
+          <button
+            type="button"
+            onClick={() => aiMediaInputRef.current?.click()}
+            className="absolute bottom-3 left-3 grid h-8 w-8 place-items-center rounded-full border border-zinc-700 text-zinc-300 transition hover:border-zinc-500 hover:text-white"
+            aria-label="Add photos or videos"
+            title="Add photos or videos"
+          >
+            <Plus size={16} />
+          </button>
+          <span className="absolute bottom-4 left-14 text-[10px] text-zinc-600">
+            Add photos or video
+          </span>
+        </div>
+        {mediaNames.length > 0 && (
+          <div className="mt-3 space-y-2">
+            {mediaNames.map((name, index) => (
+              <div key={`${name}-${index}`} className="flex items-center justify-between gap-2 rounded-xl border border-zinc-800 bg-black px-3 py-2 text-xs text-zinc-300">
+                <span className="truncate">{name}</span>
+                <button type="button" onClick={() => removeMedia(index)} className="text-zinc-500 hover:text-red-400" aria-label={`Remove ${name}`}>
+                  <X size={13} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
         <button
           type="button"
           onClick={() => void generateDraft()}
@@ -542,52 +602,127 @@ export default function ProjectMarketing() {
                   <p className="mt-1 text-lg font-semibold">{day.getDate()}</p>
                 </div>
                 <div className="space-y-2 p-2">
-                  {postsForDay(day).map((post) => (
-                    <article key={post._id} className="group rounded-xl border border-zinc-800 bg-zinc-950 p-3">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className={`text-[10px] font-semibold uppercase ${post.status === "failed" ? "text-red-400" : post.status === "published" ? "text-emerald-400" : "text-[#ff7550]"}`}>
-                          {post.status}
-                        </span>
-                        <button type="button" onClick={() => void removePost({ postId: post._id }).catch(error => setComposerError(error.message))} className="opacity-0 text-zinc-600 group-hover:opacity-100 hover:text-red-400" aria-label="Delete post">
-                          <Trash2 size={12} />
-                        </button>
-                      </div>
-                      <p className="mt-2 line-clamp-4 text-xs leading-5 text-zinc-300">{post.content}</p>
-                      <div className="mt-3 flex flex-wrap gap-1">
-                        {(post.deliveries?.length
-                          ? post.deliveries
-                          : post.channels.map((channel: ChannelId) => ({
-                              channel,
-                              status: post.status,
-                            }))
-                        ).map((delivery: SocialDelivery) => (
-                          <span
-                            key={delivery.channel}
-                            title={delivery.error || delivery.remoteUrl || delivery.status}
-                            className={`rounded px-1.5 py-1 text-[9px] uppercase ${
-                              delivery.status === "published"
-                                ? "bg-emerald-500/15 text-emerald-300"
-                                : delivery.status === "failed" || delivery.status === "unknown"
-                                  ? "bg-red-500/15 text-red-300"
-                                  : "bg-zinc-800 text-zinc-400"
-                            }`}
-                          >
-                            {delivery.channel}: {delivery.status}
-                          </span>
-                        ))}
-                      </div>
-                      <p className="mt-3 flex items-center gap-1 text-[10px] text-zinc-600">
-                        <Clock3 size={10} />
-                        {new Date(post.scheduledFor).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
-                      </p>
-                      {(post.status === "draft" || post.status === "failed") && (
-                        <button type="button" onClick={() => void publishNow({ postId: post._id }).catch(error => setComposerError(error.message))} className="mt-3 text-[10px] font-semibold text-[#ff7550]">
-                          Publish now
-                        </button>
-                      )}
-                      {post.error && <p className="mt-2 text-[10px] leading-4 text-red-400">{post.error}</p>}
-                    </article>
-                  ))}
+                  {postsForDay(day).map((post) => {
+                    const deliveries = post.deliveries?.length
+                      ? post.deliveries
+                      : post.channels.map((channel: ChannelId) => ({
+                          channel,
+                          status: post.status as DeliveryStatus,
+                        }));
+                    const previewChannel = post.channels[0] ?? "x";
+                    const previewAccount =
+                      socialAccounts?.find((account) => account.channel === previewChannel)?.name ??
+                      "Your account";
+
+                    return (
+                      <article key={post._id} className="group overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-950">
+                        <SocialPostPreview
+                          compact
+                          channel={previewChannel}
+                          content={post.content}
+                          accountName={previewAccount}
+                          media={(post.mediaUrls ?? []).map((url) => ({ url }))}
+                        />
+                        <div className="p-3">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className={`text-[10px] font-semibold uppercase ${
+                              post.status === "failed"
+                                ? "text-red-400"
+                                : post.status === "published"
+                                  ? "text-emerald-400"
+                                  : "text-[#ff7550]"
+                            }`}>
+                              {post.status}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                void removePost({ postId: post._id }).catch((error) =>
+                                  setComposerError(error.message),
+                                )
+                              }
+                              className="opacity-0 text-zinc-600 transition group-hover:opacity-100 hover:text-red-400 focus:opacity-100"
+                              aria-label="Delete post"
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                          </div>
+                          <div className="mt-3 space-y-2">
+                            {deliveries.map((delivery: SocialDelivery) => (
+                              <div key={delivery._id ?? delivery.channel}>
+                                <div
+                                  className={`rounded-lg px-2 py-1.5 text-[9px] font-semibold uppercase ${
+                                    delivery.status === "published"
+                                      ? "bg-emerald-500/15 text-emerald-300"
+                                      : delivery.status === "failed" ||
+                                          delivery.status === "unknown"
+                                        ? "bg-red-500/15 text-red-300"
+                                        : "bg-zinc-800 text-zinc-400"
+                                  }`}
+                                >
+                                  {delivery.channel}: {delivery.status}
+                                </div>
+                                {(delivery.status === "failed" ||
+                                  delivery.status === "unknown") && (
+                                  <div className="mt-1 rounded-lg border border-red-500/20 bg-red-500/5 p-2 text-[9px] leading-4 text-red-200">
+                                    <p>{delivery.error || "The network did not confirm this post."}</p>
+                                    {delivery.toolSlug && (
+                                      <p className="mt-1 text-red-300/70">Action: {delivery.toolSlug}</p>
+                                    )}
+                                    {delivery.providerLogId && (
+                                      <p className="text-red-300/70">Log: {delivery.providerLogId}</p>
+                                    )}
+                                    {delivery.status === "failed" && delivery._id && (
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          void retryDelivery({ deliveryId: delivery._id! }).catch(
+                                            (error) => setComposerError(error.message),
+                                          )
+                                        }
+                                        className="mt-2 inline-flex items-center gap-1 font-semibold text-white"
+                                      >
+                                        <RotateCcw size={10} />
+                                        Retry this network
+                                      </button>
+                                    )}
+                                    {delivery.status === "unknown" && (
+                                      <p className="mt-1 font-medium">
+                                        Check the network before retrying to avoid a duplicate.
+                                      </p>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                          <p className="mt-3 flex items-center gap-1 text-[10px] text-zinc-600">
+                            <Clock3 size={10} />
+                            {new Date(post.scheduledFor).toLocaleTimeString([], {
+                              hour: "numeric",
+                              minute: "2-digit",
+                            })}
+                          </p>
+                          {post.status === "draft" && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                void publishNow({ postId: post._id }).catch((error) =>
+                                  setComposerError(error.message),
+                                )
+                              }
+                              className="mt-3 text-[10px] font-semibold text-[#ff7550]"
+                            >
+                              Publish now
+                            </button>
+                          )}
+                          {post.error && (
+                            <p className="mt-2 text-[10px] leading-4 text-red-400">{post.error}</p>
+                          )}
+                        </div>
+                      </article>
+                    );
+                  })}
                 </div>
               </section>
             ))}
@@ -834,19 +969,35 @@ export default function ProjectMarketing() {
                 </select>
               </div>
             )}
-            <div className="mt-4 rounded-xl border border-zinc-800 bg-black p-4">
-              <p className="text-xs font-semibold text-zinc-400">Post preview · {channels.join(", ")}</p>
-              {youtubeTitle && <h3 className="mt-2 font-semibold">{youtubeTitle}</h3>}
-              <p className="mt-3 whitespace-pre-wrap text-sm">{content || "Your post preview will appear here."}</p>
-              {mediaPreviews.map(media => media.type.startsWith("video/")
-                ? <video key={media.url} src={media.url} controls className="mt-3 max-h-52 rounded-lg" />
-                : <img key={media.url} src={media.url} alt="Post attachment" className="mt-3 max-h-52 rounded-lg" />)}
-            </div>
+            <section className="mt-5">
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <h3 className="text-sm font-semibold text-white">Live previews</h3>
+                <span className="text-[10px] text-zinc-500">Adapted for each selected network</span>
+              </div>
+              <div className="grid gap-4 md:grid-cols-2">
+                {channels.map((channel) => (
+                  <SocialPostPreview
+                    key={channel}
+                    channel={channel}
+                    content={content || "Your post preview will appear here."}
+                    title={channel === "youtube" ? youtubeTitle : undefined}
+                    accountName={
+                      socialAccounts?.find(
+                        (account) =>
+                          account.channel === channel &&
+                          account.connectedAccountId === accountSelections[channel],
+                      )?.name ?? "Your account"
+                    }
+                    media={mediaPreviews}
+                  />
+                ))}
+              </div>
+            </section>
             <fieldset className="mt-4 space-y-2 text-sm">
               <legend className="mb-2">When do you want to publish?</legend>
               <label className="block"><input type="radio" checked={publishMode === "now"} onChange={() => { setPublishMode("now"); setConfirmed(false); }} /> Publish now</label>
-              <label className="block"><input type="radio" checked={publishMode === "scheduled"} disabled={access.monthlyPostLimit !== null} onChange={() => { setPublishMode("scheduled"); setConfirmed(false); }} /> Schedule for later</label>
-              {access.monthlyPostLimit !== null && <Link href="/chat/billing" className="block text-sky-400">Upgrade to Starter to schedule posts</Link>}
+              <label className="block"><input type="radio" checked={publishMode === "scheduled"} disabled={!access.canSchedule} onChange={() => { setPublishMode("scheduled"); setConfirmed(false); }} /> Schedule for later</label>
+              {!access.canSchedule && <Link href="/chat/billing" className="block text-sky-400">Upgrade to Starter to schedule posts</Link>}
             </fieldset>
             <div className="mt-4">
               <label className="text-xs font-medium text-zinc-400">Publish time ({Intl.DateTimeFormat().resolvedOptions().timeZone})</label>

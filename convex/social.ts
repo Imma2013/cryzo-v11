@@ -80,7 +80,9 @@ async function socialAccess(
       .withIndex("by_user", (q) => q.eq("userId", userId))
       .unique(),
   ]);
-  const owner = user?.email?.trim().toLowerCase() === OWNER_EMAIL;
+  const owner =
+    Boolean(user?.isAdmin) ||
+    user?.email?.trim().toLowerCase() === OWNER_EMAIL;
   const paid =
     owner ||
     Boolean(
@@ -238,6 +240,8 @@ export const getAccess = query({
     postsUsed: v.number(),
     monthlyPostLimit: v.union(v.number(), v.null()),
     maxChannelsPerPost: v.union(v.number(), v.null()),
+    canSchedule: v.boolean(),
+    isAdmin: v.boolean(),
   }),
   handler: async (ctx, args) => {
     const userId = await getAuthUserId(ctx);
@@ -248,6 +252,8 @@ export const getAccess = query({
         postsUsed: 0,
         monthlyPostLimit: FREE_MONTHLY_POSTS,
         maxChannelsPerPost: FREE_CHANNELS_PER_POST,
+        canSchedule: false,
+        isAdmin: false,
       };
     }
     if (args.conversationId) await requireProject(ctx, userId, args.conversationId);
@@ -258,6 +264,8 @@ export const getAccess = query({
       postsUsed: access.postsUsed,
       monthlyPostLimit: access.monthlyPostLimit,
       maxChannelsPerPost: access.maxChannelsPerPost,
+      canSchedule: access.paid,
+      isAdmin: access.plan === "owner",
     };
   },
 });
@@ -437,6 +445,47 @@ export const publishNow = mutation({
     });
     await ctx.scheduler.runAfter(0, internal.socialWorker.publishPost, {
       postId: post._id,
+    });
+    return null;
+  },
+});
+
+export const retryDelivery = mutation({
+  args: { deliveryId: v.id("socialDeliveries") },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const userId = await currentUserId(ctx);
+    const delivery = await ctx.db.get(args.deliveryId);
+    if (!delivery || delivery.userId !== userId) {
+      throw new Error("Delivery not found.");
+    }
+    if (delivery.status !== "failed") {
+      throw new Error(
+        delivery.status === "unknown"
+          ? "Check the network before retrying an unknown result."
+          : "Only failed deliveries can be retried.",
+      );
+    }
+    const post = await ctx.db.get(delivery.postId);
+    if (!post || post.userId !== userId) throw new Error("Post not found.");
+
+    await validatePublishing(ctx, post);
+    await reservePost(ctx, post);
+    const now = Date.now();
+    await ctx.db.patch(delivery._id, {
+      status: "pending",
+      error: undefined,
+      completedAt: undefined,
+      leaseExpiresAt: undefined,
+      updatedAt: now,
+    });
+    await ctx.db.patch(post._id, {
+      status: "publishing",
+      error: undefined,
+      updatedAt: now,
+    });
+    await ctx.scheduler.runAfter(0, internal.socialWorker.publishDelivery, {
+      deliveryId: delivery._id,
     });
     return null;
   },

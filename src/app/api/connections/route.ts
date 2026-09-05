@@ -99,6 +99,7 @@ export async function POST(req: Request) {
   const connectionRequest = social?.id
     ? await getComposio().connectedAccounts.link(userId, social.id, {
         callbackUrl: origin + (returnTo && /^\/chat\/[a-zA-Z0-9]+$/.test(returnTo) ? returnTo : "/chat/apps"),
+        allowMultiple: true,
       })
     : await (await getComposio().create(userId)).authorize(toolkit, {
     callbackUrl: origin + (returnTo && /^\/chat\/[a-zA-Z0-9]+$/.test(returnTo) ? returnTo : "/chat/apps"),
