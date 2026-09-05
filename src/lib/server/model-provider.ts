@@ -91,6 +91,11 @@ export async function resolveServerModel(request: ServerModelRequest) {
 
   const definition = getProvider(providerId);
   let apiKey = request.modelApiKey?.trim() || "";
+  // The marketing copilot deliberately uses the server-managed OpenRouter
+  // credential. BYOK requests still provide their own device/account key.
+  if (providerId === "openrouter" && request.credentialMode === "cryzo" && !apiKey) {
+    apiKey = process.env.OPENROUTER_API_KEY?.trim() || "";
+  }
   let baseURL =
     request.modelBaseUrl?.trim() ||
     PROVIDER_BASE_URLS[providerId] ||
