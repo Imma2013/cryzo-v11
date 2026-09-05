@@ -498,6 +498,34 @@ export function finishStreamingArtifactStream(
         await executeRemoteActions(conversationId, state, pending);
       }
 
+      // A model can emit a complete file set without an explicit npm install
+      // action. Validate the assembled project before declaring the build
+      // incomplete; the guard repairs missing entry files such as App.tsx.
+      if (!state.previewUrl && pending.some((action) => action.type === "file")) {
+        const validation = await callGuard({
+          operation: "project",
+          conversationId,
+        });
+        if (validation.output) appendOutput(state, validation.output);
+        if (applyRepairedFiles(state, validation.repairedFiles)) emit(state);
+        if (validation.repairedFiles?.length) {
+          const install = await callSandbox({
+            operation: "action",
+            conversationId,
+            action: { type: "shell", content: "npm install" },
+          });
+          applyResponse(state, install);
+        }
+      }
+
+      if (!state.previewUrl) {
+        const restarted = await callSandbox({
+          operation: "restart",
+          conversationId,
+        });
+        applyResponse(state, restarted);
+      }
+
       if (state.previewUrl) {
         state.active = true;
         state.progress = "ready";
