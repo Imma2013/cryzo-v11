@@ -49,8 +49,8 @@ export async function POST(req: Request) {
       {
         conversationId: body.conversationId,
         storageId: body.storageId,
-        contentType: body.contentType,
-        name: body.name,
+        contentType: body.contentType!,
+        name: body.name!,
         serviceKey,
       },
       { token },
