@@ -37,9 +37,19 @@ export async function POST(req: Request) {
       typeof body.conversationId === "string" && body.conversationId
         ? body.conversationId
         : undefined;
-    const project = conversationId
-      ? await fetchQuery(api.conversations.get, { id: conversationId as Id<"conversations"> }, { token })
-      : null;
+    let project: { title?: string } | null = null;
+    if (conversationId) {
+      try {
+        project = await fetchQuery(
+          api.conversations.get,
+          { id: conversationId as Id<"conversations"> },
+          { token },
+        );
+      } catch {
+        // Standalone marketing chats may carry an old/deleted project id.
+        project = null;
+      }
+    }
     const accounts = await fetchQuery(api.social.listAccounts, {}, { token });
     const channels = Array.isArray(body.channels)
       ? body.channels.filter((channel): channel is string => typeof channel === "string").slice(0, 7)
