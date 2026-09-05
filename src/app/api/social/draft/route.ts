@@ -1,67 +1,131 @@
 import { generateText } from "ai";
-import { fetchMutation, fetchQuery } from "convex/nextjs";
+import { fetchQuery } from "convex/nextjs";
 import { api } from "../../../../../convex/_generated/api";
-import type { Id } from "../../../../../convex/_generated/dataModel";
 import { resolveServerModel } from "@/lib/server/model-provider";
-import { managedCandidates, openRouterClient } from "@/lib/server/openrouter";
-import { DEFAULT_MANAGED_MODEL_ID } from "@/lib/ai/managed-models";
 import { transientProviderFailure } from "@/lib/ai/request-intent";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 180;
+
+const MARKETING_MODEL_ID =
+  process.env.OPENROUTER_MARKETING_MODEL?.trim() || "minimax/minimax-m3:free";
+
+type HistoryItem = { role?: string; content?: string };
+
 export async function POST(req: Request) {
   const requestId = crypto.randomUUID();
-  const token = req.headers.get("authorization")?.replace(/^Bearer /, "") ?? "";
+  const token = req.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ?? "";
   if (!token) return Response.json({ error: "Sign in first." }, { status: 401 });
-  const serviceKey = process.env.CRYZO_INTERNAL_API_SECRET;
-  let runId: Id<"aiRuns"> | undefined;
-  let settled = false;
+
   try {
-    if (!serviceKey) throw new Error("AI drafting is not configured.");
     const user = await fetchQuery(api.users.currentUser, {}, { token });
     if (!user) return Response.json({ error: "Sign in first." }, { status: 401 });
-    const { prompt, channels, conversationId, requestKey, history } = await req.json();
-    if (typeof prompt !== "string" || !prompt.trim() || prompt.length > 4000 || typeof requestKey !== "string") throw new Error("Describe the post you want.");
-    const project = await fetchQuery(api.conversations.get, { id: conversationId }, { token });
-    if (!project) throw new Error("Project not found.");
-    const balance = await fetchQuery(api.aiUsage.balance, {}, { token });
-    const modelId = balance.plan === "free" ? DEFAULT_MANAGED_MODEL_ID : "cryzo/minimax-m3";
-    const candidates = await managedCandidates(modelId, false, false);
-    const system = "You are Cryzo Marketing. Draft social copy for human review. Never claim to have published anything. No fabricated facts, URLs or results. Return only the post copy.";
-    const safeHistory = Array.isArray(history) ? history.slice(-8).filter(item => item && ["user", "assistant"].includes(item.role) && typeof item.content === "string").map(item => `${item.role}: ${item.content.slice(0, 2000)}`).join("\n") : "";
-    const accounts = await fetchQuery(api.social.listAccounts, {}, { token });
-    const input = "Project context: " + project.title + "\nConnected accounts: " + accounts.map(account => `${account.channel}:${account.name}`).join(", ") +
-      "\nNetworks: " + (Array.isArray(channels) ? channels.join(", ") : "") + (safeHistory ? "\nConversation:\n" + safeHistory : "") + "\nRequest: " + prompt;
-    const maxCostMicros = Math.ceil(Math.max(...candidates.map(model => (system.length + input.length) * model.inputCost + 8192 * model.outputCost + model.requestCost)) * 1_000_000);
-    runId = await fetchMutation(api.aiUsage.reserve, { conversationId, requestKey: "social:" + requestKey, modelId,
-      freeModel: balance.plan === "free", maxCostMicros, serviceKey }, { token });
-    const signal = AbortSignal.any([req.signal, AbortSignal.timeout(150_000)]);
-    for (const [attempt, candidate] of [candidates[0], candidates[0]].entries()) {
-      try {
-        const selected = await resolveServerModel({ providerId: "cryzo", modelId: candidate.id });
-        const result = await generateText({ model: selected.model, system, prompt: input,
-          maxOutputTokens: Math.min(8192, candidate.output), maxRetries: 0,
-          abortSignal: AbortSignal.any([signal, AbortSignal.timeout(35000)]) });
-        const text = result.text.trim();
-        if (!text || result.finishReason === "length" || result.finishReason === "error") throw new Error("No complete draft returned.");
-        const reported = result.providerMetadata?.openrouter?.usage as { cost?: number } | undefined;
-        const cost = reported?.cost ?? (await openRouterClient().generations.getGeneration({ id: result.response.id }, { timeoutMs: 5000 })).data.totalCost;
-        if (!Number.isFinite(cost) || cost < 0) throw new Error("Unable to verify usage.");
-        if (signal.aborted) throw new Error("Draft generation cancelled.");
-        await fetchMutation(api.aiUsage.settle, { serviceKey, runId, success: true, costMicros: Math.ceil(cost * 1_000_000),
-          actualModel: candidate.id, generationId: result.response.id,
-          telemetry: { requestedModel: modelId, actualModel: candidate.id, usage: result.usage, finishReason: result.finishReason, reportedCost: cost } });
-        settled = true;
-        return Response.json({ text, requestId, actualModel: candidate.name, fallbackUsed: false,
-          proposal: { content: text, channels: Array.isArray(channels) ? channels : [], requiresConfirmation: true } });
-      } catch (error) { if (signal.aborted || attempt > 0 || !transientProviderFailure(error)) break; }
+
+    const body = (await req.json()) as {
+      prompt?: unknown;
+      channels?: unknown;
+      conversationId?: unknown;
+      requestKey?: unknown;
+      history?: unknown;
+    };
+    const prompt = typeof body.prompt === "string" ? body.prompt.trim() : "";
+    if (!prompt || prompt.length > 4000) {
+      return Response.json({ error: "Describe what you want to publish." }, { status: 400 });
     }
-    throw new Error("No model completed the draft. Please retry. No AI allowance was charged.");
+
+    const conversationId =
+      typeof body.conversationId === "string" && body.conversationId
+        ? body.conversationId
+        : undefined;
+    const project = conversationId
+      ? await fetchQuery(api.conversations.get, { id: conversationId as never }, { token })
+      : null;
+    const accounts = await fetchQuery(api.social.listAccounts, {}, { token });
+    const channels = Array.isArray(body.channels)
+      ? body.channels.filter((channel): channel is string => typeof channel === "string").slice(0, 7)
+      : [];
+
+    const safeHistory = Array.isArray(body.history)
+      ? (body.history as HistoryItem[])
+          .slice(-12)
+          .filter(
+            (item) =>
+              item &&
+              (item.role === "user" || item.role === "assistant") &&
+              typeof item.content === "string",
+          )
+          .map((item) => `${item.role}: ${item.content!.slice(0, 2000)}`)
+          .join("\n")
+      : "";
+
+    const system = [
+      "You are Cryzo Marketing, a conversational social-media copilot.",
+      "Respond naturally to the user's request, then provide a ready-to-publish draft when they ask for copy.",
+      "Never claim a post was published. Publishing requires explicit user confirmation in the composer.",
+      "Keep the response concise and do not emit code, XML, or internal reasoning.",
+      "Respect each network's limits (for example, keep X copy under 280 characters unless the user asks otherwise).",
+    ].join(" ");
+
+    const input = [
+      project ? `Project context: ${project.title}` : "Project context: none (standalone marketing chat)",
+      `Connected accounts: ${accounts.map((account) => `${account.channel}:${account.name}`).join(", ") || "none"}`,
+      `Target networks: ${channels.join(", ") || "not selected"}`,
+      safeHistory ? `Conversation so far:\n${safeHistory}` : "",
+      `User request: ${prompt}`,
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    if (!process.env.OPENROUTER_API_KEY?.trim()) {
+      throw new Error("OPENROUTER_API_KEY is not configured in the Vercel runtime.");
+    }
+
+    let lastError: unknown;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        const selected = await resolveServerModel({
+          providerId: "openrouter",
+          modelId: MARKETING_MODEL_ID,
+          credentialMode: "cryzo",
+        });
+        const result = await generateText({
+          model: selected.model,
+          system,
+          prompt: input,
+          maxOutputTokens: 1200,
+          maxRetries: 0,
+          abortSignal: AbortSignal.any([
+            req.signal,
+            AbortSignal.timeout(45_000),
+          ]),
+        });
+        const text = result.text.trim();
+        if (!text || result.finishReason === "length" || result.finishReason === "error") {
+          throw new Error("The marketing model did not return a complete response.");
+        }
+        return Response.json({
+          text,
+          requestId,
+          actualModel: MARKETING_MODEL_ID,
+          fallbackUsed: false,
+          proposal: {
+            content: text,
+            channels,
+            requiresConfirmation: true,
+          },
+        });
+      } catch (error) {
+        lastError = error;
+        if (attempt === 0 && transientProviderFailure(error)) continue;
+        break;
+      }
+    }
+
+    throw lastError instanceof Error
+      ? lastError
+      : new Error("The marketing model could not complete the response.");
   } catch (error) {
-    return Response.json({ error: error instanceof Error ? error.message : "Unable to create draft.", requestId }, { status: 502 });
-  } finally {
-    if (runId && !settled && serviceKey) await fetchMutation(api.aiUsage.settle, { serviceKey, runId, success: false, costMicros: 0 }).catch(() => undefined);
+    const message = error instanceof Error ? error.message : "Unable to create a marketing response.";
+    return Response.json({ error: message, requestId }, { status: 502 });
   }
 }
-
-
