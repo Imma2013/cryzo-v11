@@ -28,6 +28,16 @@ const VITE_CONFIG_CANDIDATES = [
   "vite.config.cts",
   "vite.config.cjs",
 ] as const;
+const PREVIEW_ENTRY_CANDIDATES = [
+  "src/main.tsx",
+  "src/main.jsx",
+  "src/main.ts",
+  "src/main.js",
+  "src/web.tsx",
+  "src/web.jsx",
+  "src/web.ts",
+  "src/web.js",
+] as const;
 
 function sandboxNameFor(conversationId: string) {
   const safe = conversationId.toLowerCase().replace(/[^a-z0-9-]/g, "-").slice(0, 48);
@@ -181,11 +191,53 @@ async function runInstall(sandbox: Sandbox) {
 }
 
 async function ensureDependencies(sandbox: Sandbox) {
-  const check = await runTextCommand(sandbox, "test -d node_modules", {
-    allowFailure: true,
-  });
+  // npm writes node_modules/.package-lock.json after a successful install. If a
+  // generated package.json is newer than that marker, the persistent sandbox is
+  // carrying dependencies from an older model checkpoint and must be refreshed.
+  const check = await runTextCommand(
+    sandbox,
+    "test -d node_modules && test -f node_modules/.package-lock.json && test ! package.json -nt node_modules/.package-lock.json",
+    { allowFailure: true },
+  );
   if (check.exitCode !== 0) return await runInstall(sandbox);
   return "";
+}
+
+async function ensureReactRuntime(sandbox: Sandbox) {
+  const usesReact = await runTextCommand(
+    sandbox,
+    `grep -R -E -q 'from ["'"']react([/"'"']|$)|from ["'"']react-dom|react/jsx-(dev-)?runtime' src App.tsx 2>/dev/null`,
+    { allowFailure: true },
+  );
+  if (usesReact.exitCode !== 0) return "";
+
+  const check = await runTextCommand(
+    sandbox,
+    `node -e "for (const id of ['react','react/jsx-runtime','react/jsx-dev-runtime','react-dom','react-dom/client']) require.resolve(id)"`,
+    { allowFailure: true },
+  );
+  if (check.exitCode === 0) return "";
+
+  const result = await sandbox.runCommand({
+    cmd: "npm",
+    args: ["install", "react@latest", "react-dom@latest", "--no-audit", "--no-fund", "--prefer-offline"],
+    cwd: PROJECT_DIR,
+  });
+  const stdout = await result.stdout();
+  const stderr = await result.stderr();
+  if (result.exitCode !== 0) {
+    throw new Error(stderr || stdout || "Failed to install the generated React runtime dependencies");
+  }
+
+  const verify = await runTextCommand(
+    sandbox,
+    `node -e "for (const id of ['react','react/jsx-runtime','react/jsx-dev-runtime','react-dom','react-dom/client']) require.resolve(id)"`,
+    { allowFailure: true },
+  );
+  if (verify.exitCode !== 0) {
+    throw new Error(verify.output || "React runtime dependencies are still unresolved after npm install");
+  }
+  return `Installed missing React runtime dependencies.\n${[stdout, stderr].filter(Boolean).join("\n").slice(-8000)}\n`;
 }
 
 function parseVersion(version: string) {
@@ -231,6 +283,16 @@ async function ensureCompatibleVite(sandbox: Sandbox) {
 
 async function findUserViteConfig(sandbox: Sandbox) {
   for (const candidate of VITE_CONFIG_CANDIDATES) {
+    const result = await runTextCommand(sandbox, `test -f ${candidate}`, {
+      allowFailure: true,
+    });
+    if (result.exitCode === 0) return candidate;
+  }
+  return null;
+}
+
+async function findPreviewEntry(sandbox: Sandbox) {
+  for (const candidate of PREVIEW_ENTRY_CANDIDATES) {
     const result = await runTextCommand(sandbox, `test -f ${candidate}`, {
       allowFailure: true,
     });
@@ -388,6 +450,35 @@ async function checkPublicPreview(sandbox: Sandbox) {
   }
 }
 
+async function checkPreviewEntry(sandbox: Sandbox) {
+  const entry = await findPreviewEntry(sandbox);
+  if (!entry) return { ready: true, entry: null as string | null, error: null as string | null };
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 5000);
+  try {
+    const response = await fetch(`${previewUrlFor(sandbox)}/${entry}`, {
+      cache: "no-store",
+      redirect: "follow",
+      signal: controller.signal,
+      headers: { "User-Agent": "CryzoPreviewModuleHealth/1.0" },
+    });
+    const body = (await response.text()).slice(-8000);
+    return {
+      ready: response.ok,
+      entry,
+      error: response.ok ? null : body || `Preview entry returned HTTP ${response.status}`,
+    };
+  } catch (error) {
+    return {
+      ready: false,
+      entry,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 async function tailPreviewLog(sandbox: Sandbox) {
   const result = await runTextCommand(
     sandbox,
@@ -410,7 +501,7 @@ async function previewDiagnostics(sandbox: Sandbox) {
   const viteVersion = (await getViteVersion(sandbox)) || "missing";
   const packageInfo = await runTextCommand(
     sandbox,
-    "node -e \"try{const p=require('./package.json'); console.log(JSON.stringify({name:p.name,scripts:p.scripts,devDependencies:p.devDependencies},null,2))}catch(e){console.error(String(e));process.exit(1)}\"",
+    "node -e \"try{const p=require('./package.json'); console.log(JSON.stringify({name:p.name,scripts:p.scripts,dependencies:p.dependencies,devDependencies:p.devDependencies},null,2))}catch(e){console.error(String(e));process.exit(1)}\"",
     { allowFailure: true },
   );
   const processInfo = await runTextCommand(
@@ -482,11 +573,13 @@ echo $! > ${PREVIEW_PID_FILE}
 async function startPreview(sandbox: Sandbox, forceRestart = false) {
   const previewUrl = previewUrlFor(sandbox);
   let output = await ensureDependencies(sandbox);
+  output += await ensureReactRuntime(sandbox);
   output += await ensureCompatibleVite(sandbox);
 
   if (!forceRestart) {
     const existing = await checkPublicPreview(sandbox);
-    if (existing.ready) {
+    const existingEntry = existing.ready ? await checkPreviewEntry(sandbox) : { ready: false };
+    if (existing.ready && existingEntry.ready) {
       return {
         previewUrl,
         output: `${output}Preview already healthy at ${previewUrl}.\n`,
@@ -536,6 +629,16 @@ async function startPreview(sandbox: Sandbox, forceRestart = false) {
     throw new Error(`${reason}.\n\n${diagnostics}`);
   }
 
+  let entryCheck = await checkPreviewEntry(sandbox);
+  for (let attempt = 0; attempt < 4 && !entryCheck.ready; attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    entryCheck = await checkPreviewEntry(sandbox);
+  }
+  if (!entryCheck.ready) {
+    const diagnostics = await previewDiagnostics(sandbox);
+    throw new Error(`Preview module ${entryCheck.entry || "entry"} failed to transform: ${entryCheck.error || "unknown module error"}.\n\n${diagnostics}`);
+  }
+
   return {
     previewUrl,
     output: `${output}Preview server ready at ${previewUrl}.\n`,
@@ -558,6 +661,7 @@ async function runShell(sandbox: Sandbox, command: string) {
 
 async function buildStaticProject(sandbox: Sandbox) {
   let output = await ensureDependencies(sandbox);
+  output += await ensureReactRuntime(sandbox);
   const build = await sandbox.runCommand({
     cmd: "npm",
     args: ["run", "build"],
