@@ -87,7 +87,7 @@ function publicErrorMessage(message: string) {
     return "Cryzo's Composio delivery credits are depleted. Add credits in Composio, then retry.";
   }
   if (/no composio api key|api key.*not provided/i.test(message)) {
-    return "Composio is not configured in the Vercel runtime.";
+    return "Composio is not configured in the Vercel runtime. Set COMPOSIO_API_KEY for the Vercel Production environment.";
   }
   return message;
 }
