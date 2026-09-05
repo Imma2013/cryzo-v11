@@ -8,7 +8,8 @@ const toolkits: Record<string, string> = { x: "twitter", reddit: "reddit", youtu
 
 type ComposioExecution = {
   data: unknown;
-  error?: string;
+  error?: string | null;
+  successful?: boolean;
   logId: string;
   // Some providers (notably LinkedIn) return the created resource identifier
   // in response metadata instead of the JSON body.
