@@ -21,6 +21,7 @@ import {
   X,
 } from "lucide-react";
 import { Id } from "../../convex/_generated/dataModel";
+import { ThemeToggle } from "@/providers/ThemeProvider";
 
 export function Sidebar() {
   const { user, userId, signOut } = useAuth();
@@ -253,14 +254,18 @@ export function Sidebar() {
 
         <div className="border-t border-zinc-800 p-3">
           {collapsed ? (
-            <button
-              type="button"
-              onClick={() => signOut()}
-              className="mx-auto block rounded-md p-2 text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-white"
-              aria-label="Sign out"
-            >
-              <LogOut size={16} />
-            </button>
+            <div className="flex flex-col items-center gap-1">
+              <ThemeToggle />
+              <ThemeToggle />
+              <button
+                type="button"
+                onClick={() => signOut()}
+                className="rounded-md p-2 text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-white"
+                aria-label="Sign out"
+              >
+                <LogOut size={16} />
+              </button>
+            </div>
           ) : (
             <div className="flex items-center gap-2">
               <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-zinc-800 text-sm font-semibold text-zinc-200">
