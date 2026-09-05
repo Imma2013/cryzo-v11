@@ -42,7 +42,8 @@ export const publishDelivery = internalAction({
       };
       const options = payload.post.platformOptions ?? {}, content = payload.post.content;
       const urls = payload.mediaUrls as string[];
-      const video = payload.mediaTypes?.[0]?.startsWith("video/");
+      const mediaTypes = (payload.mediaTypes ?? []) as string[];
+      const video = mediaTypes[0]?.startsWith("video/");
       let result;
       if (toolkit === "twitter") {
         const ids = [];
@@ -63,12 +64,43 @@ export const publishDelivery = internalAction({
           : urls.length ? await execute("FACEBOOK_CREATE_MULTI_PHOTO_POST", { page_id: options.facebookPageId, photo_urls: urls, message: content })
           : await execute("FACEBOOK_CREATE_POST", { page_id: options.facebookPageId, message: content, published: true });
       } else if (toolkit === "instagram") {
-        if (urls.length !== 1) throw new Error("Instagram currently requires exactly one image or video.");
-        const container = await execute("INSTAGRAM_POST_IG_USER_MEDIA", { ig_user_id: "me", caption: content,
-          ...(video ? { video_url: urls[0], media_type: "REELS" } : { image_url: urls[0] }) }, false);
+        const igUserId = String(options.instagramUserId ?? "");
+        if (!/^\d+$/.test(igUserId)) {
+          throw new Error("Choose an Instagram Business or Creator account.");
+        }
+        const postType = options.instagramPostType ?? "post";
+        let container;
+        if (postType === "carousel") {
+          const childImageUrls = urls.filter((_, index) => !mediaTypes[index]?.startsWith("video/"));
+          const childVideoUrls = urls.filter((_, index) => mediaTypes[index]?.startsWith("video/"));
+          container = await execute("INSTAGRAM_CREATE_CAROUSEL_CONTAINER", {
+            ig_user_id: igUserId,
+            caption: content,
+            ...(childImageUrls.length ? { child_image_urls: childImageUrls } : {}),
+            ...(childVideoUrls.length ? { child_video_urls: childVideoUrls } : {}),
+          }, false);
+        } else {
+          container = await execute("INSTAGRAM_POST_IG_USER_MEDIA", {
+            ig_user_id: igUserId,
+            ...(postType === "story" ? {} : { caption: content }),
+            ...(video
+              ? {
+                  video_url: urls[0],
+                  media_type: postType === "story" ? "STORIES" : "REELS",
+                }
+              : {
+                  image_url: urls[0],
+                  ...(postType === "story" ? { media_type: "STORIES" } : {}),
+                }),
+          }, false);
+        }
         const id = identifier(container.data);
         if (!id) throw new Error("Instagram did not create a media container.");
-        result = await execute("INSTAGRAM_POST_IG_USER_MEDIA_PUBLISH", { ig_user_id: "me", creation_id: id, max_wait_seconds: 120 });
+        result = await execute("INSTAGRAM_POST_IG_USER_MEDIA_PUBLISH", {
+          ig_user_id: igUserId,
+          creation_id: id,
+          max_wait_seconds: 300,
+        });
       } else if (toolkit === "linkedin") {
         if (video) throw new Error("LinkedIn video publishing is not enabled yet. Use text or images.");
         let author = typeof options.linkedinAuthorUrn === "string"
