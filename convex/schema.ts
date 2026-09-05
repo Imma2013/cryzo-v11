@@ -250,6 +250,8 @@ export default defineSchema({
         tiktokPrivacy: v.optional(v.string()),
         facebookPageId: v.optional(v.string()),
         youtubePrivacy: v.optional(v.string()),
+        linkedinAuthorUrn: v.optional(v.string()),
+        linkedinVisibility: v.optional(v.string()),
       }),
     ),
     error: v.optional(v.string()),
