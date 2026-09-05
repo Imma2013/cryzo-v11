@@ -50,9 +50,25 @@ html[data-theme="light"] .bg-black {
 }
 
 html[data-theme="light"] .bg-zinc-950,
+html[data-theme="light"] .bg-\[\#08090b\],
+html[data-theme="light"] .bg-\[\#090909\],
+html[data-theme="light"] .bg-\[\#0a0a0a\],
+html[data-theme="light"] .bg-\[\#0b0b0b\],
+html[data-theme="light"] .bg-\[\#0b0d10\],
+html[data-theme="light"] .bg-\[\#0c0c0c\],
+html[data-theme="light"] .bg-\[\#0d0d0d\],
+html[data-theme="light"] .bg-\[\#0e0e10\] {
+  background-color: #f7f8fa !important;
+}
+
+html[data-theme="light"] .bg-\[\#101010\],
 html[data-theme="light"] .bg-\[\#111113\],
 html[data-theme="light"] .bg-\[\#151515\] {
   background-color: #f4f4f5 !important;
+}
+
+html[data-theme="light"] .bg-\[\#15110f\] {
+  background-color: #fff7ed !important;
 }
 
 html[data-theme="light"] .bg-zinc-900 {
