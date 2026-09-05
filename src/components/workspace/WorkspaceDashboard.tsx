@@ -17,12 +17,10 @@ import {
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { useAuth } from "@/providers/AuthProvider";
-import ProjectMarketing from "./ProjectMarketing";
 
-type DashboardSection = "data" | "users" | "apps" | "code" | "domains" | "marketing";
+type DashboardSection = "data" | "users" | "apps" | "code" | "domains";
 
 const NAVIGATION = [
-  { id: "marketing" as const, label: "Marketing", icon: Globe2 },
   { id: "data" as const, label: "Data", icon: Database },
   { id: "users" as const, label: "Users", icon: Users },
   { id: "apps" as const, label: "Apps", icon: AppWindow },
@@ -72,7 +70,6 @@ function WorkspaceDashboardContent({
     | undefined;
 
   const content = (() => {
-    if (section === "marketing") return <ProjectMarketing key={conversationId} conversationId={conversationId} />;
     if (overview === undefined || publishTarget === undefined) {
       return (
         <div className="flex h-full items-center justify-center gap-2 text-sm text-zinc-500">

@@ -211,6 +211,19 @@ export function Sidebar() {
 
         <div className="border-t border-zinc-800 px-2 py-2">
           <Link
+            href="/chat/marketing"
+            onClick={() => navigate("/chat/marketing")}
+            className={`flex w-full cursor-pointer items-center gap-2.5 rounded-xl px-2 py-2.5 text-sm transition-colors ${
+              pathname === "/chat/marketing" || pathname === "/chat/social"
+                ? "bg-zinc-800 text-white"
+                : "text-zinc-400 hover:bg-zinc-800/60 hover:text-white"
+            }`}
+            title={collapsed ? "Marketing" : undefined}
+          >
+            <CalendarDays size={15} className="shrink-0" />
+            {!collapsed && <span>Marketing</span>}
+          </Link>
+          <Link
             href="/chat/apps"
             onClick={() => navigate("/chat/apps")}
             className={`flex w-full cursor-pointer items-center gap-2.5 rounded-xl px-2 py-2.5 text-sm transition-colors ${

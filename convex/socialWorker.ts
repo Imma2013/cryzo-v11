@@ -6,7 +6,7 @@ import { internalAction } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { composioSocialSessionOptions } from "../src/lib/server/composio-social";
 
-const toolkits: Record<string, string> = { x: "twitter", reddit: "reddit", youtube: "youtube", tiktok: "tiktok", instagram: "instagram", facebook: "facebook" };
+const toolkits: Record<string, string> = { x: "twitter", reddit: "reddit", youtube: "youtube", tiktok: "tiktok", instagram: "instagram", facebook: "facebook", linkedin: "linkedin" };
 function entries(value: unknown): [string, unknown][] {
   if (!value || typeof value !== "object") return [];
   return Object.entries(value).flatMap(([key, child]) => [[key, child] as [string, unknown], ...entries(child)]);
@@ -29,7 +29,7 @@ export const publishDelivery = internalAction({
     const toolkit = toolkits[payload.delivery.channel];
     let executionStarted = false, logId: string | undefined, toolSlug: string | undefined;
     try {
-      if (!toolkit || !payload.delivery.connectedAccountId) throw new Error("Connect an approved account to this project before publishing.");
+      if (!toolkit || !payload.delivery.connectedAccountId) throw new Error("Connect an approved account in Marketing before publishing.");
       const composio = new Composio();
       const session = await composio.create(String(payload.post.userId), composioSocialSessionOptions(toolkit, payload.delivery.connectedAccountId));
       const execute = async (slug: string, arguments_: Record<string, unknown>, publishes = true) => {
@@ -69,6 +69,31 @@ export const publishDelivery = internalAction({
         const id = identifier(container.data);
         if (!id) throw new Error("Instagram did not create a media container.");
         result = await execute("INSTAGRAM_POST_IG_USER_MEDIA_PUBLISH", { ig_user_id: "me", creation_id: id, max_wait_seconds: 120 });
+      } else if (toolkit === "linkedin") {
+        if (video) throw new Error("LinkedIn video publishing is not enabled yet. Use text or images.");
+        let author = typeof options.linkedinAuthorUrn === "string"
+          ? options.linkedinAuthorUrn.trim()
+          : "";
+        if (!author) {
+          const profile = await execute("LINKEDIN_GET_MY_INFO", {}, false);
+          const personId = identifier(profile.data, ["sub", "person_id", "member_id", "id"]);
+          if (!personId) throw new Error("LinkedIn did not return the connected member ID.");
+          author = personId.startsWith("urn:li:") ? personId : `urn:li:person:${personId}`;
+        }
+        const images = [];
+        for (const url of urls) {
+          images.push(await composio.files.upload({
+            file: url,
+            toolSlug: "LINKEDIN_CREATE_LINKED_IN_POST",
+            toolkitSlug: toolkit,
+          }));
+        }
+        result = await execute("LINKEDIN_CREATE_LINKED_IN_POST", {
+          author,
+          commentary: content.slice(0, 3000),
+          visibility: options.linkedinVisibility || "PUBLIC",
+          ...(images.length ? { images } : {}),
+        });
       } else if (toolkit === "youtube") {
         if (!video || urls.length !== 1) throw new Error("YouTube requires exactly one video.");
         const file = await composio.files.upload({ file: urls[0], toolSlug: "YOUTUBE_UPLOAD_VIDEO", toolkitSlug: toolkit });

@@ -1,4 +1,4 @@
-export const SOCIAL_TOOLKITS = ["twitter", "facebook", "instagram", "youtube", "reddit", "tiktok"] as const;
+export const SOCIAL_TOOLKITS = ["twitter", "facebook", "instagram", "youtube", "reddit", "tiktok", "linkedin"] as const;
 export type SocialToolkit = typeof SOCIAL_TOOLKITS[number];
 
 const ENV_NAMES: Record<SocialToolkit, string> = {
@@ -8,6 +8,7 @@ const ENV_NAMES: Record<SocialToolkit, string> = {
   youtube: "COMPOSIO_YOUTUBE_AUTH_CONFIG_ID",
   reddit: "COMPOSIO_REDDIT_AUTH_CONFIG_ID",
   tiktok: "COMPOSIO_TIKTOK_AUTH_CONFIG_ID",
+  linkedin: "COMPOSIO_LINKEDIN_AUTH_CONFIG_ID",
 };
 
 export function socialAuthConfig(toolkit: string) {

@@ -32,11 +32,18 @@ export async function POST(req: Request) {
   try {
     const { accountId, conversationId } = await req.json();
     const account = (await accounts(userId)).find(item => item.id === accountId);
-    if (!account) return Response.json({ error: "Connect this account before adding it to a project." }, { status: 400 });
+    if (!account) return Response.json({ error: "Connect this account before adding it to Marketing." }, { status: 400 });
     const serviceKey = process.env.CRYZO_INTERNAL_API_SECRET;
     if (!serviceKey) throw new Error("Account binding is not configured.");
-    await fetchMutation(api.social.bindAccount, { conversationId: conversationId as Id<"conversations">, channel: account.channel,
-      connectedAccountId: account.id, name: account.name, serviceKey }, { token: req.headers.get("authorization")!.slice(7) });
+    await fetchMutation(api.social.bindAccount, {
+      conversationId: conversationId
+        ? (conversationId as Id<"conversations">)
+        : undefined,
+      channel: account.channel,
+      connectedAccountId: account.id,
+      name: account.name,
+      serviceKey,
+    }, { token: req.headers.get("authorization")!.slice(7) });
     return Response.json({ success: true });
   } catch (error) { return Response.json({ error: error instanceof Error ? error.message : "Unable to add account." }, { status: 400 }); }
 }
