@@ -33,6 +33,8 @@ const platformOptionsValidator = v.object({
   tiktokPrivacy: v.optional(v.string()),
   facebookPageId: v.optional(v.string()),
   youtubePrivacy: v.optional(v.string()),
+  linkedinAuthorUrn: v.optional(v.string()),
+  linkedinVisibility: v.optional(v.string()),
 });
 
 type Channel = Doc<"socialDeliveries">["channel"];
@@ -109,26 +111,41 @@ async function deliveriesForPost(
     .take(10);
 }
 
+async function userAccounts(ctx: SocialContext, userId: Id<"users">) {
+  return await ctx.db
+    .query("socialAccounts")
+    .withIndex("by_user", (q) => q.eq("userId", userId))
+    .take(100);
+}
+
 async function ensureDeliveries(ctx: MutationCtx, post: Doc<"socialPosts">) {
-  const existing = await deliveriesForPost(ctx, post._id);
+  const [existing, accounts] = await Promise.all([
+    deliveriesForPost(ctx, post._id),
+    userAccounts(ctx, post.userId),
+  ]);
   const existingChannels = new Set(
     existing.map((delivery) => delivery.channel),
   );
   const now = Date.now();
+
   for (const channel of post.channels) {
+    const account = accounts.find((item) => item.channel === channel);
     if (existingChannels.has(channel)) {
-      const delivery = existing.find(item => item.channel === channel)!;
-      if (!delivery.connectedAccountId && post.conversationId) {
-        const account = (await projectAccounts(ctx, post.conversationId)).find(item => item.channel === channel);
-        if (account) await ctx.db.patch(delivery._id, { connectedAccountId: account.connectedAccountId });
+      const delivery = existing.find((item) => item.channel === channel)!;
+      if (!delivery.connectedAccountId && account) {
+        await ctx.db.patch(delivery._id, {
+          connectedAccountId: account.connectedAccountId,
+          updatedAt: now,
+        });
       }
       continue;
     }
+
     await ctx.db.insert("socialDeliveries", {
       postId: post._id,
       userId: post.userId,
       conversationId: post.conversationId,
-      connectedAccountId: post.conversationId ? (await projectAccounts(ctx, post.conversationId)).find(account => account.channel === channel)?.connectedAccountId : undefined,
+      connectedAccountId: account?.connectedAccountId,
       channel,
       status: post.status === "draft" ? "draft" : "pending",
       idempotencyKey: `${post._id}:${channel}`,
@@ -137,6 +154,7 @@ async function ensureDeliveries(ctx: MutationCtx, post: Doc<"socialPosts">) {
       updatedAt: now,
     });
   }
+
   return await deliveriesForPost(ctx, post._id);
 }
 
@@ -234,7 +252,7 @@ export const listPosts = query({
       .take(250);
 
     return await Promise.all(
-      posts.filter(post => post.userId === userId && post.conversationId === args.conversationId).map(async (post) => ({
+      posts.filter((post) => post.userId === userId).map(async (post) => ({
         ...post,
         deliveries: await deliveriesForPost(ctx, post._id),
         mediaUrls: (
@@ -260,7 +278,7 @@ export const generateUploadUrl = mutation({
 
 export const createPost = mutation({
   args: {
-    conversationId: v.id("conversations"),
+    conversationId: v.optional(v.id("conversations")),
     requestKey: v.string(),
     content: v.string(),
     channels: v.array(channelValidator),
@@ -273,9 +291,18 @@ export const createPost = mutation({
   handler: async (ctx, args) => {
     const userId = await currentUserId(ctx);
     const channels = [...new Set(args.channels)];
-    await requireProject(ctx, userId, args.conversationId);
-    if (!args.requestKey || args.requestKey.length > 200) throw new Error("Invalid request.");
-    const previous = await ctx.db.query("socialPosts").withIndex("by_project_and_request", q => q.eq("conversationId", args.conversationId).eq("requestKey", args.requestKey)).unique();
+    if (args.conversationId) {
+      await requireProject(ctx, userId, args.conversationId);
+    }
+    if (!args.requestKey || args.requestKey.length > 200) {
+      throw new Error("Invalid request.");
+    }
+    const previous = await ctx.db
+      .query("socialPosts")
+      .withIndex("by_user_and_request", (q) =>
+        q.eq("userId", userId).eq("requestKey", args.requestKey),
+      )
+      .first();
     if (previous) return previous._id;
     const access = await socialAccess(ctx, userId, Date.now());
     if (!Number.isFinite(args.scheduledFor)) throw new Error("Choose a valid date.");
@@ -284,7 +311,9 @@ export const createPost = mutation({
     if ((args.mediaStorageIds?.length ?? 0) > 4) throw new Error("Use at most four media files.");
     for (const storageId of args.mediaStorageIds ?? []) {
       const media = await ctx.db.query("socialMedia").withIndex("by_storage", q => q.eq("storageId", storageId)).unique();
-      if (!media || media.userId !== userId || media.conversationId !== args.conversationId) throw new Error("Media does not belong to this project.");
+      if (!media || media.userId !== userId) {
+        throw new Error("Media does not belong to this account.");
+      }
     }
     const content = args.content.trim();
     if (!content || content.length > 12000) {
@@ -303,7 +332,7 @@ export const createPost = mutation({
       args.status !== "draft" && (channels.includes("youtube") || channels.includes("tiktok") || channels.includes("instagram")) &&
       !args.mediaStorageIds?.length
     ) {
-      throw new Error("YouTube and TikTok publishing require a video upload.");
+      throw new Error("The selected networks require a media upload.");
     }
 
     const now = Date.now();
@@ -551,30 +580,97 @@ async function requireProject(ctx: SocialContext, userId: Id<"users">, conversat
   const project = await ctx.db.get(conversationId);
   if (project?.userId !== userId) throw new Error("Project not found.");
 }
-async function projectAccounts(ctx: SocialContext, conversationId: Id<"conversations">) {
-  return ctx.db.query("socialAccounts").withIndex("by_project", q => q.eq("conversationId", conversationId)).take(8);
-}
 async function validatePublishing(ctx: MutationCtx, post: Doc<"socialPosts">) {
-  if (!post.conversationId) throw new Error("Move this legacy draft into a project before publishing.");
-  await requireProject(ctx, post.userId, post.conversationId);
-  const accounts = await projectAccounts(ctx, post.conversationId);
-  for (const channel of post.channels) {
-    const account = accounts.find(item => item.channel === channel);
-    if (!account) throw new Error("Connect " + channel + " to this project first.");
-    const delivery = (await deliveriesForPost(ctx, post._id)).find(item => item.channel === channel);
-    if (delivery?.connectedAccountId && delivery.connectedAccountId !== account.connectedAccountId) throw new Error("The connected account changed. Create a new draft before publishing.");
+  if (post.conversationId) {
+    await requireProject(ctx, post.userId, post.conversationId);
   }
-  if (post.channels.includes("reddit") && !post.platformOptions?.redditCommunity?.trim()) throw new Error("Choose a Reddit community.");
-  if (post.channels.some(c => ["youtube", "tiktok", "instagram"].includes(c)) && !post.mediaStorageIds.length) throw new Error("This network requires media.");
-  if (post.channels.includes("facebook") && !/^\d+$/.test(post.platformOptions?.facebookPageId ?? "")) throw new Error("Choose a numeric Facebook Page ID.");
-  if (post.channels.includes("linkedin")) throw new Error("LinkedIn publishing is not enabled in this release.");
-  if (post.channels.some(c => ["youtube", "tiktok", "instagram"].includes(c)) && post.mediaStorageIds.length !== 1) throw new Error("Choose exactly one media file for this network.");
-  if (post.channels.includes("reddit") && post.mediaStorageIds.length) throw new Error("Reddit currently supports text posts only.");
+
+  const [accounts, deliveries] = await Promise.all([
+    userAccounts(ctx, post.userId),
+    deliveriesForPost(ctx, post._id),
+  ]);
+
+  for (const channel of post.channels) {
+    const delivery = deliveries.find((item) => item.channel === channel);
+    const account = delivery?.connectedAccountId
+      ? accounts.find(
+          (item) =>
+            item.channel === channel &&
+            item.connectedAccountId === delivery.connectedAccountId,
+        )
+      : accounts.find((item) => item.channel === channel);
+
+    if (!account) {
+      throw new Error(`Connect ${channel} in Marketing before publishing.`);
+    }
+  }
+
+  if (
+    post.channels.includes("reddit") &&
+    !post.platformOptions?.redditCommunity?.trim()
+  ) {
+    throw new Error("Choose a Reddit community.");
+  }
+  if (
+    post.channels.some((channel) =>
+      ["youtube", "tiktok", "instagram"].includes(channel),
+    ) &&
+    !post.mediaStorageIds.length
+  ) {
+    throw new Error("This network requires media.");
+  }
+  if (
+    post.channels.includes("facebook") &&
+    !/^\d+$/.test(post.platformOptions?.facebookPageId ?? "")
+  ) {
+    throw new Error("Choose a numeric Facebook Page ID.");
+  }
+  if (
+    post.channels.some((channel) =>
+      ["youtube", "tiktok", "instagram"].includes(channel),
+    ) &&
+    post.mediaStorageIds.length !== 1
+  ) {
+    throw new Error("Choose exactly one media file for this network.");
+  }
+  if (post.channels.includes("reddit") && post.mediaStorageIds.length) {
+    throw new Error("Reddit currently supports text posts only.");
+  }
+  if (post.channels.includes("linkedin") && post.content.length > 3000) {
+    throw new Error("LinkedIn posts must be 3,000 characters or fewer.");
+  }
+
   for (const id of post.mediaStorageIds) {
-    const media = await ctx.db.query("socialMedia").withIndex("by_storage", q => q.eq("storageId", id)).unique();
-    if (media?.conversationId !== post.conversationId || media.userId !== post.userId) throw new Error("Media does not belong to this project.");
-    if (post.channels.includes("x") && media.contentType.startsWith("video/")) throw new Error("X currently supports image uploads only.");
-    if (post.channels.some(c => c === "youtube" || c === "tiktok") && !media.contentType.startsWith("video/")) throw new Error("YouTube and TikTok require video files.");
+    const media = await ctx.db
+      .query("socialMedia")
+      .withIndex("by_storage", (q) => q.eq("storageId", id))
+      .unique();
+
+    if (!media || media.userId !== post.userId) {
+      throw new Error("Media does not belong to this account.");
+    }
+    if (
+      post.channels.includes("x") &&
+      media.contentType.startsWith("video/")
+    ) {
+      throw new Error("X currently supports image uploads only.");
+    }
+    if (
+      post.channels.some(
+        (channel) => channel === "youtube" || channel === "tiktok",
+      ) &&
+      !media.contentType.startsWith("video/")
+    ) {
+      throw new Error("YouTube and TikTok require video files.");
+    }
+    if (
+      post.channels.includes("linkedin") &&
+      media.contentType.startsWith("video/")
+    ) {
+      throw new Error(
+        "LinkedIn video publishing is not enabled yet. Use text or images.",
+      );
+    }
   }
 }
 async function reservePost(ctx: MutationCtx, post: Doc<"socialPosts">) {
@@ -598,59 +694,158 @@ export const expireDeliveryLease = internalMutation({
   },
 });
 export const listAccounts = query({
-  args: { conversationId: v.id("conversations") }, returns: v.array(v.any()),
+  args: { conversationId: v.optional(v.id("conversations")) },
+  returns: v.array(v.any()),
   handler: async (ctx, args) => {
     const userId = await currentUserId(ctx);
-    await requireProject(ctx, userId, args.conversationId);
-    return projectAccounts(ctx, args.conversationId);
+    if (args.conversationId) {
+      await requireProject(ctx, userId, args.conversationId);
+    }
+    const accounts = await userAccounts(ctx, userId);
+    const seen = new Set<string>();
+    return accounts.filter((account) => {
+      if (seen.has(account.connectedAccountId)) return false;
+      seen.add(account.connectedAccountId);
+      return true;
+    });
   },
 });
+
 export const bindAccount = mutation({
-  args: { conversationId: v.id("conversations"), channel: channelValidator, connectedAccountId: v.string(), name: v.string(), serviceKey: v.string() },
+  args: {
+    conversationId: v.optional(v.id("conversations")),
+    channel: channelValidator,
+    connectedAccountId: v.string(),
+    name: v.string(),
+    serviceKey: v.string(),
+  },
   returns: v.null(),
   handler: async (ctx, args) => {
-    if (!process.env.CRYZO_INTERNAL_API_SECRET || args.serviceKey !== process.env.CRYZO_INTERNAL_API_SECRET) throw new Error("Unauthorized.");
+    if (
+      !process.env.CRYZO_INTERNAL_API_SECRET ||
+      args.serviceKey !== process.env.CRYZO_INTERNAL_API_SECRET
+    ) {
+      throw new Error("Unauthorized.");
+    }
+
     const userId = await currentUserId(ctx);
-    await requireProject(ctx, userId, args.conversationId);
-    const access = await socialAccess(ctx, userId, Date.now());
-    const accounts = await projectAccounts(ctx, args.conversationId);
-    const existing = accounts.find(account => account.channel === args.channel);
-    const all = await ctx.db.query("socialAccounts").withIndex("by_user", q => q.eq("userId", userId)).take(100);
-    if (all.length === 100 && !existing) throw new Error("Remove an unused project connection before adding another.");
-    const distinct = new Set(all.filter(account => account._id !== existing?._id).map(account => account.connectedAccountId));
+    if (args.conversationId) {
+      await requireProject(ctx, userId, args.conversationId);
+    }
+
+    const [access, all] = await Promise.all([
+      socialAccess(ctx, userId, Date.now()),
+      userAccounts(ctx, userId),
+    ]);
+    const existing = all.find(
+      (account) => account.connectedAccountId === args.connectedAccountId,
+    );
+    const distinct = new Set(
+      all
+        .filter((account) => account._id !== existing?._id)
+        .map((account) => account.connectedAccountId),
+    );
     distinct.add(args.connectedAccountId);
-    if (distinct.size > (access.paid ? 7 : 1)) throw new Error("Your plan allows " + (access.paid ? 7 : 1) + " connected social accounts.");
-    const fields = { userId, conversationId: args.conversationId, channel: args.channel, connectedAccountId: args.connectedAccountId, name: args.name.slice(0, 100) };
-    if (existing) await ctx.db.patch(existing._id, fields);
-    else await ctx.db.insert("socialAccounts", fields);
+
+    if (distinct.size > (access.paid ? 7 : 1)) {
+      throw new Error(
+        `Your plan allows ${access.paid ? 7 : 1} connected social accounts.`,
+      );
+    }
+
+    const now = Date.now();
+    const fields = {
+      userId,
+      conversationId: args.conversationId,
+      channel: args.channel,
+      connectedAccountId: args.connectedAccountId,
+      name: args.name.slice(0, 100),
+      updatedAt: now,
+    };
+
+    if (existing) {
+      await ctx.db.patch(existing._id, fields);
+    } else {
+      await ctx.db.insert("socialAccounts", {
+        ...fields,
+        createdAt: now,
+      });
+    }
     return null;
   },
 });
+
 export const unbindAccount = mutation({
-  args: { accountId: v.id("socialAccounts") }, returns: v.null(),
-  handler: async (ctx, args) => {
-    const userId = await currentUserId(ctx), account = await ctx.db.get(args.accountId);
-    if (account?.userId !== userId) throw new Error("Account not found.");
-    await ctx.db.delete(account._id);
-    return null;
-  },
-});
-export const registerMedia = mutation({
-  args: { conversationId: v.id("conversations"), storageId: v.id("_storage"), contentType: v.string(), name: v.string(), serviceKey: v.string() },
+  args: { accountId: v.id("socialAccounts") },
   returns: v.null(),
   handler: async (ctx, args) => {
-    if (!process.env.CRYZO_INTERNAL_API_SECRET || args.serviceKey !== process.env.CRYZO_INTERNAL_API_SECRET) throw new Error("Unauthorized.");
     const userId = await currentUserId(ctx);
-    await requireProject(ctx, userId, args.conversationId);
+    const account = await ctx.db.get(args.accountId);
+    if (account?.userId !== userId) throw new Error("Account not found.");
+
+    const matches = await userAccounts(ctx, userId);
+    for (const match of matches) {
+      if (match.connectedAccountId === account.connectedAccountId) {
+        await ctx.db.delete(match._id);
+      }
+    }
+    return null;
+  },
+});
+
+export const registerMedia = mutation({
+  args: {
+    conversationId: v.optional(v.id("conversations")),
+    storageId: v.id("_storage"),
+    contentType: v.string(),
+    name: v.string(),
+    serviceKey: v.string(),
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    if (
+      !process.env.CRYZO_INTERNAL_API_SECRET ||
+      args.serviceKey !== process.env.CRYZO_INTERNAL_API_SECRET
+    ) {
+      throw new Error("Unauthorized.");
+    }
+
+    const userId = await currentUserId(ctx);
+    if (args.conversationId) {
+      await requireProject(ctx, userId, args.conversationId);
+    }
+
     const metadata = await ctx.storage.getMetadata(args.storageId);
-    if (!metadata || metadata.size > 500_000_000 || !metadata.contentType?.match(/^(image|video)\//)) throw new Error("Invalid or oversized media upload.");
-    if (metadata.contentType !== args.contentType) throw new Error("Media type does not match the upload.");
-    const existing = await ctx.db.query("socialMedia").withIndex("by_storage", q => q.eq("storageId", args.storageId)).unique();
+    if (
+      !metadata ||
+      metadata.size > 500_000_000 ||
+      !metadata.contentType?.match(/^(image|video)\//)
+    ) {
+      throw new Error("Invalid or oversized media upload.");
+    }
+    if (metadata.contentType !== args.contentType) {
+      throw new Error("Media type does not match the upload.");
+    }
+
+    const existing = await ctx.db
+      .query("socialMedia")
+      .withIndex("by_storage", (q) => q.eq("storageId", args.storageId))
+      .unique();
     if (existing) {
-      if (existing.userId !== userId || existing.conversationId !== args.conversationId) throw new Error("Media already belongs to another project.");
+      if (existing.userId !== userId) {
+        throw new Error("Media already belongs to another account.");
+      }
       return null;
     }
-    await ctx.db.insert("socialMedia", { userId, conversationId: args.conversationId, storageId: args.storageId, contentType: args.contentType, name: args.name });
+
+    await ctx.db.insert("socialMedia", {
+      userId,
+      conversationId: args.conversationId,
+      storageId: args.storageId,
+      contentType: args.contentType,
+      name: args.name,
+      createdAt: Date.now(),
+    });
     return null;
   },
 });

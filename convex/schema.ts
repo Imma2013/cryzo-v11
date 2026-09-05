@@ -260,6 +260,7 @@ export default defineSchema({
     .index("by_user_and_scheduled", ["userId", "scheduledFor"])
     .index("by_project_and_scheduled", ["conversationId", "scheduledFor"])
     .index("by_project_and_request", ["conversationId", "requestKey"])
+    .index("by_user_and_request", ["userId", "requestKey"])
     .index("by_user_and_created", ["userId", "createdAt"])
     .index("by_status_and_scheduled", ["status", "scheduledFor"]),
 
@@ -303,16 +304,31 @@ export default defineSchema({
     .index("by_user_and_status", ["userId", "status", "updatedAt"]),
 
   socialAccounts: defineTable({
-    userId: v.id("users"), conversationId: v.id("conversations"),
-    channel: v.string(), connectedAccountId: v.string(), name: v.string(),
-  }).index("by_project", ["conversationId"]).index("by_user", ["userId"]),
+    userId: v.id("users"),
+    conversationId: v.optional(v.id("conversations")),
+    channel: v.string(),
+    connectedAccountId: v.string(),
+    name: v.string(),
+    createdAt: v.optional(v.number()),
+    updatedAt: v.optional(v.number()),
+  })
+    .index("by_project", ["conversationId"])
+    .index("by_user", ["userId"])
+    .index("by_user_and_channel", ["userId", "channel"])
+    .index("by_user_and_connected", ["userId", "connectedAccountId"]),
   socialUsage: defineTable({
     userId: v.id("users"), period: v.string(), reserved: v.number(),
   }).index("by_user_period", ["userId", "period"]),
   socialMedia: defineTable({
-    userId: v.id("users"), conversationId: v.id("conversations"), storageId: v.id("_storage"),
-    contentType: v.string(), name: v.string(),
-  }).index("by_storage", ["storageId"]),
+    userId: v.id("users"),
+    conversationId: v.optional(v.id("conversations")),
+    storageId: v.id("_storage"),
+    contentType: v.string(),
+    name: v.string(),
+    createdAt: v.optional(v.number()),
+  })
+    .index("by_storage", ["storageId"])
+    .index("by_user", ["userId"]),
 
   subscriptions: defineTable({
     userId: v.id("users"),

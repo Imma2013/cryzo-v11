@@ -22,6 +22,7 @@ import ProjectSocialAccounts from "./ProjectSocialAccounts";
 
 const CHANNELS = [
   { id: "x", label: "X", color: "bg-white text-black" },
+  { id: "linkedin", label: "LinkedIn", color: "bg-[#0a66c2] text-white" },
   { id: "reddit", label: "Reddit", color: "bg-[#ff4500] text-white" },
   { id: "youtube", label: "YouTube", color: "bg-[#ff0033] text-white" },
   { id: "tiktok", label: "TikTok", color: "bg-zinc-950 text-white" },
@@ -67,11 +68,15 @@ function localInputValue(date: Date) {
   return new Date(date.getTime() - offset).toISOString().slice(0, 16);
 }
 
-export default function ProjectMarketing({ conversationId }: { conversationId: Id<"conversations"> }) {
-  const { authToken } = useAuth();
+export default function ProjectMarketing() {
+  const { authToken, userId } = useAuth();
   const [accessNow] = useState(() => Date.now());
-  const access = useQuery(api.social.getAccess, { now: accessNow, conversationId });
-  const posts = useQuery(api.social.listPosts, { conversationId }) as SocialPost[] | undefined;
+  const access = useQuery(api.social.getAccess, { now: accessNow });
+  const posts = useQuery(api.social.listPosts, {}) as SocialPost[] | undefined;
+  const projects = useQuery(
+    api.conversations.list,
+    userId ? { userId } : "skip",
+  );
   const createPost = useMutation(api.social.createPost);
   const publishNow = useMutation(api.social.publishNow);
   const removePost = useMutation(api.social.removePost);
@@ -95,6 +100,9 @@ export default function ProjectMarketing({ conversationId }: { conversationId: I
   const [youtubePrivacy, setYoutubePrivacy] = useState("private");
   const [youtubeTitle, setYoutubeTitle] = useState("");
   const [tiktokPrivacy, setTiktokPrivacy] = useState("SELF_ONLY");
+  const [linkedinAuthorUrn, setLinkedinAuthorUrn] = useState("");
+  const [linkedinVisibility, setLinkedinVisibility] = useState("PUBLIC");
+  const [sourceProjectId, setSourceProjectId] = useState("");
   const [saving, setSaving] = useState(false);
   const [composerError, setComposerError] = useState<string | null>(null);
   const [aiPrompt, setAiPrompt] = useState("");
@@ -104,6 +112,7 @@ export default function ProjectMarketing({ conversationId }: { conversationId: I
   const [aiError, setAiError] = useState<string | null>(null);
   const [agentHistory, setAgentHistory] = useState<{ role: "user" | "assistant"; content: string }[]>([]);
   const [confirmed, setConfirmed] = useState(false);
+  const activeProjectId = sourceProjectId || projects?.[0]?._id || "";
 
   const week = useMemo(() => {
     const first = startOfWeek(weekAnchor);
@@ -138,13 +147,13 @@ export default function ProjectMarketing({ conversationId }: { conversationId: I
     try {
       for (const file of Array.from(files).slice(0, 4)) {
         if (file.size > 500_000_000) throw new Error("Use media below 500 MB.");
-        const authorize = await fetch("/api/social/media", { method: "POST", headers: { Authorization: `Bearer ${authToken}`, "Content-Type": "application/json" }, body: JSON.stringify({ conversationId }) });
+        const authorize = await fetch("/api/social/media", { method: "POST", headers: { Authorization: `Bearer ${authToken}`, "Content-Type": "application/json" }, body: JSON.stringify({}) });
         const permission = await authorize.json();
         if (!authorize.ok || !permission.uploadUrl) throw new Error(permission.error || "Upload could not start.");
         const upload = await fetch(permission.uploadUrl, { method: "POST", headers: { "Content-Type": file.type }, body: file });
         if (!upload.ok) throw new Error("Upload failed.");
         const { storageId } = await upload.json();
-        const response = await fetch("/api/social/media", { method: "POST", headers: { Authorization: `Bearer ${authToken}`, "Content-Type": "application/json" }, body: JSON.stringify({ conversationId, storageId, contentType: file.type, name: file.name }) });
+        const response = await fetch("/api/social/media", { method: "POST", headers: { Authorization: `Bearer ${authToken}`, "Content-Type": "application/json" }, body: JSON.stringify({ storageId, contentType: file.type, name: file.name }) });
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || "Upload registration failed.");
         setMediaStorageIds(current => [...current, data.storageId]);
@@ -163,7 +172,9 @@ export default function ProjectMarketing({ conversationId }: { conversationId: I
     try {
       if (status !== "draft" && !confirmed) throw new Error("Review the preview and confirm this exact post before publishing or scheduling.");
       const postId = await createPost({
-        conversationId,
+        conversationId: activeProjectId
+          ? (activeProjectId as Id<"conversations">)
+          : undefined,
         requestKey: requestKey.current,
         content,
         channels,
@@ -176,6 +187,12 @@ export default function ProjectMarketing({ conversationId }: { conversationId: I
           facebookPageId: facebookPageId.trim() || undefined,
           youtubePrivacy,
           tiktokPrivacy: channels.includes("tiktok") ? tiktokPrivacy : undefined,
+          linkedinAuthorUrn: channels.includes("linkedin")
+            ? linkedinAuthorUrn.trim() || undefined
+            : undefined,
+          linkedinVisibility: channels.includes("linkedin")
+            ? linkedinVisibility
+            : undefined,
         },
       });
       if (status === "now") await publishNow({ postId });
@@ -187,6 +204,7 @@ export default function ProjectMarketing({ conversationId }: { conversationId: I
       setMediaNames([]);
       setRedditCommunity("");
       setYoutubeTitle("");
+      setLinkedinAuthorUrn("");
       setConfirmed(false);
     } catch (error) {
       setComposerError(error instanceof Error ? error.message : "Unable to save post");
@@ -197,6 +215,10 @@ export default function ProjectMarketing({ conversationId }: { conversationId: I
 
   const generateDraft = async () => {
     if (!aiPrompt.trim() || !authToken || aiLoading) return;
+    if (!activeProjectId) {
+      setAiError("Create or choose a project to give the marketing agent brand context.");
+      return;
+    }
     setAiLoading(true);
     setAiError(null);
     try {
@@ -206,7 +228,13 @@ export default function ProjectMarketing({ conversationId }: { conversationId: I
           "Content-Type": "application/json",
           Authorization: `Bearer ${authToken}`,
         },
-        body: JSON.stringify({ prompt: aiPrompt, channels, conversationId, requestKey: crypto.randomUUID(), history: agentHistory }),
+        body: JSON.stringify({
+          prompt: aiPrompt,
+          channels,
+          conversationId: activeProjectId,
+          requestKey: crypto.randomUUID(),
+          history: agentHistory,
+        }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Unable to generate post");
@@ -260,11 +288,32 @@ export default function ProjectMarketing({ conversationId }: { conversationId: I
             Cryzo writes the copy. Composio uses your connected accounts to publish it.
           </p>
           <Link
-            href="/chat/apps"
+            href="#social-accounts"
             className="mt-3 inline-flex text-xs font-semibold text-[#ff7550] hover:text-[#ff9a7f]"
           >
-            Connect or manage social accounts
+            Manage your connected accounts
           </Link>
+        {projects && projects.length > 0 ? (
+          <label className="mt-5 block text-xs font-medium text-zinc-400">
+            Project context
+            <select
+              value={activeProjectId}
+              onChange={(event) => setSourceProjectId(event.target.value)}
+              className="mt-2 h-11 w-full rounded-xl border border-zinc-700 bg-black px-3 text-sm text-white outline-none focus:border-[#ff7550]"
+            >
+              {projects.map((project) => (
+                <option key={project._id} value={project._id}>
+                  {project.title}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : (
+          <p className="mt-5 rounded-xl border border-zinc-800 bg-black p-3 text-xs leading-5 text-zinc-500">
+            Create a project first so the agent can use its brand context. Manual
+            drafts and publishing still work without one.
+          </p>
+        )}
         <textarea
           value={aiPrompt}
           onChange={(event) => setAiPrompt(event.target.value)}
@@ -274,7 +323,7 @@ export default function ProjectMarketing({ conversationId }: { conversationId: I
         <button
           type="button"
           onClick={() => void generateDraft()}
-          disabled={!aiPrompt.trim() || aiLoading}
+          disabled={!aiPrompt.trim() || !activeProjectId || aiLoading}
           className="mt-3 flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#ff5f2e] text-sm font-semibold disabled:opacity-40"
         >
           {aiLoading ? <Loader2 className="animate-spin" size={16} /> : <Sparkles size={16} />}
@@ -312,7 +361,7 @@ export default function ProjectMarketing({ conversationId }: { conversationId: I
           </div>
           <div className="flex items-center gap-2">
             <Link
-              href="/chat/apps"
+              href="#social-accounts"
               className="rounded-xl border border-zinc-700 px-4 py-2.5 text-sm font-semibold text-zinc-300"
             >
               Connections
@@ -327,10 +376,10 @@ export default function ProjectMarketing({ conversationId }: { conversationId: I
           </div>
         </header>
 
-        <ProjectSocialAccounts conversationId={conversationId} />
+        <ProjectSocialAccounts />
         <div className="px-5 py-3 text-xs text-zinc-400">
           {posts.filter(post => post.status === "published").length} published · {posts.filter(post => post.status === "scheduled").length} scheduled · {posts.filter(post => post.status === "failed").length} need attention
-          <span className="block mt-1 text-zinc-600">Delivery totals for this project. Engagement metrics appear only when supplied by the network.</span>
+          <span className="block mt-1 text-zinc-600">Delivery totals across Marketing. Engagement metrics appear only when supplied by the network.</span>
         </div>
         {composerError && !composerOpen && <p role="alert" className="px-5 py-2 text-sm text-red-400">{composerError}</p>}
         <div className="flex items-center justify-between border-b border-zinc-800 px-5 py-3">
@@ -491,6 +540,37 @@ export default function ProjectMarketing({ conversationId }: { conversationId: I
                   placeholder="Video title"
                   className="mt-2 h-11 w-full rounded-xl border border-zinc-700 bg-black px-3 text-sm outline-none focus:border-[#ff7550]"
                 />
+              </div>
+            )}
+            {channels.includes("linkedin") && (
+              <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                <label className="block text-xs text-zinc-400">
+                  LinkedIn author URN
+                  <input
+                    value={linkedinAuthorUrn}
+                    onChange={(event) => {
+                      setLinkedinAuthorUrn(event.target.value);
+                      setConfirmed(false);
+                    }}
+                    placeholder="Optional · defaults to your profile"
+                    className="mt-2 h-11 w-full rounded-xl border border-zinc-700 bg-black px-3 text-sm outline-none focus:border-[#ff7550]"
+                  />
+                </label>
+                <label className="block text-xs text-zinc-400">
+                  LinkedIn visibility
+                  <select
+                    value={linkedinVisibility}
+                    onChange={(event) => {
+                      setLinkedinVisibility(event.target.value);
+                      setConfirmed(false);
+                    }}
+                    className="mt-2 h-11 w-full rounded-xl border border-zinc-700 bg-black px-3 text-sm outline-none focus:border-[#ff7550]"
+                  >
+                    <option value="PUBLIC">Public</option>
+                    <option value="CONNECTIONS">Connections</option>
+                    <option value="LOGGED_IN">LinkedIn members</option>
+                  </select>
+                </label>
               </div>
             )}
             {channels.includes("tiktok") && (

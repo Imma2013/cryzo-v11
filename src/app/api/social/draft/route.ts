@@ -29,8 +29,8 @@ export async function POST(req: Request) {
     const candidates = await managedCandidates(modelId, false, false);
     const system = "You are Cryzo Marketing. Draft social copy for human review. Never claim to have published anything. No fabricated facts, URLs or results. Return only the post copy.";
     const safeHistory = Array.isArray(history) ? history.slice(-8).filter(item => item && ["user", "assistant"].includes(item.role) && typeof item.content === "string").map(item => `${item.role}: ${item.content.slice(0, 2000)}`).join("\n") : "";
-    const accounts = await fetchQuery(api.social.listAccounts, { conversationId }, { token });
-    const input = "Project: " + project.title + "\nConnected accounts: " + accounts.map(account => `${account.channel}:${account.name}`).join(", ") +
+    const accounts = await fetchQuery(api.social.listAccounts, {}, { token });
+    const input = "Project context: " + project.title + "\nConnected accounts: " + accounts.map(account => `${account.channel}:${account.name}`).join(", ") +
       "\nNetworks: " + (Array.isArray(channels) ? channels.join(", ") : "") + (safeHistory ? "\nConversation:\n" + safeHistory : "") + "\nRequest: " + prompt;
     const maxCostMicros = Math.ceil(Math.max(...candidates.map(model => (system.length + input.length) * model.inputCost + 8192 * model.outputCost + model.requestCost)) * 1_000_000);
     runId = await fetchMutation(api.aiUsage.reserve, { conversationId, requestKey: "social:" + requestKey, modelId,
