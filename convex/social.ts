@@ -647,10 +647,12 @@ export const markDeliveryFailed = internalMutation({
     return null;
   },
 });
+
 async function requireProject(ctx: SocialContext, userId: Id<"users">, conversationId: Id<"conversations">) {
   const project = await ctx.db.get(conversationId);
   if (project?.userId !== userId) throw new Error("Project not found.");
 }
+
 async function validatePublishing(ctx: MutationCtx, post: Doc<"socialPosts">) {
   if (post.conversationId) {
     await requireProject(ctx, post.userId, post.conversationId);
@@ -781,13 +783,6 @@ async function validatePublishing(ctx: MutationCtx, post: Doc<"socialPosts">) {
   }
   if (
     post.channels.includes("instagram") &&
-    instagramPostType === "post" &&
-    mediaItems.some((media) => media.contentType.startsWith("video/"))
-  ) {
-    throw new Error("Choose Reel for an Instagram video.");
-  }
-  if (
-    post.channels.includes("instagram") &&
     instagramPostType === "reel" &&
     mediaItems.some((media) => !media.contentType.startsWith("video/"))
   ) {
@@ -800,15 +795,14 @@ async function validatePublishing(ctx: MutationCtx, post: Doc<"socialPosts">) {
   ) {
     throw new Error("Facebook video posts require exactly one video.");
   }
-  if (
-    post.channels.includes("linkedin") &&
-    mediaItems.some((media) => media.contentType.startsWith("video/"))
-  ) {
-    throw new Error(
-      "LinkedIn video publishing is not enabled yet. Use text or images.",
-    );
+  if (post.channels.includes("linkedin")) {
+    const videos = mediaItems.filter((media) => media.contentType.startsWith("video/"));
+    if (videos.length > 0 && (videos.length !== 1 || mediaItems.length !== 1)) {
+      throw new Error("LinkedIn video posts require exactly one video file.");
+    }
   }
 }
+
 async function reservePost(ctx: MutationCtx, post: Doc<"socialPosts">) {
   if (post.quotaPeriod) return;
   await assertCanPublish(ctx, post.userId, post.channels);
@@ -818,6 +812,7 @@ async function reservePost(ctx: MutationCtx, post: Doc<"socialPosts">) {
   else await ctx.db.insert("socialUsage", { userId: post.userId, period, reserved: 1 });
   await ctx.db.patch(post._id, { quotaPeriod: period });
 }
+
 export const expireDeliveryLease = internalMutation({
   args: { deliveryId: v.id("socialDeliveries") }, returns: v.null(),
   handler: async (ctx, args) => {
@@ -829,6 +824,7 @@ export const expireDeliveryLease = internalMutation({
     return null;
   },
 });
+
 export const listAccounts = query({
   args: { conversationId: v.optional(v.id("conversations")) },
   returns: v.array(v.any()),
@@ -1004,6 +1000,7 @@ export const markProcessing = internalMutation({
     return null;
   },
 });
+
 export const claimPoll = internalMutation({
   args: { deliveryId: v.id("socialDeliveries") }, returns: v.union(v.null(), v.any()),
   handler: async (ctx, args) => {
@@ -1013,12 +1010,10 @@ export const claimPoll = internalMutation({
     return delivery;
   },
 });
+
 async function releasePost(ctx: MutationCtx, post: Doc<"socialPosts">) {
   if (!post.quotaPeriod) return;
   const meter = await ctx.db.query("socialUsage").withIndex("by_user_period", q => q.eq("userId", post.userId).eq("period", post.quotaPeriod!)).unique();
   if (meter) await ctx.db.patch(meter._id, { reserved: Math.max(0, meter.reserved - 1) });
   await ctx.db.patch(post._id, { quotaPeriod: undefined });
 }
-
-
-
