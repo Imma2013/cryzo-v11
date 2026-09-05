@@ -263,6 +263,13 @@ export default function ProjectMarketing() {
     try {
       for (const file of Array.from(files).slice(0, Math.max(0, 10 - mediaStorageIds.length))) {
         if (file.size > 500_000_000) throw new Error("Use media below 500 MB.");
+        if (
+          channels.includes("youtube") &&
+          file.type.startsWith("image/") &&
+          file.size > 2_000_000
+        ) {
+          throw new Error("YouTube thumbnails must be smaller than 2 MB.");
+        }
         const authorize = await fetch("/api/social/media", { method: "POST", headers: { Authorization: `Bearer ${authToken}`, "Content-Type": "application/json" }, body: JSON.stringify({}) });
         const permission = await authorize.json();
         if (!authorize.ok || !permission.uploadUrl) throw new Error(permission.error || "Upload could not start.");
@@ -673,6 +680,11 @@ export default function ProjectMarketing() {
               <input type="file" accept="image/*,video/*" multiple className="hidden" onChange={(event) => void uploadMedia(event.target.files)} />
             </label>
             {mediaNames.length > 0 && <p className="mt-2 text-xs text-zinc-500">{mediaNames.join(", ")}</p>}
+            {channels.includes("youtube") && (
+              <p className="mt-2 text-xs text-zinc-500">
+                Add one video and, optionally, one JPG, PNG, or GIF under 2 MB as its custom thumbnail.
+              </p>
+            )}
             {channels.includes("reddit") && (
               <div className="mt-4">
                 <label className="text-xs font-medium text-zinc-400">Reddit community</label>
