@@ -8,6 +8,7 @@ import { getProvider } from "@/lib/ai/models";
 import { getManagedModel } from "@/lib/ai/managed-models";
 import { resolveAccountProviderSecret } from "@/lib/server/provider-secrets";
 import { managedCatalog } from "@/lib/server/openrouter";
+import { resolveModelCapabilities } from "@/lib/server/model-capabilities";
 
 export type ServerModelRequest = {
   providerId?: string;
@@ -70,6 +71,10 @@ async function resolveManagedCryzoModel(requestedModel?: string) {
     creditMultiplier: managed.creditMultiplier,
     minimumPlan: managed.minimumPlan ?? "free",
     supportsTools: Boolean(managed.toolCall),
+    supportsVision: Boolean(managed.attachments),
+    contextWindow: managed.context,
+    maxOutputTokens: managed.output,
+    capabilitySource: "managed" as const,
     profile: managed,
   } as const;
 }
@@ -134,6 +139,7 @@ export async function resolveServerModel(request: ServerModelRequest) {
     throw new Error("OpenRouter keys must use https://openrouter.ai/api/v1.");
   }
 
+  const capabilities = await resolveModelCapabilities(providerId, requestedModel);
   const provider = createOpenAI({
     baseURL,
     apiKey: apiKey || "not-required",
@@ -165,8 +171,11 @@ export async function resolveServerModel(request: ServerModelRequest) {
     usesCryzoCredits: false,
     creditMultiplier: 0,
     minimumPlan: "free" as const,
-    supportsTools: true,
+    supportsTools: capabilities.supportsTools,
+    supportsVision: capabilities.supportsVision,
+    contextWindow: capabilities.contextWindow,
+    maxOutputTokens: capabilities.maxOutputTokens,
+    capabilitySource: capabilities.source,
     profile: undefined,
   };
 }
-
