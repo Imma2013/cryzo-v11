@@ -31,7 +31,7 @@ let composio: Composio | null = null;
 
 function getComposio() {
   const apiKey = process.env.COMPOSIO_API_KEY?.trim();
-  if (!apiKey) throw new Error("Composio is not configured in the Vercel runtime.");
+  if (!apiKey) throw new Error("Composio is not configured in the Vercel runtime. Set COMPOSIO_API_KEY for the Vercel Production environment.");
   return (composio ??= new Composio({ apiKey }));
 }
 
@@ -98,7 +98,7 @@ export async function POST(request: Request) {
   }
   if (!process.env.COMPOSIO_API_KEY?.trim()) {
     return Response.json(
-      { error: "Composio is not configured in the Vercel runtime." },
+      { error: "Composio is not configured in the Vercel runtime. Set COMPOSIO_API_KEY for the Vercel Production environment." },
       { status: 503 },
     );
   }
