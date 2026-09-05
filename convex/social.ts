@@ -35,6 +35,23 @@ const platformOptionsValidator = v.object({
   youtubePrivacy: v.optional(v.string()),
   linkedinAuthorUrn: v.optional(v.string()),
   linkedinVisibility: v.optional(v.string()),
+  instagramUserId: v.optional(v.string()),
+  instagramPostType: v.optional(
+    v.union(
+      v.literal("post"),
+      v.literal("reel"),
+      v.literal("story"),
+      v.literal("carousel"),
+    ),
+  ),
+  accountSelections: v.optional(
+    v.array(
+      v.object({
+        channel: channelValidator,
+        connectedAccountId: v.string(),
+      }),
+    ),
+  ),
 });
 
 type Channel = Doc<"socialDeliveries">["channel"];
@@ -129,7 +146,14 @@ async function ensureDeliveries(ctx: MutationCtx, post: Doc<"socialPosts">) {
   const now = Date.now();
 
   for (const channel of post.channels) {
-    const account = accounts.find((item) => item.channel === channel);
+    const selectedAccountId = post.platformOptions?.accountSelections?.find(
+      (selection) => selection.channel === channel,
+    )?.connectedAccountId;
+    const account = accounts.find(
+      (item) =>
+        item.channel === channel &&
+        (!selectedAccountId || item.connectedAccountId === selectedAccountId),
+    );
     if (existingChannels.has(channel)) {
       const delivery = existing.find((item) => item.channel === channel)!;
       if (!delivery.connectedAccountId && account) {
@@ -308,7 +332,7 @@ export const createPost = mutation({
     if (!Number.isFinite(args.scheduledFor)) throw new Error("Choose a valid date.");
     if (args.status === "scheduled" && !access.paid) throw new Error("Upgrade to Starter to schedule posts.");
     if (args.status === "scheduled") await assertCanPublish(ctx, userId, channels);
-    if ((args.mediaStorageIds?.length ?? 0) > 4) throw new Error("Use at most four media files.");
+    if ((args.mediaStorageIds?.length ?? 0) > 10) throw new Error("Use at most ten media files.");
     for (const storageId of args.mediaStorageIds ?? []) {
       const media = await ctx.db.query("socialMedia").withIndex("by_storage", q => q.eq("storageId", storageId)).unique();
       if (!media || media.userId !== userId) {
@@ -591,17 +615,21 @@ async function validatePublishing(ctx: MutationCtx, post: Doc<"socialPosts">) {
   ]);
 
   for (const channel of post.channels) {
+    const selectedAccountId = post.platformOptions?.accountSelections?.find(
+      (selection) => selection.channel === channel,
+    )?.connectedAccountId;
     const delivery = deliveries.find((item) => item.channel === channel);
-    const account = delivery?.connectedAccountId
+    const accountId = selectedAccountId || delivery?.connectedAccountId;
+    const account = accountId
       ? accounts.find(
           (item) =>
             item.channel === channel &&
-            item.connectedAccountId === delivery.connectedAccountId,
+            item.connectedAccountId === accountId,
         )
       : accounts.find((item) => item.channel === channel);
 
     if (!account) {
-      throw new Error(`Connect ${channel} in Marketing before publishing.`);
+      throw new Error(`Connect and select ${channel} in Marketing before publishing.`);
     }
   }
 
@@ -626,20 +654,49 @@ async function validatePublishing(ctx: MutationCtx, post: Doc<"socialPosts">) {
     throw new Error("Choose a numeric Facebook Page ID.");
   }
   if (
-    post.channels.some((channel) =>
-      ["youtube", "tiktok", "instagram"].includes(channel),
-    ) &&
+    post.channels.includes("tiktok") &&
     post.mediaStorageIds.length !== 1
   ) {
-    throw new Error("Choose exactly one media file for this network.");
+    throw new Error("Choose exactly one video for TikTok.");
+  }
+  if (
+    post.channels.includes("youtube") &&
+    (post.mediaStorageIds.length < 1 || post.mediaStorageIds.length > 2)
+  ) {
+    throw new Error("YouTube needs one video and supports one optional thumbnail image.");
+  }
+  if (
+    post.channels.includes("instagram") &&
+    !/^\d+$/.test(post.platformOptions?.instagramUserId ?? "")
+  ) {
+    throw new Error("Choose an Instagram Business or Creator account.");
+  }
+  const instagramPostType = post.platformOptions?.instagramPostType ?? "post";
+  if (post.channels.includes("instagram")) {
+    if (
+      instagramPostType === "carousel" &&
+      (post.mediaStorageIds.length < 2 || post.mediaStorageIds.length > 10)
+    ) {
+      throw new Error("Instagram carousels require 2 to 10 media files.");
+    }
+    if (
+      instagramPostType !== "carousel" &&
+      post.mediaStorageIds.length !== 1
+    ) {
+      throw new Error("Instagram posts, reels, and stories require exactly one media file.");
+    }
   }
   if (post.channels.includes("reddit") && post.mediaStorageIds.length) {
     throw new Error("Reddit currently supports text posts only.");
+  }
+  if (post.channels.includes("x") && post.mediaStorageIds.length > 4) {
+    throw new Error("X supports at most four images per post.");
   }
   if (post.channels.includes("linkedin") && post.content.length > 3000) {
     throw new Error("LinkedIn posts must be 3,000 characters or fewer.");
   }
 
+  const mediaItems = [];
   for (const id of post.mediaStorageIds) {
     const media = await ctx.db
       .query("socialMedia")
@@ -649,28 +706,60 @@ async function validatePublishing(ctx: MutationCtx, post: Doc<"socialPosts">) {
     if (!media || media.userId !== post.userId) {
       throw new Error("Media does not belong to this account.");
     }
-    if (
-      post.channels.includes("x") &&
-      media.contentType.startsWith("video/")
-    ) {
-      throw new Error("X currently supports image uploads only.");
+    mediaItems.push(media);
+  }
+
+  if (
+    post.channels.includes("x") &&
+    mediaItems.some((media) => media.contentType.startsWith("video/"))
+  ) {
+    throw new Error("X currently supports image uploads only.");
+  }
+  if (
+    post.channels.includes("tiktok") &&
+    mediaItems.some((media) => !media.contentType.startsWith("video/"))
+  ) {
+    throw new Error("TikTok requires a video file.");
+  }
+  if (post.channels.includes("youtube")) {
+    const videos = mediaItems.filter((media) =>
+      media.contentType.startsWith("video/"),
+    );
+    const images = mediaItems.filter((media) =>
+      media.contentType.startsWith("image/"),
+    );
+    if (videos.length !== 1 || images.length > 1 || videos.length + images.length !== mediaItems.length) {
+      throw new Error("YouTube needs exactly one video and at most one thumbnail image.");
     }
-    if (
-      post.channels.some(
-        (channel) => channel === "youtube" || channel === "tiktok",
-      ) &&
-      !media.contentType.startsWith("video/")
-    ) {
-      throw new Error("YouTube and TikTok require video files.");
-    }
-    if (
-      post.channels.includes("linkedin") &&
-      media.contentType.startsWith("video/")
-    ) {
-      throw new Error(
-        "LinkedIn video publishing is not enabled yet. Use text or images.",
-      );
-    }
+  }
+  if (
+    post.channels.includes("instagram") &&
+    instagramPostType === "post" &&
+    mediaItems.some((media) => media.contentType.startsWith("video/"))
+  ) {
+    throw new Error("Choose Reel for an Instagram video.");
+  }
+  if (
+    post.channels.includes("instagram") &&
+    instagramPostType === "reel" &&
+    mediaItems.some((media) => !media.contentType.startsWith("video/"))
+  ) {
+    throw new Error("Instagram Reels require a video.");
+  }
+  if (
+    post.channels.includes("facebook") &&
+    mediaItems.some((media) => media.contentType.startsWith("video/")) &&
+    mediaItems.length !== 1
+  ) {
+    throw new Error("Facebook video posts require exactly one video.");
+  }
+  if (
+    post.channels.includes("linkedin") &&
+    mediaItems.some((media) => media.contentType.startsWith("video/"))
+  ) {
+    throw new Error(
+      "LinkedIn video publishing is not enabled yet. Use text or images.",
+    );
   }
 }
 async function reservePost(ctx: MutationCtx, post: Doc<"socialPosts">) {

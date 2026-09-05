@@ -252,6 +252,31 @@ export default defineSchema({
         youtubePrivacy: v.optional(v.string()),
         linkedinAuthorUrn: v.optional(v.string()),
         linkedinVisibility: v.optional(v.string()),
+        instagramUserId: v.optional(v.string()),
+        instagramPostType: v.optional(
+          v.union(
+            v.literal("post"),
+            v.literal("reel"),
+            v.literal("story"),
+            v.literal("carousel"),
+          ),
+        ),
+        accountSelections: v.optional(
+          v.array(
+            v.object({
+              channel: v.union(
+                v.literal("x"),
+                v.literal("linkedin"),
+                v.literal("reddit"),
+                v.literal("youtube"),
+                v.literal("tiktok"),
+                v.literal("instagram"),
+                v.literal("facebook"),
+              ),
+              connectedAccountId: v.string(),
+            }),
+          ),
+        ),
       }),
     ),
     error: v.optional(v.string()),

@@ -2,7 +2,7 @@ import { Composio } from "@composio/core";
 import { requireRequestUserId } from "@/lib/server/request-user";
 import { invalidateConnectionsCache } from "@/lib/composio-connection-cache";
 import { paginateApps, type CatalogApp } from "@/lib/catalog-pagination";
-import { socialAuthConfig } from "@/lib/server/composio-social";
+import { requiresCustomSocialAuth, socialAuthConfig } from "@/lib/server/composio-social";
 
 let composio: Composio | null = null;
 function getComposio() { return composio ??= new Composio(); }
@@ -91,9 +91,11 @@ export async function POST(req: Request) {
   const origin = new URL(req.url).origin;
   invalidateConnectionsCache(userId);
   const social = socialAuthConfig(toolkit);
-  if (social && !social.id) return Response.json({
-    error: `${toolkit} is awaiting its Cryzo OAuth approval. Configure ${social.environmentName} in Vercel after creating the auth config in Composio.`,
-  }, { status: 503 });
+  if (social && !social.id && requiresCustomSocialAuth(toolkit)) {
+    return Response.json({
+      error: `${toolkit} requires a custom OAuth app. Configure ${social.environmentName} in Vercel with the Composio Auth Config ID.`,
+    }, { status: 503 });
+  }
   const connectionRequest = social?.id
     ? await getComposio().connectedAccounts.link(userId, social.id, {
         callbackUrl: origin + (returnTo && /^\/chat\/[a-zA-Z0-9]+$/.test(returnTo) ? returnTo : "/chat/apps"),
