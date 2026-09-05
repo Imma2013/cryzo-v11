@@ -14,4 +14,11 @@ describe("execution intent", () => {
     expect(transientProviderFailure(new Error("401 invalid key"))).toBe(false);
     expect(transientProviderFailure(new Error("400 unsupported reasoning"))).toBe(false);
   });
+  it("recognizes structured retryable provider failures", () => {
+    expect(transientProviderFailure({ statusCode: 503 })).toBe(true);
+    expect(transientProviderFailure({ response: { status: 429 } })).toBe(true);
+    expect(transientProviderFailure({ cause: { code: 408 } })).toBe(true);
+    expect(transientProviderFailure({ status: 401 })).toBe(false);
+    expect(transientProviderFailure({ error: { code: 400 } })).toBe(false);
+  });
 });
