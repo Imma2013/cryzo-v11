@@ -1,6 +1,21 @@
 export const SOCIAL_TOOLKITS = ["twitter", "facebook", "instagram", "youtube", "reddit", "tiktok", "linkedin"] as const;
 export type SocialToolkit = typeof SOCIAL_TOOLKITS[number];
 
+export const MANAGED_SOCIAL_TOOLKITS = ["facebook", "instagram", "youtube", "reddit", "linkedin"] as const;
+export const CUSTOM_SOCIAL_TOOLKITS = ["twitter", "tiktok"] as const;
+
+export function supportsManagedSocialAuth(toolkit: string) {
+  return MANAGED_SOCIAL_TOOLKITS.includes(
+    toolkit as (typeof MANAGED_SOCIAL_TOOLKITS)[number],
+  );
+}
+
+export function requiresCustomSocialAuth(toolkit: string) {
+  return CUSTOM_SOCIAL_TOOLKITS.includes(
+    toolkit as (typeof CUSTOM_SOCIAL_TOOLKITS)[number],
+  );
+}
+
 const ENV_NAMES: Record<SocialToolkit, string> = {
   twitter: "COMPOSIO_TWITTER_AUTH_CONFIG_ID",
   facebook: "COMPOSIO_FACEBOOK_AUTH_CONFIG_ID",
