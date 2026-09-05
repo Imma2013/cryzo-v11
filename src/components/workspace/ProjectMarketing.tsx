@@ -481,7 +481,13 @@ export default function ProjectMarketing() {
           <textarea
             value={aiPrompt}
             onChange={(event) => setAiPrompt(event.target.value)}
-            placeholder="Announce our new product with a confident, playful tone..."
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !event.shiftKey) {
+                event.preventDefault();
+                void generateDraft();
+              }
+            }}
+            placeholder="Ask your marketing copilot to write or adapt a post..."
             className="min-h-32 w-full resize-none rounded-2xl bg-transparent p-4 pb-14 text-sm outline-none placeholder:text-zinc-600"
           />
           <input
