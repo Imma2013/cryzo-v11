@@ -256,7 +256,6 @@ export function Sidebar() {
           {collapsed ? (
             <div className="flex flex-col items-center gap-1">
               <ThemeToggle />
-              <ThemeToggle />
               <button
                 type="button"
                 onClick={() => signOut()}
@@ -274,6 +273,7 @@ export function Sidebar() {
               <div className="min-w-0 flex-1 truncate text-sm text-zinc-400">
                 {user?.name || user?.email}
               </div>
+              <ThemeToggle />
               <button
                 type="button"
                 onClick={() => signOut()}
