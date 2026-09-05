@@ -5,6 +5,7 @@ import { useMutation, useQuery } from "convex/react";
 import { useAuthToken } from "@convex-dev/auth/react";
 import { Check, Loader2, Plus, Unplug } from "lucide-react";
 import { api } from "../../../convex/_generated/api";
+import type { Id } from "../../../convex/_generated/dataModel";
 
 const networks = [
   { toolkit: "twitter", channel: "x", label: "X", mark: "X", accent: "bg-white text-black" },
@@ -104,7 +105,7 @@ export default function ProjectSocialAccounts() {
     }
   }
 
-  async function disconnect(accountId: Parameters<typeof unbind>[0]["accountId"]) {
+  async function disconnect(accountId: Id<"socialAccounts">) {
     setError("");
     setNotice("");
     try {
@@ -116,7 +117,7 @@ export default function ProjectSocialAccounts() {
   }
 
   const accountCount = bound?.length ?? 0;
-  const canAddAnother = Boolean(access?.paid || accountCount === 0);
+  const canAddAnother = Boolean(access?.canSchedule || accountCount === 0);
 
   return (
     <section id="social-accounts" className="border-b border-zinc-700 bg-[#0c0c0c] px-5 py-5">
