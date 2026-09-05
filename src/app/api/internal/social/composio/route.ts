@@ -30,7 +30,9 @@ type GatewayRequest = ExecuteRequest | UploadRequest;
 let composio: Composio | null = null;
 
 function getComposio() {
-  return (composio ??= new Composio());
+  const apiKey = process.env.COMPOSIO_API_KEY?.trim();
+  if (!apiKey) throw new Error("Composio is not configured in the Vercel runtime.");
+  return (composio ??= new Composio({ apiKey }));
 }
 
 function authorized(request: Request) {
