@@ -466,6 +466,21 @@ export default function ProjectMarketing() {
             drafts and publishing still work without one.
           </p>
         )}
+        {agentHistory.length > 0 && (
+          <div className="mt-5 max-h-56 space-y-2 overflow-y-auto rounded-2xl border border-zinc-800 bg-black p-3">
+            {agentHistory.map((message, index) => (
+              <div
+                key={`${message.role}-${index}`}
+                className={`rounded-xl px-3 py-2 text-xs leading-5 ${message.role === "user" ? "ml-5 bg-zinc-900 text-zinc-300" : "mr-5 bg-[#1c120e] text-zinc-200"}`}
+              >
+                <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-zinc-500">
+                  {message.role === "user" ? "You" : "Marketing copilot"}
+                </span>
+                <span className="whitespace-pre-wrap">{message.content}</span>
+              </div>
+            ))}
+          </div>
+        )}
         <div className="relative mt-5 rounded-2xl border border-zinc-700 bg-black focus-within:border-[#ff7550]">
           <textarea
             value={aiPrompt}
