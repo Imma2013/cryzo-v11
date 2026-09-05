@@ -11,8 +11,6 @@ type ComposioExecution = {
   error?: string | null;
   successful?: boolean;
   logId: string;
-  // Some providers (notably LinkedIn) return the created resource identifier
-  // in response metadata instead of the JSON body.
   response?: {
     status?: number;
     headers?: Record<string, string>;
@@ -20,6 +18,8 @@ type ComposioExecution = {
   headers?: Record<string, string>;
   status?: number;
 };
+
+type JsonRecord = Record<string, unknown>;
 
 async function callComposio<T>(body: Record<string, unknown>): Promise<T> {
   const secret = process.env.CRYZO_INTERNAL_API_SECRET;
@@ -45,12 +45,41 @@ async function callComposio<T>(body: Record<string, unknown>): Promise<T> {
   }
   return payload.result;
 }
+
 function entries(value: unknown): [string, unknown][] {
   if (!value || typeof value !== "object") return [];
   return Object.entries(value).flatMap(([key, child]) => [[key, child] as [string, unknown], ...entries(child)]);
 }
+
 function identifier(value: unknown, keys = ["post_id", "tweet_id", "video_id", "media_id", "id"]) {
-  return entries(value).find(([key, value]) => keys.includes(key) && (typeof value === "string" || typeof value === "number"))?.[1]?.toString();
+  return entries(value).find(([key, child]) => keys.includes(key) && (typeof child === "string" || typeof child === "number"))?.[1]?.toString();
+}
+
+function findStringMatching(value: unknown, predicate: (value: string) => boolean): string | undefined {
+  if (typeof value === "string") return predicate(value) ? value : undefined;
+  if (!value || typeof value !== "object") return undefined;
+  for (const child of Object.values(value)) {
+    const match = findStringMatching(child, predicate);
+    if (match) return match;
+  }
+  return undefined;
+}
+
+function linkedinVideoUrn(value: unknown) {
+  return (
+    findStringMatching(value, (candidate) => candidate.startsWith("urn:li:video:")) ||
+    identifier(value, [
+      "video_urn",
+      "videoUrn",
+      "video_id",
+      "videoId",
+      "asset_urn",
+      "assetUrn",
+      "asset",
+      "urn",
+      "id",
+    ])
+  );
 }
 
 function linkedinIdentifier(result: ComposioExecution) {
@@ -83,6 +112,63 @@ function linkedinIdentifier(result: ComposioExecution) {
     value.length > 0,
   )?.[1];
 }
+
+function asRecord(value: unknown): JsonRecord | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as JsonRecord)
+    : null;
+}
+
+function inputProperties(schema: unknown): JsonRecord | null {
+  const root = asRecord(schema);
+  if (!root) return null;
+  const nested = [
+    root.input_parameters,
+    root.inputParameters,
+    root.input_schema,
+    root.inputSchema,
+    asRecord(root.tool)?.input_parameters,
+    asRecord(root.tool)?.inputParameters,
+    asRecord(root.data)?.input_parameters,
+    asRecord(root.data)?.inputParameters,
+  ];
+  for (const candidate of nested) {
+    const properties = asRecord(asRecord(candidate)?.properties);
+    if (properties) return properties;
+  }
+  return null;
+}
+
+function pickProperty(properties: JsonRecord | null, candidates: string[]) {
+  if (!properties) return undefined;
+  return candidates.find((candidate) => Object.prototype.hasOwnProperty.call(properties, candidate));
+}
+
+function setSchemaArgument(
+  args: JsonRecord,
+  properties: JsonRecord | null,
+  candidates: string[],
+  value: unknown,
+  fallback?: string,
+) {
+  const key = pickProperty(properties, candidates) || (!properties ? fallback : undefined);
+  if (key) args[key] = value;
+  return key;
+}
+
+async function safeToolProperties(toolkit: string, toolSlug: string) {
+  try {
+    const schema = await callComposio<unknown>({
+      operation: "schema",
+      toolkit,
+      toolSlug,
+    });
+    return inputProperties(schema);
+  } catch {
+    return null;
+  }
+}
+
 export const publishPost = internalAction({
   args: { postId: v.id("socialPosts") }, returns: v.null(),
   handler: async (ctx, args) => {
@@ -90,6 +176,7 @@ export const publishPost = internalAction({
     return null;
   },
 });
+
 export const publishDelivery = internalAction({
   args: { deliveryId: v.id("socialDeliveries") }, returns: v.null(),
   handler: async (ctx, args) => {
@@ -187,7 +274,6 @@ export const publishDelivery = internalAction({
           max_wait_seconds: 300,
         });
       } else if (toolkit === "linkedin") {
-        if (video) throw new Error("LinkedIn video publishing is not enabled yet. Use text or images.");
         let author = typeof options.linkedinAuthorUrn === "string"
           ? options.linkedinAuthorUrn.trim()
           : "";
@@ -197,21 +283,102 @@ export const publishDelivery = internalAction({
           if (!personId) throw new Error("LinkedIn did not return the connected member ID.");
           author = personId.startsWith("urn:li:") ? personId : `urn:li:person:${personId}`;
         }
-        const images = [];
-        for (const url of urls) {
-          images.push(await callComposio<unknown>({
-            operation: "upload",
-            toolkit,
-            toolSlug: "LINKEDIN_CREATE_LINKED_IN_POST",
-            file: url,
-          }));
+
+        if (video) {
+          if (urls.length !== 1) throw new Error("LinkedIn video posts require exactly one video.");
+          const uploadSlug = "LINKEDIN_UPLOAD_VIDEO";
+          const uploadProperties = await safeToolProperties(toolkit, uploadSlug);
+          const uploadArgs: JsonRecord = {};
+          setSchemaArgument(
+            uploadArgs,
+            uploadProperties,
+            ["owner", "author", "owner_urn", "ownerUrn"],
+            author,
+            "owner",
+          );
+
+          const urlField = setSchemaArgument(
+            uploadArgs,
+            uploadProperties,
+            ["source_url", "sourceUrl", "video_url", "videoUrl", "file_url", "fileUrl", "url"],
+            urls[0],
+            "source_url",
+          );
+
+          if (!urlField && uploadProperties) {
+            const stagedFile = await callComposio<unknown>({
+              operation: "upload",
+              toolkit,
+              toolSlug: uploadSlug,
+              file: urls[0],
+            });
+            const fileField = setSchemaArgument(
+              uploadArgs,
+              uploadProperties,
+              ["video_file", "videoFile", "video_file_path", "videoFilePath", "file", "media", "video"],
+              stagedFile,
+            );
+            if (!fileField) {
+              throw new Error("LinkedIn's current video upload schema does not expose a supported video input.");
+            }
+          }
+
+          const uploaded = await execute(uploadSlug, uploadArgs, false);
+          const videoUrn = linkedinVideoUrn(uploaded.data);
+          if (!videoUrn) throw new Error("LinkedIn did not return a video URN after upload.");
+
+          const createSlug = "LINKEDIN_CREATE_VIDEO_POST";
+          const createProperties = await safeToolProperties(toolkit, createSlug);
+          const createArgs: JsonRecord = {};
+          setSchemaArgument(
+            createArgs,
+            createProperties,
+            ["author", "owner", "author_urn", "authorUrn", "owner_urn", "ownerUrn"],
+            author,
+            "author",
+          );
+          setSchemaArgument(
+            createArgs,
+            createProperties,
+            ["commentary", "text", "content", "message", "description"],
+            content.slice(0, 3000),
+            "commentary",
+          );
+          setSchemaArgument(
+            createArgs,
+            createProperties,
+            ["visibility"],
+            options.linkedinVisibility || "PUBLIC",
+            "visibility",
+          );
+          const videoField = setSchemaArgument(
+            createArgs,
+            createProperties,
+            ["video", "video_urn", "videoUrn", "video_id", "videoId", "media", "asset"],
+            videoUrn,
+            "video",
+          );
+          if (!videoField) {
+            throw new Error("LinkedIn's current video-post schema does not expose a supported video field.");
+          }
+          result = await execute(createSlug, createArgs);
+        } else {
+          const images = [];
+          for (const url of urls) {
+            images.push(await callComposio<unknown>({
+              operation: "upload",
+              toolkit,
+              toolSlug: "LINKEDIN_CREATE_LINKED_IN_POST",
+              file: url,
+            }));
+          }
+          result = await execute("LINKEDIN_CREATE_LINKED_IN_POST", {
+            author,
+            commentary: content.slice(0, 3000),
+            visibility: options.linkedinVisibility || "PUBLIC",
+            ...(images.length ? { images } : {}),
+          });
         }
-        result = await execute("LINKEDIN_CREATE_LINKED_IN_POST", {
-          author,
-          commentary: content.slice(0, 3000),
-          visibility: options.linkedinVisibility || "PUBLIC",
-          ...(images.length ? { images } : {}),
-        });
       } else if (toolkit === "youtube") {
         const videoIndex = mediaTypes.findIndex((type) => type.startsWith("video/"));
         const thumbnailIndex = mediaTypes.findIndex((type) => type.startsWith("image/"));
@@ -252,8 +419,6 @@ export const publishDelivery = internalAction({
         : identifier(result.data);
       if (!id) {
         if (toolkit === "linkedin" && result.successful !== false && !result.error) {
-          // LinkedIn can complete the publish while Composio omits x-restli-id.
-          // Keep the delivery published; the provider log remains the audit reference.
           await ctx.runMutation(internal.social.markDeliveryPublished, {
             deliveryId: args.deliveryId,
             toolSlug: toolSlug!,
@@ -307,5 +472,3 @@ export const checkTikTok = internalAction({
     return null;
   },
 });
-
-
