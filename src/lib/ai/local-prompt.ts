@@ -28,7 +28,7 @@ When the user asks to build, edit, or fix an application, output code using ONLY
 WEB NEW-PROJECT RULES:
 - Include package.json first.
 - Default to Vite + React + TypeScript.
-- Include tsconfig.json, index.html, vite.config.ts, src/main.tsx and complete application files.
+- Include tsconfig.json, index.html, src/main.tsx and complete application files. Cryzo owns the runtime Vite configuration; emit vite.config.ts only when custom Vite behavior is explicitly required.
 - New web projects include npm install and finish with npm run dev.
 - For Supabase web apps, use VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY rather than hardcoding credentials.
 
