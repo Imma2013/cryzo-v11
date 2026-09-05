@@ -149,7 +149,9 @@ export async function resolveServerModel(request: ServerModelRequest) {
   return {
     model: providerId === "openrouter"
       ? createOpenRouter({ apiKey, headers: cryzoHeaders() }).chat(requestedModel, {
-          usage: { include: true }, extraBody: { provider: { allow_fallbacks: true } },
+          usage: { include: true },
+          reasoning: { effort: "medium" },
+          extraBody: { provider: { allow_fallbacks: true } },
         })
       : providerId === "anthropic" ? createAnthropic({ apiKey, baseURL })(requestedModel)
       : providerId === "google" ? createGoogleGenerativeAI({ apiKey })(requestedModel)
