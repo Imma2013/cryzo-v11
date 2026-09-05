@@ -148,7 +148,7 @@ export default function ProjectMarketing() {
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
   const [agentHistory, setAgentHistory] = useState<{ role: "user" | "assistant"; content: string }[]>([]);
-  const activeProjectId = sourceProjectId || projects?.[0]?._id || "";
+  const activeProjectId = sourceProjectId || "";
 
   useEffect(() => {
     if (!socialAccounts) return;
@@ -383,7 +383,7 @@ export default function ProjectMarketing() {
         body: JSON.stringify({
           prompt: aiPrompt,
           channels,
-          conversationId: activeProjectId,
+          conversationId: activeProjectId || undefined,
           requestKey: crypto.randomUUID(),
           history: agentHistory,
         }),
@@ -437,7 +437,7 @@ export default function ProjectMarketing() {
         </div>
         <h2 className="mt-5 text-2xl font-semibold leading-tight">Create your next campaign.</h2>
           <p className="mt-2 text-sm leading-6 text-zinc-500">
-            Cryzo writes the copy. Composio uses your connected accounts to publish it.
+            Chat with your marketing copilot, then confirm drafts in the composer.
           </p>
           <Link
             href="#social-accounts"
@@ -453,7 +453,7 @@ export default function ProjectMarketing() {
               onChange={(event) => setSourceProjectId(event.target.value)}
               className="mt-2 h-11 w-full rounded-xl border border-zinc-700 bg-black px-3 text-sm text-white outline-none focus:border-[#ff7550]"
             >
-              {projects.map((project) => (
+              <option value="">New chat (no project context)</option>\n              {projects.map((project) => (
                 <option key={project._id} value={project._id}>
                   {project.title}
                 </option>
@@ -512,11 +512,11 @@ export default function ProjectMarketing() {
         <button
           type="button"
           onClick={() => void generateDraft()}
-          disabled={!aiPrompt.trim() || !activeProjectId || aiLoading}
+          disabled={!aiPrompt.trim() || aiLoading}
           className="mt-3 flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#ff5f2e] text-sm font-semibold disabled:opacity-40"
         >
           {aiLoading ? <Loader2 className="animate-spin" size={16} /> : <Sparkles size={16} />}
-          Generate draft
+          Send to marketing copilot
         </button>
         {aiError && <p className="mt-3 text-xs leading-5 text-red-400">{aiError}</p>}
         {aiDraft && (
