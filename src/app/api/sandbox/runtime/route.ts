@@ -20,7 +20,6 @@ const PREVIEW_LOG_FILE = ".cryzo-preview.log";
 const RUNTIME_DIR = ".cryzo";
 const RUNTIME_CONFIG_FILE = `${RUNTIME_DIR}/vite.runtime.config.ts`;
 const SAFE_VITE_5 = "5.4.21";
-const INSPECTOR_SCRIPT_TAG = '<script src="https://cryzo.me/inspector-script.js"></script>';
 const VITE_CONFIG_CANDIDATES = [
   "vite.config.ts",
   "vite.config.mts",
@@ -121,13 +120,6 @@ async function writeFile(sandbox: Sandbox, action: ArtifactAction) {
   }
 
   const relative = safeRelativePath(action.filePath);
-  let content = action.content;
-  if (relative === "index.html" && !content.includes("inspector-script.js")) {
-    content = /<\/body>/i.test(content)
-      ? content.replace(/<\/body>/i, `${INSPECTOR_SCRIPT_TAG}\n</body>`)
-      : `${content}\n${INSPECTOR_SCRIPT_TAG}\n`;
-  }
-
   const directory = path.posix.dirname(relative);
   if (directory !== ".") {
     await sandbox.runCommand("mkdir", ["-p", `${PROJECT_DIR}/${directory}`]);
@@ -136,7 +128,7 @@ async function writeFile(sandbox: Sandbox, action: ArtifactAction) {
   await sandbox.writeFiles([
     {
       path: `${PROJECT_DIR}/${relative}`,
-      content: Buffer.from(content, "utf8"),
+      content: Buffer.from(action.content, "utf8"),
     },
   ]);
 }
@@ -223,7 +215,7 @@ async function writeRuntimeViteConfig(sandbox: Sandbox) {
     ? `import userConfigExport from ${JSON.stringify(`../${userConfigPath}`)};`
     : "const userConfigExport = {};";
 
-  const source = `import { defineConfig, mergeConfig } from "vite";\n${importLine}\n\nconst cryzoRuntimeConfig = {\n  server: {\n    host: "0.0.0.0",\n    port: ${PREVIEW_PORT},\n    strictPort: true,\n    allowedHosts: [${JSON.stringify(publicHost)}],\n  },\n};\n\nexport default defineConfig(async (env) => {\n  const candidate = typeof userConfigExport === "function"\n    ? await userConfigExport(env)\n    : await userConfigExport;\n  return mergeConfig(candidate || {}, cryzoRuntimeConfig);\n});\n`;
+  const source = `import { defineConfig, mergeConfig } from "vite";\n${importLine}\n\nconst cryzoInspectorPlugin = {\n  name: "cryzo-preview-inspector",\n  transformIndexHtml() {\n    return [{\n      tag: "script",\n      attrs: { src: "https://cryzo.me/inspector-script.js" },\n      injectTo: "body",\n    }];\n  },\n};\n\nconst cryzoRuntimeConfig = {\n  plugins: [cryzoInspectorPlugin],\n  server: {\n    host: "0.0.0.0",\n    port: ${PREVIEW_PORT},\n    strictPort: true,\n    allowedHosts: [${JSON.stringify(publicHost)}],\n  },\n};\n\nexport default defineConfig(async (env) => {\n  const candidate = typeof userConfigExport === "function"\n    ? await userConfigExport(env)\n    : await userConfigExport;\n  return mergeConfig(candidate || {}, cryzoRuntimeConfig);\n});\n`;
 
   await sandbox.runCommand("mkdir", ["-p", `${PROJECT_DIR}/${RUNTIME_DIR}`]);
   await sandbox.writeFiles([
