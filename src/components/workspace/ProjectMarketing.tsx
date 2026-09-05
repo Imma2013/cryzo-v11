@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import Link from "next/link";
 import {
@@ -45,6 +45,19 @@ type SocialDelivery = {
   error?: string;
   remoteUrl?: string;
 };
+type SocialAccount = {
+  _id: Id<"socialAccounts">;
+  channel: ChannelId;
+  connectedAccountId: string;
+  name: string;
+};
+
+type PublishingTarget = {
+  id: string;
+  name: string;
+  username?: string;
+};
+
 type SocialPost = {
   _id: Id<"socialPosts">;
   content: string;
@@ -73,6 +86,9 @@ export default function ProjectMarketing() {
   const [accessNow] = useState(() => Date.now());
   const access = useQuery(api.social.getAccess, { now: accessNow });
   const posts = useQuery(api.social.listPosts, {}) as SocialPost[] | undefined;
+  const socialAccounts = useQuery(api.social.listAccounts, {}) as
+    | SocialAccount[]
+    | undefined;
   const projects = useQuery(
     api.conversations.list,
     userId ? { userId } : "skip",
@@ -97,6 +113,17 @@ export default function ProjectMarketing() {
   const [mediaNames, setMediaNames] = useState<string[]>([]);
   const [redditCommunity, setRedditCommunity] = useState("");
   const [facebookPageId, setFacebookPageId] = useState("");
+  const [facebookPages, setFacebookPages] = useState<PublishingTarget[]>([]);
+  const [instagramUserId, setInstagramUserId] = useState("");
+  const [instagramTargets, setInstagramTargets] = useState<PublishingTarget[]>([]);
+  const [instagramPostType, setInstagramPostType] = useState<
+    "post" | "reel" | "story" | "carousel"
+  >("post");
+  const [accountSelections, setAccountSelections] = useState<
+    Partial<Record<ChannelId, string>>
+  >({});
+  const [targetsLoading, setTargetsLoading] = useState(false);
+  const [targetsError, setTargetsError] = useState("");
   const [youtubePrivacy, setYoutubePrivacy] = useState("private");
   const [youtubeTitle, setYoutubeTitle] = useState("");
   const [tiktokPrivacy, setTiktokPrivacy] = useState("SELF_ONLY");
@@ -113,6 +140,90 @@ export default function ProjectMarketing() {
   const [agentHistory, setAgentHistory] = useState<{ role: "user" | "assistant"; content: string }[]>([]);
   const [confirmed, setConfirmed] = useState(false);
   const activeProjectId = sourceProjectId || projects?.[0]?._id || "";
+
+  useEffect(() => {
+    if (!socialAccounts) return;
+    setAccountSelections((current) => {
+      const next = { ...current };
+      for (const channel of CHANNELS) {
+        const options = socialAccounts.filter(
+          (account) => account.channel === channel.id,
+        );
+        if (
+          !next[channel.id] ||
+          !options.some(
+            (account) => account.connectedAccountId === next[channel.id],
+          )
+        ) {
+          next[channel.id] = options[0]?.connectedAccountId;
+        }
+      }
+      return next;
+    });
+  }, [socialAccounts]);
+
+  useEffect(() => {
+    if (!composerOpen || !authToken) return;
+    const lookups = (["facebook", "instagram"] as const)
+      .filter((channel) => channels.includes(channel))
+      .map(async (channel) => {
+        const accountId = accountSelections[channel];
+        if (!accountId) return { channel, items: [] as PublishingTarget[] };
+        const params = new URLSearchParams({ channel, accountId });
+        const response = await fetch(`/api/social/targets?${params}`, {
+          headers: { Authorization: `Bearer ${authToken}` },
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || `Could not load ${channel} destinations.`);
+        return { channel, items: data.items as PublishingTarget[] };
+      });
+
+    if (!lookups.length) return;
+    let cancelled = false;
+    setTargetsLoading(true);
+    setTargetsError("");
+    void Promise.all(lookups)
+      .then((results) => {
+        if (cancelled) return;
+        for (const result of results) {
+          if (result.channel === "facebook") {
+            setFacebookPages(result.items);
+            setFacebookPageId((current) =>
+              result.items.some((item) => item.id === current)
+                ? current
+                : result.items[0]?.id ?? "",
+            );
+          } else {
+            setInstagramTargets(result.items);
+            setInstagramUserId((current) =>
+              result.items.some((item) => item.id === current)
+                ? current
+                : result.items[0]?.id ?? "",
+            );
+          }
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setTargetsError(
+            error instanceof Error ? error.message : "Could not load publishing destinations.",
+          );
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setTargetsLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    accountSelections.facebook,
+    accountSelections.instagram,
+    authToken,
+    channels,
+    composerOpen,
+  ]);
 
   const week = useMemo(() => {
     const first = startOfWeek(weekAnchor);
@@ -145,7 +256,7 @@ export default function ProjectMarketing() {
     setComposerError(null);
     setConfirmed(false);
     try {
-      for (const file of Array.from(files).slice(0, 4)) {
+      for (const file of Array.from(files).slice(0, Math.max(0, 10 - mediaStorageIds.length))) {
         if (file.size > 500_000_000) throw new Error("Use media below 500 MB.");
         const authorize = await fetch("/api/social/media", { method: "POST", headers: { Authorization: `Bearer ${authToken}`, "Content-Type": "application/json" }, body: JSON.stringify({}) });
         const permission = await authorize.json();
@@ -185,6 +296,14 @@ export default function ProjectMarketing() {
           redditCommunity: redditCommunity.trim() || undefined,
           youtubeTitle: youtubeTitle.trim() || undefined,
           facebookPageId: facebookPageId.trim() || undefined,
+          instagramUserId: instagramUserId.trim() || undefined,
+          instagramPostType: channels.includes("instagram")
+            ? instagramPostType
+            : undefined,
+          accountSelections: channels.flatMap((channel) => {
+            const connectedAccountId = accountSelections[channel];
+            return connectedAccountId ? [{ channel, connectedAccountId }] : [];
+          }),
           youtubePrivacy,
           tiktokPrivacy: channels.includes("tiktok") ? tiktokPrivacy : undefined,
           linkedinAuthorUrn: channels.includes("linkedin")
@@ -496,6 +615,47 @@ export default function ProjectMarketing() {
                 Free includes one connected social account and 10 posts per month. Starter unlocks scheduling and seven accounts. Deliveries use integration credits.
               </p>
             )}
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              {channels.map((channel) => {
+                const options =
+                  socialAccounts?.filter((account) => account.channel === channel) ?? [];
+                const label = CHANNELS.find((item) => item.id === channel)?.label ?? channel;
+                return (
+                  <label key={channel} className="block text-xs text-zinc-400">
+                    {label} account
+                    <select
+                      value={accountSelections[channel] ?? ""}
+                      onChange={(event) => {
+                        setAccountSelections((current) => ({
+                          ...current,
+                          [channel]: event.target.value,
+                        }));
+                        setConfirmed(false);
+                      }}
+                      className="mt-2 h-11 w-full rounded-xl border border-zinc-700 bg-black px-3 text-sm text-white outline-none focus:border-[#ff7550]"
+                    >
+                      <option value="">Choose a connected account</option>
+                      {options.map((account) => (
+                        <option
+                          key={account.connectedAccountId}
+                          value={account.connectedAccountId}
+                        >
+                          {account.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                );
+              })}
+            </div>
+            {channels.some(
+              (channel) =>
+                !socialAccounts?.some((account) => account.channel === channel),
+            ) && (
+              <p className="mt-3 text-xs text-amber-300">
+                Connect every selected network before publishing. You can still save this as a draft.
+              </p>
+            )}
             <textarea
               value={content}
               onChange={(event) => { setContent(event.target.value); setConfirmed(false); }}
@@ -520,9 +680,79 @@ export default function ProjectMarketing() {
               </div>
             )}
             {channels.includes("facebook") && (
-              <label className="mt-4 block text-xs text-zinc-400">Facebook Page ID
-                <input value={facebookPageId} onChange={event => setFacebookPageId(event.target.value)} inputMode="numeric" placeholder="Your connected Facebook Page ID" className="mt-2 h-11 w-full rounded-xl border border-zinc-700 bg-black px-3 text-sm" />
+              <label className="mt-4 block text-xs text-zinc-400">
+                Facebook Page
+                <select
+                  value={facebookPageId}
+                  disabled={targetsLoading}
+                  onChange={(event) => {
+                    setFacebookPageId(event.target.value);
+                    setConfirmed(false);
+                  }}
+                  className="mt-2 h-11 w-full rounded-xl border border-zinc-700 bg-black px-3 text-sm text-white outline-none focus:border-[#ff7550]"
+                >
+                  <option value="">
+                    {targetsLoading ? "Loading managed Pages…" : "Choose a managed Page"}
+                  </option>
+                  {facebookPages.map((page) => (
+                    <option key={page.id} value={page.id}>
+                      {page.name}
+                    </option>
+                  ))}
+                </select>
               </label>
+            )}
+            {channels.includes("instagram") && (
+              <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                <label className="block text-xs text-zinc-400">
+                  Instagram profile
+                  <select
+                    value={instagramUserId}
+                    disabled={targetsLoading}
+                    onChange={(event) => {
+                      setInstagramUserId(event.target.value);
+                      setConfirmed(false);
+                    }}
+                    className="mt-2 h-11 w-full rounded-xl border border-zinc-700 bg-black px-3 text-sm text-white outline-none focus:border-[#ff7550]"
+                  >
+                    <option value="">
+                      {targetsLoading ? "Loading business profile…" : "Choose a Business or Creator profile"}
+                    </option>
+                    {instagramTargets.map((target) => (
+                      <option key={target.id} value={target.id}>
+                        {target.username ? `@${target.username}` : target.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="block text-xs text-zinc-400">
+                  Instagram format
+                  <select
+                    value={instagramPostType}
+                    onChange={(event) => {
+                      setInstagramPostType(
+                        event.target.value as
+                          | "post"
+                          | "reel"
+                          | "story"
+                          | "carousel",
+                      );
+                      setConfirmed(false);
+                    }}
+                    className="mt-2 h-11 w-full rounded-xl border border-zinc-700 bg-black px-3 text-sm text-white outline-none focus:border-[#ff7550]"
+                  >
+                    <option value="post">Image post</option>
+                    <option value="reel">Reel</option>
+                    <option value="story">Story</option>
+                    <option value="carousel">Carousel (2–10 items)</option>
+                  </select>
+                </label>
+              </div>
+            )}
+            {targetsError && (
+              <p role="alert" className="mt-3 text-xs text-red-400">
+                {targetsError}
+              </p>
             )}
             {channels.includes("youtube") && (
               <label className="mt-4 block text-xs text-zinc-400">YouTube visibility
@@ -614,7 +844,15 @@ export default function ProjectMarketing() {
               <button type="button" disabled={saving} onClick={() => void save("draft")} className="rounded-xl border border-zinc-700 px-4 py-2.5 text-sm font-semibold text-zinc-300">
                 Save draft
               </button>
-              <button type="button" disabled={saving || !confirmed || !content.trim() || channels.length === 0} onClick={() => void save(publishMode)} className="inline-flex items-center gap-2 rounded-xl bg-[#ff5f2e] px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-40">
+              <button type="button" disabled={
+                  saving ||
+                  !confirmed ||
+                  !content.trim() ||
+                  channels.length === 0 ||
+                  channels.some((channel) => !accountSelections[channel]) ||
+                  (channels.includes("facebook") && !facebookPageId) ||
+                  (channels.includes("instagram") && !instagramUserId)
+                } onClick={() => void save(publishMode)} className="inline-flex items-center gap-2 rounded-xl bg-[#ff5f2e] px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-40">
                 {saving ? <Loader2 className="animate-spin" size={15} /> : <Send size={15} />}
                 {publishMode === "now" ? "Publish now" : "Schedule post"}
               </button>
