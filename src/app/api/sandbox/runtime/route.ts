@@ -302,8 +302,8 @@ async function replaceInvalidViteConfig(
 
   const extension = path.posix.extname(relativePath).toLowerCase();
   const fallback = extension === ".cjs" || extension === ".cts"
-    ? "module.exports = {};\\n"
-    : "export default {};\\n";
+    ? "module.exports = {};\n"
+    : "export default {};\n";
   await sandbox.writeFiles([
     {
       path: `${PROJECT_DIR}/${relativePath}`,
@@ -499,7 +499,7 @@ async function startPreview(sandbox: Sandbox, forceRestart = false) {
     const validation = await validateViteConfig(sandbox, userConfigPath);
     if (!validation.valid) {
       const backupPath = await replaceInvalidViteConfig(sandbox, userConfigPath);
-      output += `Replaced invalid ${userConfigPath} with a safe fallback before preview startup. Original saved at ${backupPath}: ${validation.error || "syntax error"}\\n`;
+      output += `Replaced invalid ${userConfigPath} with a safe fallback before preview startup. Original saved at ${backupPath}: ${validation.error || "syntax error"}\n`;
     } else if (validation.skipped) {
       output += `Could not run the Vite config preflight because esbuild is unavailable; using the generated config as-is.\n`;
     }
