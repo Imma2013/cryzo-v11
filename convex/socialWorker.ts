@@ -27,7 +27,10 @@ export const publishDelivery = internalAction({
     const payload = await ctx.runQuery(internal.social.getDeliveryForPublish, args);
     if (!payload || !await ctx.runMutation(internal.social.claimDelivery, args)) return null;
     const toolkit = toolkits[payload.delivery.channel];
-    let executionStarted = false, logId: string | undefined, toolSlug: string | undefined;
+    let executionStarted = false;
+    let explicitProviderFailure = false;
+    let logId: string | undefined;
+    let toolSlug: string | undefined;
     try {
       if (!toolkit || !payload.delivery.connectedAccountId) throw new Error("Connect an approved account in Marketing before publishing.");
       const composio = new Composio();
@@ -37,7 +40,10 @@ export const publishDelivery = internalAction({
         if (publishes) executionStarted = true;
         const result = await session.execute(slug, arguments_);
         logId = result.logId;
-        if (result.error) throw new Error(result.error);
+        if (result.error) {
+          explicitProviderFailure = true;
+          throw new Error(result.error);
+        }
         return result;
       };
       const options = payload.post.platformOptions ?? {}, content = payload.post.content;
@@ -165,7 +171,11 @@ export const publishDelivery = internalAction({
       await ctx.runMutation(internal.social.markDeliveryPublished, { deliveryId: args.deliveryId, toolSlug: toolSlug!, providerLogId: result.logId, remotePostId: id });
     } catch (error) {
       await ctx.runMutation(internal.social.markDeliveryFailed, { deliveryId: args.deliveryId,
-        error: error instanceof Error ? error.message : "Publishing failed.", outcomeUnknown: executionStarted, toolSlug, providerLogId: logId });
+        error: error instanceof Error ? error.message : "Publishing failed.",
+        outcomeUnknown: executionStarted && !explicitProviderFailure,
+        toolSlug,
+        providerLogId: logId,
+      });
     }
     return null;
   },
