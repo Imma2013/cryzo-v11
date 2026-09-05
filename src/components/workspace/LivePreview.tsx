@@ -47,38 +47,56 @@ export function LivePreview({
 }) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const inspectorActiveRef = useRef(false);
   const [inspectorActive, setInspectorActive] = useState(false);
   const [deviceIdx, setDeviceIdx] = useState(0);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [selectedElement, setSelectedElement] = useState<ElementInfo | null>(null);
 
+  const postInspectorState = useCallback((active: boolean) => {
+    iframeRef.current?.contentWindow?.postMessage(
+      { type: "INSPECTOR_ACTIVATE", active },
+      "*",
+    );
+  }, []);
+
+  const setInspector = useCallback((active: boolean) => {
+    inspectorActiveRef.current = active;
+    setInspectorActive(active);
+    if (active) setSelectedElement(null);
+    postInspectorState(active);
+  }, [postInspectorState]);
+
   useEffect(() => {
     function handleMessage(e: MessageEvent) {
-      if (!e.data?.type) return;
+      if (e.source !== iframeRef.current?.contentWindow || !e.data?.type) return;
+
+      if (e.data.type === "INSPECTOR_READY") {
+        postInspectorState(inspectorActiveRef.current);
+        return;
+      }
+
       if (e.data.type === "INSPECTOR_CLICK") {
         const info = e.data.elementInfo as ElementInfo;
         setSelectedElement(info);
         onElementSelected?.(info);
+        inspectorActiveRef.current = false;
         setInspectorActive(false);
-        iframeRef.current?.contentWindow?.postMessage(
-          { type: "INSPECTOR_ACTIVATE", active: false },
-          "*",
-        );
+        postInspectorState(false);
       }
     }
+
     window.addEventListener("message", handleMessage);
     return () => window.removeEventListener("message", handleMessage);
-  }, [onElementSelected]);
+  }, [onElementSelected, postInspectorState]);
 
   const toggleInspector = useCallback(() => {
-    const next = !inspectorActive;
-    setInspectorActive(next);
-    if (next) setSelectedElement(null);
-    iframeRef.current?.contentWindow?.postMessage(
-      { type: "INSPECTOR_ACTIVATE", active: next },
-      "*",
-    );
-  }, [inspectorActive]);
+    setInspector(!inspectorActiveRef.current);
+  }, [setInspector]);
+
+  const handleFrameLoad = useCallback(() => {
+    postInspectorState(inspectorActiveRef.current);
+  }, [postInspectorState]);
 
   const handleRefresh = useCallback(() => {
     if (iframeRef.current && url) {
@@ -95,13 +113,8 @@ export function LivePreview({
 
   useEffect(() => {
     if (inspectRequest <= 0 || !url) return;
-    setSelectedElement(null);
-    setInspectorActive(true);
-    iframeRef.current?.contentWindow?.postMessage(
-      { type: "INSPECTOR_ACTIVATE", active: true },
-      "*",
-    );
-  }, [inspectRequest, url]);
+    setInspector(true);
+  }, [inspectRequest, url, setInspector]);
 
   const toggleFullscreen = async () => {
     if (!isFullscreen && containerRef.current) {
@@ -149,6 +162,7 @@ export function LivePreview({
           className="block h-full w-full border-0 bg-white"
           sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-storage-access-by-user-activation"
           loading="eager"
+          onLoad={handleFrameLoad}
         />
       </div>
     );
@@ -224,6 +238,7 @@ export function LivePreview({
           style={{ width: device.width, maxWidth: "100%" }}
           sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-storage-access-by-user-activation"
           loading="eager"
+          onLoad={handleFrameLoad}
         />
       </div>
     </div>
