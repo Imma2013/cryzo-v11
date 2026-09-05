@@ -112,7 +112,10 @@ export async function GET(request: Request) {
       const id = textValue(record, ["id", "ig_id", "user_id"]);
       return Boolean(id && /^\d+$/.test(id));
     });
-    const id = targetRecord && textValue(targetRecord, ["id", "ig_id", "user_id"]);
+    if (!targetRecord) {
+      throw new Error("Instagram did not return a Business or Creator account ID.");
+    }
+    const id = textValue(targetRecord, ["id", "ig_id", "user_id"]);
     if (!id) {
       throw new Error("Instagram did not return a Business or Creator account ID.");
     }
