@@ -280,6 +280,40 @@ async function validateViteConfig(
   }
 }
 
+async function replaceInvalidViteConfig(
+  sandbox: Sandbox,
+  relativePath: string,
+) {
+  const token = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const backupPath = `${PROJECT_DIR}/${RUNTIME_DIR}/rejected-vite-config-${token}-${path.posix.basename(relativePath)}`;
+  const original = await sandbox.readFileToBuffer({
+    path: `${PROJECT_DIR}/${relativePath}`,
+  });
+
+  await sandbox.runCommand("mkdir", ["-p", `${PROJECT_DIR}/${RUNTIME_DIR}`]);
+  if (original) {
+    await sandbox.writeFiles([
+      {
+        path: backupPath,
+        content: original,
+      },
+    ]);
+  }
+
+  const extension = path.posix.extname(relativePath).toLowerCase();
+  const fallback = extension === ".cjs" || extension === ".cts"
+    ? "module.exports = {};\\n"
+    : "export default {};\\n";
+  await sandbox.writeFiles([
+    {
+      path: `${PROJECT_DIR}/${relativePath}`,
+      content: Buffer.from(fallback, "utf8"),
+    },
+  ]);
+
+  return backupPath;
+}
+
 async function writeRuntimeViteConfig(
   sandbox: Sandbox,
   userConfigPath: string | null,
@@ -464,8 +498,8 @@ async function startPreview(sandbox: Sandbox, forceRestart = false) {
   if (userConfigPath) {
     const validation = await validateViteConfig(sandbox, userConfigPath);
     if (!validation.valid) {
-      output += `Ignored invalid ${userConfigPath} before preview startup: ${validation.error || "syntax error"}\n`;
-      userConfigPath = null;
+      const backupPath = await replaceInvalidViteConfig(sandbox, userConfigPath);
+      output += `Replaced invalid ${userConfigPath} with a safe fallback before preview startup. Original saved at ${backupPath}: ${validation.error || "syntax error"}\\n`;
     } else if (validation.skipped) {
       output += `Could not run the Vite config preflight because esbuild is unavailable; using the generated config as-is.\n`;
     }
