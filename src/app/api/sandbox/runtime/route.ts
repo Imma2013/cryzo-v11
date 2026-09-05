@@ -239,9 +239,52 @@ async function findUserViteConfig(sandbox: Sandbox) {
   return null;
 }
 
-async function writeRuntimeViteConfig(sandbox: Sandbox) {
+async function validateViteConfig(
+  sandbox: Sandbox,
+  relativePath: string,
+) {
+  const toolCheck = await runTextCommand(
+    sandbox,
+    "test -x ./node_modules/.bin/esbuild",
+    { allowFailure: true },
+  );
+  if (toolCheck.exitCode !== 0) {
+    return {
+      valid: true,
+      skipped: true,
+      error: null as string | null,
+    };
+  }
+
+  const token = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const outputRelative = `${RUNTIME_DIR}/vite-config-check-${token}.js`;
+  try {
+    const result = await sandbox.runCommand({
+      cmd: "./node_modules/.bin/esbuild",
+      args: [relativePath, `--outfile=${outputRelative}`, "--log-level=error"],
+      cwd: PROJECT_DIR,
+    });
+    const stdout = await result.stdout();
+    const stderr = await result.stderr();
+    return {
+      valid: result.exitCode === 0,
+      skipped: false,
+      error: result.exitCode === 0
+        ? null
+        : (stderr || stdout || "Vite config contains invalid syntax").slice(-8000),
+    };
+  } finally {
+    await runTextCommand(sandbox, `rm -f ${outputRelative}`, {
+      allowFailure: true,
+    });
+  }
+}
+
+async function writeRuntimeViteConfig(
+  sandbox: Sandbox,
+  userConfigPath: string | null,
+) {
   const publicHost = previewHostFor(sandbox);
-  const userConfigPath = await findUserViteConfig(sandbox);
   const importLine = userConfigPath
     ? `import userConfigExport from ${JSON.stringify(`../${userConfigPath}`)};`
     : "const userConfigExport = {};";
@@ -388,8 +431,11 @@ pkill -f '[v]ite.*${PREVIEW_PORT}' 2>/dev/null || true
   }
 }
 
-async function launchPreview(sandbox: Sandbox) {
-  const runtimeConfig = await writeRuntimeViteConfig(sandbox);
+async function launchPreview(
+  sandbox: Sandbox,
+  userConfigPath: string | null,
+) {
+  const runtimeConfig = await writeRuntimeViteConfig(sandbox, userConfigPath);
   const command = `
 rm -f ${PREVIEW_LOG_FILE} ${PREVIEW_PID_FILE}
 nohup ./node_modules/.bin/vite --config ${RUNTIME_CONFIG_FILE} > ${PREVIEW_LOG_FILE} 2>&1 &
@@ -414,8 +460,19 @@ async function startPreview(sandbox: Sandbox, forceRestart = false) {
     }
   }
 
+  let userConfigPath = await findUserViteConfig(sandbox);
+  if (userConfigPath) {
+    const validation = await validateViteConfig(sandbox, userConfigPath);
+    if (!validation.valid) {
+      output += `Ignored invalid ${userConfigPath} before preview startup: ${validation.error || "syntax error"}\n`;
+      userConfigPath = null;
+    } else if (validation.skipped) {
+      output += `Could not run the Vite config preflight because esbuild is unavailable; using the generated config as-is.\n`;
+    }
+  }
+
   await stopPreview(sandbox);
-  const runtimeConfig = await launchPreview(sandbox);
+  const runtimeConfig = await launchPreview(sandbox, userConfigPath);
   output += `Cryzo runtime config: ${runtimeConfig.userConfigPath || "no user vite.config found"} + ${runtimeConfig.publicHost}\n`;
 
   let listening = false;
