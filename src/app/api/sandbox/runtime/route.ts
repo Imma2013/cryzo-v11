@@ -206,7 +206,7 @@ async function ensureDependencies(sandbox: Sandbox) {
 async function ensureReactRuntime(sandbox: Sandbox) {
   const usesReact = await runTextCommand(
     sandbox,
-    `grep -R -E -q 'from ["'"']react([/"'"']|$)|from ["'"']react-dom|react/jsx-(dev-)?runtime' src App.tsx 2>/dev/null`,
+    `grep -R -E -q 'react|jsx' src App.tsx 2>/dev/null`,
     { allowFailure: true },
   );
   if (usesReact.exitCode !== 0) return "";
@@ -294,8 +294,8 @@ async function findUserViteConfig(sandbox: Sandbox) {
 async function findPreviewEntry(sandbox: Sandbox) {
   for (const candidate of PREVIEW_ENTRY_CANDIDATES) {
     const result = await runTextCommand(sandbox, `test -f ${candidate}`, {
-      allowFailure: true,
-    });
+      allowFailure: true },
+    );
     if (result.exitCode === 0) return candidate;
   }
   return null;
@@ -337,8 +337,8 @@ async function validateViteConfig(
     };
   } finally {
     await runTextCommand(sandbox, `rm -f ${outputRelative}`, {
-      allowFailure: true,
-    });
+      allowFailure: true },
+    );
   }
 }
 
@@ -385,7 +385,8 @@ async function writeRuntimeViteConfig(
     ? `import userConfigExport from ${JSON.stringify(`../${userConfigPath}`)};`
     : "const userConfigExport = {};";
 
-  const source = `import { defineConfig, mergeConfig } from "vite";\n${importLine}\n\nconst cryzoRuntimeConfig = {\n  server: {\n    host: "0.0.0.0",\n    port: ${PREVIEW_PORT},\n    strictPort: true,\n    allowedHosts: [${JSON.stringify(publicHost)}],\n  },\n};\n\nexport default defineConfig(async (env) => {\n  const candidate = typeof userConfigExport === "function"\n    ? await userConfigExport(env)\n    : await userConfigExport;\n  return mergeConfig(candidate || {}, cryzoRuntimeConfig);\n});\n`;
+  const source = `import { defineConfig, mergeConfig } from "vite";\n${importLine}\n\nconst cryzoRuntimeConfig = {\n  server: {\n    host: "0.0.0.0",\n    port: ${PREVIEW_PORT},\n    strictPort: true,\n    allowedHosts: [${JSON.stringify(publicHost)}],\n  },\n};\n\nexport default defineConfig(async (env) => {\n  const candidate = typeof userConfigExport === "function"\n    ? await userConfigExport(env)\n    : await userConfigExport;
+  return mergeConfig(candidate || {}, cryzoRuntimeConfig);\n});\n`;
 
   await sandbox.runCommand("mkdir", ["-p", `${PROJECT_DIR}/${RUNTIME_DIR}`]);
   await sandbox.writeFiles([
