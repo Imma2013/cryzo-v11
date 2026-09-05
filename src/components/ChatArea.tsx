@@ -109,6 +109,7 @@ export function ChatArea({
       if (part.type !== "data-generation") return;
       const data = part.data as { status?: string; actualModelName?: string; fallbackUsed?: boolean };
       if (data.status === "retrying") setGenerationStatus("Retrying the same model...");
+      else if (data.status === "continuing") setGenerationStatus("Continuing the build...");
       else setGenerationStatus("Working...");
     },
     onFinish: ({ message, isAbort, isError }) => {
@@ -231,7 +232,9 @@ export function ChatArea({
 
   // Feed the currently-generated assistant message directly into the browser
   // runtime. This intentionally bypasses the Convex persistence round-trip for
-  // live preview; Convex still stores the completed artifact below.
+  // live preview; Convex still stores the completed artifact below. A continued
+  // generation can arrive as more than one AI SDK text part, so treat all text
+  // parts in the assistant message as one cumulative build stream.
   useEffect(() => {
     const latestAssistant = [...messages]
       .reverse()
@@ -245,19 +248,14 @@ export function ChatArea({
 
     if (!liveMessageIdsRef.current.has(latestAssistant.id)) return;
 
-    let hasStreamingArtifact = false;
-    for (const part of latestAssistant.parts ?? []) {
-      if (part.type !== "text") continue;
-      if (
-        processStreamingArtifactText(
+    const streamedText = textFromMessage(latestAssistant);
+    const hasStreamingArtifact = streamedText
+      ? processStreamingArtifactText(
           String(conversationId),
           latestAssistant.id,
-          part.text,
+          streamedText,
         )
-      ) {
-        hasStreamingArtifact = true;
-      }
-    }
+      : false;
 
     if (
       hasStreamingArtifact &&
