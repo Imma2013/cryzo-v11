@@ -11,6 +11,7 @@ export default defineSchema({
     image: v.optional(v.string()),
     emailVerificationTime: v.optional(v.number()),
     isAnonymous: v.optional(v.boolean()),
+    isAdmin: v.optional(v.boolean()),
     firebaseUid: v.optional(v.string()),
     createdAt: v.optional(v.number()),
   }).index("email", ["email"]),
