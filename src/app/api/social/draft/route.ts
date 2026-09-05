@@ -1,6 +1,7 @@
 import { generateText } from "ai";
 import { fetchQuery } from "convex/nextjs";
-import { api } from "../../../../../convex/_generated/api";\nimport type { Id } from "../../../../../convex/_generated/dataModel";
+import { api } from "../../../../../convex/_generated/api";
+import type { Id } from "../../../../../convex/_generated/dataModel";
 import { resolveServerModel } from "@/lib/server/model-provider";
 import { transientProviderFailure } from "@/lib/ai/request-intent";
 
