@@ -30,7 +30,17 @@ vi.mock("convex/browser", () => ({
 }));
 vi.mock("@/lib/server/model-provider", () => ({
   resolveServerModel: async (args: { modelId: string }) => ({
-    model: args.modelId, modelId: args.modelId, providerId: "cryzo", supportsTools: true, minimumPlan: "starter", billingTier: "premium",
+    model: args.modelId,
+    modelId: args.modelId,
+    providerId: "cryzo",
+    supportsTools: true,
+    supportsVision: true,
+    minimumPlan: "starter",
+    billingTier: "premium",
+    maxOutputTokens: 8192,
+    contextWindow: 1000000,
+    capabilitySource: "managed",
+    upstreamModelId: args.modelId,
   }),
 }));
 vi.mock("@/lib/server/openrouter", () => ({
@@ -47,8 +57,8 @@ vi.mock("ai", async importOriginal => {
       const response = mock.responses.shift() ?? { error: "503 unavailable" };
       return {
         finishReason: Promise.resolve(response.finish ?? "stop"),
-        totalUsage: Promise.resolve({ inputTokens: 10, outputTokens: 10 }),
-        steps: Promise.resolve([{ response: { id: "gen-test" }, providerMetadata: { openrouter: { usage: { cost: 0.001 }, provider: "test" } } }]),
+        totalUsage: Promise.resolve({ inputTokens: 10, outputTokens: 10, totalTokens: 20 }),
+        steps: Promise.resolve([{ response: { id: `gen-test-${mock.usedModels.length}` }, providerMetadata: { openrouter: { usage: { cost: 0.001 }, provider: "test" } } }]),
         toUIMessageStream: () => new ReadableStream({
           start(controller) {
             if (response.reasoning) {
@@ -73,18 +83,38 @@ vi.mock("ai", async importOriginal => {
 beforeEach(() => {
   vi.stubEnv("NEXT_PUBLIC_CONVEX_URL", "https://test.convex.cloud");
   vi.stubEnv("CRYZO_INTERNAL_API_SECRET", "test");
-  mock.responses.length = 0; mock.settlements.length = 0; mock.usedModels.length = 0; mock.duplicate = false; mock.cloudInitializations = 0;
+  mock.responses.length = 0;
+  mock.settlements.length = 0;
+  mock.usedModels.length = 0;
+  mock.duplicate = false;
+  mock.cloudInitializations = 0;
 });
 afterEach(() => vi.unstubAllEnvs());
-async function call(signal?: AbortSignal) {
+
+async function request(chatMode: "plan" | "build", signal?: AbortSignal) {
   const { POST } = await import("../src/app/api/chat/route");
   return POST(new Request("http://localhost/api/chat", {
-    method: "POST", signal, body: JSON.stringify({
-      authToken: "test", conversationId: "project", modelProvider: "cryzo", modelId: "requested", chatMode: "plan",
+    method: "POST",
+    signal,
+    body: JSON.stringify({
+      authToken: "test",
+      conversationId: "project",
+      modelProvider: "cryzo",
+      modelId: "requested",
+      chatMode,
       messages: [{ id: "message", role: "user", parts: [{ type: "text", text: "Make a website for dogs" }] }],
     }),
   }));
 }
+
+async function call(signal?: AbortSignal) {
+  return request("plan", signal);
+}
+
+async function build(signal?: AbortSignal) {
+  return request("build", signal);
+}
+
 async function hello() {
   const { POST } = await import("../src/app/api/chat/route");
   return POST(new Request("http://localhost/api/chat", { method: "POST", body: JSON.stringify({
@@ -92,12 +122,14 @@ async function hello() {
     messages: [{ id: "hello", role: "user", parts: [{ type: "text", text: "hello" }] }],
   }) }));
 }
+
 describe("chat stream lifecycle", () => {
   it("answers a greeting without initializing a build", async () => {
     mock.responses.push({ text: "Hello! How can I help?" });
     expect(await (await hello()).text()).toContain("Hello!");
     expect(mock.cloudInitializations).toBe(0);
   });
+
   it("streams text and charges only the reported successful cost", async () => {
     mock.responses.push({ text: "Hello" });
     const body = await (await call()).text();
@@ -105,11 +137,13 @@ describe("chat stream lifecycle", () => {
     expect(body).toContain('"status":"completed"');
     expect(mock.settlements).toMatchObject([{ success: true, costMicros: 1000 }]);
   });
+
   it("accepts reasoning-first output when visible text follows", async () => {
     mock.responses.push({ reasoning: true, text: "The answer" });
     expect(await (await call()).text()).toContain("The answer");
     expect(mock.settlements[0].success).toBe(true);
   });
+
   it("retries once on the same model and never falls back", async () => {
     mock.responses.push({ error: "429 rate limited" }, { error: "503 unavailable" }, { text: "Fallback answer" });
     const body = await (await call()).text();
@@ -117,6 +151,7 @@ describe("chat stream lifecycle", () => {
     expect(body).toContain('"type":"error"');
     expect(body).not.toContain('"fallbackUsed":true');
   });
+
   it("never finishes an empty answer as success or charges for it", async () => {
     mock.responses.push({}, {}, {});
     const body = await (await call()).text();
@@ -124,18 +159,42 @@ describe("chat stream lifecycle", () => {
     expect(body).not.toContain('"status":"completed"');
     expect(mock.settlements).toMatchObject([{ success: false, costMicros: 0 }]);
   });
-  it("does not retry a truncated partial answer or charge it", async () => {
+
+  it("does not auto-continue a truncated plan response", async () => {
     mock.responses.push({ text: "Incomplete", finish: "length" });
     expect(await (await call()).text()).toContain('"type":"error"');
     expect(mock.usedModels).toHaveLength(1);
     expect(mock.settlements[0].success).toBe(false);
   });
+
+  it("automatically continues a truncated website build and preserves checkpoints", async () => {
+    mock.responses.push(
+      {
+        text: '<cryzoArtifact id="site" title="Dog site"><cryzoAction type="file" filePath="package.json">{"scripts":{"dev":"vite"}}</cryzoAction><cryzoAction type="file" filePath="src/App.tsx">partial',
+        finish: "length",
+      },
+      {
+        text: '<cryzoArtifact id="site-cont" title="Dog site continuation"><cryzoAction type="file" filePath="src/App.tsx">export default function App(){return <main>Dogs</main>}</cryzoAction><cryzoAction type="start">npm run dev</cryzoAction></cryzoArtifact>',
+        finish: "stop",
+      },
+    );
+    const body = await (await build()).text();
+    expect(mock.usedModels).toEqual(["requested", "requested"]);
+    expect(body).toContain('"status":"continuing"');
+    expect(body).toContain('"status":"completed"');
+    expect(body).not.toContain('"type":"error"');
+    expect(mock.settlements).toMatchObject([{ success: true, costMicros: 2000 }]);
+    expect(mock.cloudInitializations).toBe(1);
+  });
+
   it("releases reservations when cancelled", async () => {
-    const abort = new AbortController(); abort.abort();
+    const abort = new AbortController();
+    abort.abort();
     expect(await (await call(abort.signal)).text()).toContain('"type":"error"');
     expect(mock.usedModels).toHaveLength(0);
     expect(mock.settlements[0].success).toBe(false);
   });
+
   it("rejects a completed duplicate before contacting a model", async () => {
     mock.duplicate = true;
     expect((await call()).status).toBe(409);
