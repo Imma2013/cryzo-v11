@@ -249,7 +249,19 @@ export const publishDelivery = internalAction({
       const id = toolkit === "linkedin"
         ? linkedinIdentifier(result)
         : identifier(result.data);
-      if (!id) throw new Error("The platform returned no post ID. Review the network before retrying.");
+      if (!id) {
+        if (toolkit === "linkedin" && result.successful !== false && !result.error) {
+          // LinkedIn can complete the publish while Composio omits x-restli-id.
+          // Keep the delivery published; the provider log remains the audit reference.
+          await ctx.runMutation(internal.social.markDeliveryPublished, {
+            deliveryId: args.deliveryId,
+            toolSlug: toolSlug!,
+            providerLogId: result.logId,
+          });
+          return null;
+        }
+        throw new Error("The platform returned no post ID. Review the network before retrying.");
+      }
       await ctx.runMutation(internal.social.markDeliveryPublished, { deliveryId: args.deliveryId, toolSlug: toolSlug!, providerLogId: result.logId, remotePostId: id });
     } catch (error) {
       await ctx.runMutation(internal.social.markDeliveryFailed, { deliveryId: args.deliveryId,
