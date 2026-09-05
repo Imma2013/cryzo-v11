@@ -367,10 +367,6 @@ export default function ProjectMarketing() {
 
   const generateDraft = async () => {
     if (!aiPrompt.trim() || !authToken || aiLoading) return;
-    if (!activeProjectId) {
-      setAiError("Create or choose a project to give the marketing agent brand context.");
-      return;
-    }
     setAiLoading(true);
     setAiError(null);
     try {
