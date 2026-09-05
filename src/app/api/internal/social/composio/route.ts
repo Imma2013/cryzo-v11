@@ -151,7 +151,7 @@ export async function POST(request: Request) {
       composioSocialSessionOptions(body.toolkit, body.connectedAccountId),
     );
     const result = await session.execute(body.toolSlug, body.arguments);
-    return Response.json({ result });
+    return Response.json({ result: normalizeComposioResult(result) });
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Composio execution failed.";
