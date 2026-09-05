@@ -25,7 +25,13 @@ type UploadRequest = {
   file: string;
 };
 
-type GatewayRequest = ExecuteRequest | UploadRequest;
+type SchemaRequest = {
+  operation: "schema";
+  toolkit: SocialToolkit;
+  toolSlug: string;
+};
+
+type GatewayRequest = ExecuteRequest | UploadRequest | SchemaRequest;
 
 let composio: Composio | null = null;
 
@@ -33,6 +39,12 @@ function getComposio() {
   const apiKey = process.env.COMPOSIO_API_KEY?.trim();
   if (!apiKey) throw new Error("Composio is not configured in the Vercel runtime. Set COMPOSIO_API_KEY for the Vercel Production environment.");
   return (composio ??= new Composio({ apiKey }));
+}
+
+function composioApiKey() {
+  const apiKey = process.env.COMPOSIO_API_KEY?.trim();
+  if (!apiKey) throw new Error("Composio is not configured in the Vercel runtime. Set COMPOSIO_API_KEY for the Vercel Production environment.");
+  return apiKey;
 }
 
 function normalizeComposioResult(value: unknown): unknown {
@@ -92,6 +104,28 @@ function publicErrorMessage(message: string) {
   return message;
 }
 
+async function fetchToolSchema(toolSlug: string) {
+  const response = await fetch(
+    `https://backend.composio.dev/api/v3.1/tools/${encodeURIComponent(toolSlug)}?toolkit_versions=latest`,
+    {
+      cache: "no-store",
+      headers: {
+        "x-api-key": composioApiKey(),
+      },
+      signal: AbortSignal.timeout(20_000),
+    },
+  );
+  const payload = await response.json().catch(() => null);
+  if (!response.ok) {
+    const message =
+      payload && typeof payload === "object" && "message" in payload
+        ? String((payload as { message?: unknown }).message || "")
+        : "";
+    throw new Error(message || `Unable to load Composio tool schema (${response.status}).`);
+  }
+  return payload;
+}
+
 export async function POST(request: Request) {
   if (!authorized(request)) {
     return Response.json({ error: "Unauthorized." }, { status: 401 });
@@ -115,6 +149,10 @@ export async function POST(request: Request) {
   }
 
   try {
+    if (body.operation === "schema") {
+      return Response.json({ result: await fetchToolSchema(body.toolSlug) });
+    }
+
     if (body.operation === "upload") {
       if (
         typeof body.file !== "string" ||
