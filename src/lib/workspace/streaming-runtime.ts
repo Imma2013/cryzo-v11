@@ -21,7 +21,6 @@ type Listener = (snapshot: StreamingRuntimeSnapshot) => void;
 type RuntimeState = StreamingRuntimeSnapshot & {
   listeners: Set<Listener>;
   processedActionsByMessage: Map<string, number>;
-  pendingActionsByMessage: Map<string, ArtifactAction[]>;
   queue: Promise<void>;
   initialized: boolean;
 };
@@ -30,7 +29,6 @@ const runtimes = new Map<string, RuntimeState>();
 let sandboxAuthToken: string | null = null;
 
 export function setStreamingRuntimeAuthToken(token: string | null) {
-  if (!token && sandboxAuthToken) runtimes.clear();
   sandboxAuthToken = token;
 }
 
@@ -52,7 +50,6 @@ function createState(): RuntimeState {
     error: null,
     listeners: new Set(),
     processedActionsByMessage: new Map(),
-    pendingActionsByMessage: new Map(),
     queue: Promise.resolve(),
     initialized: false,
   };
@@ -139,7 +136,7 @@ function parseActionAttributes(raw: string) {
   return { type, filePath, operation };
 }
 
-export function getCompletedStreamingActions(text: string): ArtifactAction[] {
+function parseCompletedActions(text: string): ArtifactAction[] {
   if (!text.includes("<cryzoArtifact")) return [];
 
   const actions: ArtifactAction[] = [];
@@ -173,64 +170,30 @@ type GuardResponse = {
   error?: string;
 };
 
-async function authenticatedPost<T>(
-  url: string,
-  body: Record<string, unknown>,
-  timeoutMs = 90_000,
-): Promise<T> {
-  let lastError: Error | null = null;
+async function authenticatedPost<T>(url: string, body: Record<string, unknown>): Promise<T> {
+  const authToken = await waitForSandboxAuthToken();
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${authToken}`,
+    },
+    body: JSON.stringify(body),
+  });
 
-  for (let attempt = 0; attempt < 2; attempt++) {
-    const authToken = await waitForSandboxAuthToken();
-    const controller = new AbortController();
-    const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
-
-    try {
-      const response = await fetch(url, {
-        method: "POST",
-        signal: controller.signal,
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${authToken}`,
-        },
-        body: JSON.stringify(body),
-      });
-
-      const data = (await response.json()) as T & { error?: string };
-      if (response.ok) return data;
-
-      if (response.status === 401 && attempt === 0) {
-        await new Promise((resolve) => window.setTimeout(resolve, 500));
-        continue;
-      }
-
-      throw new Error(
-        response.status === 401
-          ? "Your Cryzo session expired. Refresh the page to reconnect the preview."
-          : data.error || `Request failed with ${response.status}`,
-      );
-    } catch (error) {
-      if (error instanceof DOMException && error.name === "AbortError") {
-        throw new Error(
-          "The build service took too long to respond. Completed files were preserved; retry the preview to continue.",
-        );
-      }
-      lastError = error instanceof Error ? error : new Error(String(error));
-      if (attempt === 1) throw lastError;
-    } finally {
-      window.clearTimeout(timeout);
-    }
+  const data = (await response.json()) as T & { error?: string };
+  if (!response.ok) {
+    throw new Error(data.error || `Request failed with ${response.status}`);
   }
-
-  throw lastError || new Error("Unable to reach the Cryzo build service.");
+  return data;
 }
 
 async function callSandbox(body: Record<string, unknown>): Promise<SandboxResponse> {
-  return await authenticatedPost<SandboxResponse>("/api/sandbox/runtime", body, 210_000);
+  return await authenticatedPost<SandboxResponse>("/api/sandbox/runtime", body);
 }
 
 async function callGuard(body: Record<string, unknown>): Promise<GuardResponse> {
-  return await authenticatedPost<GuardResponse>("/api/sandbox/validate", body, 60_000);
+  return await authenticatedPost<GuardResponse>("/api/sandbox/validate", body);
 }
 
 function applyResponse(state: RuntimeState, response: SandboxResponse) {
@@ -350,42 +313,6 @@ async function executeRemoteAction(
   }
 }
 
-async function executeRemoteActions(
-  conversationId: string,
-  state: RuntimeState,
-  actions: ArtifactAction[],
-) {
-  const fileActions = actions.filter((action) => action.type === "file");
-  const remainingActions = actions.filter((action) => action.type !== "file");
-
-  if (fileActions.length > 0) {
-    state.progress = state.previewUrl ? "ready" : "writing";
-    appendOutput(state, `Writing ${fileActions.length} completed files...\n`);
-    emit(state);
-
-    const validation = await callGuard({
-      operation: "actions",
-      conversationId,
-      actions: fileActions,
-    });
-    const safeFiles = validation.actions || fileActions;
-    if (validation.output) appendOutput(state, validation.output);
-    for (const action of safeFiles) updateFileMap(state, action);
-    emit(state);
-
-    const response = await callSandbox({
-      operation: "actions",
-      conversationId,
-      actions: safeFiles,
-    });
-    applyResponse(state, response);
-  }
-
-  for (const action of remainingActions) {
-    await executeRemoteAction(conversationId, state, action);
-  }
-}
-
 export async function saveStreamingRuntimeFile(
   conversationId: string,
   filePath: string,
@@ -409,7 +336,7 @@ export async function saveStreamingRuntimeFile(
     throw new Error(`File validation returned no writable action for ${filePath}`);
   }
 
-  const safeAction = validation.action as ArtifactAction & { filePath: string };
+  const safeAction = validation.action;
   if (validation.output) appendOutput(state, validation.output);
   updateFileMap(state, safeAction);
   state.progress = state.previewUrl ? "ready" : "writing";
@@ -464,83 +391,20 @@ export function processStreamingArtifactText(
     emit(state);
   }
 
-  const actions = getCompletedStreamingActions(text);
+  const actions = parseCompletedActions(text);
   const processed = state.processedActionsByMessage.get(messageId) ?? 0;
   if (actions.length <= processed) return true;
 
   const newActions = actions.slice(processed);
   state.processedActionsByMessage.set(messageId, actions.length);
-  const pending = state.pendingActionsByMessage.get(messageId) || [];
-  state.pendingActionsByMessage.set(messageId, [...pending, ...newActions]);
 
-  for (const action of newActions) updateFileMap(state, action);
-  appendOutput(
-    state,
-    `Prepared ${newActions.length} action${newActions.length === 1 ? "" : "s"} from the model stream.\n`,
-  );
-  emit(state);
+  for (const action of newActions) {
+    state.queue = state.queue
+      .then(() => executeRemoteAction(conversationId, state, action))
+      .catch((error) => setError(state, error));
+  }
+
   return true;
-}
-
-export function finishStreamingArtifactStream(
-  conversationId: string,
-  messageId: string,
-  failure?: string,
-) {
-  const state = getState(conversationId);
-  const pending = state.pendingActionsByMessage.get(messageId) || [];
-  if (!state.processedActionsByMessage.has(messageId) && pending.length === 0) return;
-  state.pendingActionsByMessage.delete(messageId);
-
-  state.queue = state.queue
-    .then(async () => {
-      if (pending.length > 0) {
-        await executeRemoteActions(conversationId, state, pending);
-      }
-
-      // A model can emit a complete file set without an explicit npm install
-      // action. Validate the assembled project before declaring the build
-      // incomplete; the guard repairs missing entry files such as App.tsx.
-      if (!state.previewUrl && pending.some((action) => action.type === "file")) {
-        const validation = await callGuard({
-          operation: "project",
-          conversationId,
-        });
-        if (validation.output) appendOutput(state, validation.output);
-        if (applyRepairedFiles(state, validation.repairedFiles)) emit(state);
-        if (validation.repairedFiles?.length) {
-          const install = await callSandbox({
-            operation: "action",
-            conversationId,
-            action: { type: "shell", content: "npm install" },
-          });
-          applyResponse(state, install);
-        }
-      }
-
-      if (!state.previewUrl) {
-        const restarted = await callSandbox({
-          operation: "restart",
-          conversationId,
-        });
-        applyResponse(state, restarted);
-      }
-
-      if (state.previewUrl) {
-        state.active = true;
-        state.progress = "ready";
-        state.error = null;
-        emit(state);
-        return;
-      }
-
-      setError(
-        state,
-        failure ||
-          "Generation ended before the preview started. Completed files were preserved. Continue the build to finish the remaining files.",
-      );
-    })
-    .catch((error) => setError(state, error));
 }
 
 export async function prebootStreamingRuntime(conversationId: string) {

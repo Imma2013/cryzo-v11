@@ -4,7 +4,6 @@ import { fetchQuery } from "convex/nextjs";
 import { api } from "../../../../../convex/_generated/api";
 import type { Id } from "../../../../../convex/_generated/dataModel";
 import type { ArtifactAction } from "@/lib/workspace/types";
-import * as ts from "typescript";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -125,35 +124,6 @@ async function hasEsbuild(sandbox: Sandbox) {
   return result.exitCode === 0;
 }
 
-function formatTypeScriptDiagnostic(diagnostic: ts.Diagnostic) {
-  const message = ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n");
-  if (!diagnostic.file || diagnostic.start == null) return message;
-  const position = diagnostic.file.getLineAndCharacterOfPosition(diagnostic.start);
-  return `${diagnostic.file.fileName}:${position.line + 1}:${position.character + 1} ${message}`;
-}
-
-function validateWithTypeScript(relativePath: string, content: string) {
-  try {
-    const result = ts.transpileModule(content, {
-      fileName: relativePath,
-      compilerOptions: {
-        allowJs: true,
-        jsx: ts.JsxEmit.ReactJSX,
-        module: ts.ModuleKind.ESNext,
-        target: ts.ScriptTarget.ES2022,
-      },
-      reportDiagnostics: true,
-    });
-    const diagnostics = (result.diagnostics || []).filter(
-      (diagnostic) => diagnostic.category === ts.DiagnosticCategory.Error,
-    );
-    if (diagnostics.length === 0) return null;
-    return diagnostics.slice(0, 8).map(formatTypeScriptDiagnostic).join("\n");
-  } catch (error) {
-    return error instanceof Error ? error.message : String(error);
-  }
-}
-
 async function validateSourceSyntax(
   sandbox: Sandbox,
   relativePath: string,
@@ -161,9 +131,6 @@ async function validateSourceSyntax(
 ) {
   const extension = path.posix.extname(relativePath).toLowerCase();
   if (!SOURCE_EXTENSIONS.has(extension)) return null;
-
-  const parserError = validateWithTypeScript(relativePath, content);
-  if (parserError) return `Invalid syntax in ${relativePath}: ${parserError}`;
   if (!(await hasEsbuild(sandbox))) return null;
 
   const token = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -318,7 +285,7 @@ async function validateAndRepairAction(sandbox: Sandbox, action: ArtifactAction)
 async function validateStoredProject(sandbox: Sandbox) {
   const listing = await runTextCommand(
     sandbox,
-    "find . -path './node_modules' -prune -o -path './.cryzo' -prune -o -type f \\( -name '*.js' -o -name '*.jsx' -o -name '*.ts' -o -name '*.tsx' -o -name '*.mjs' -o -name '*.mts' -o -name '*.cjs' -o -name '*.cts' -o -name '*.json' \\) -print 2>/dev/null | sed 's#^\\./##' | head -n 151",
+    "find src -type f 2>/dev/null | head -n 151",
     { allowFailure: true },
   );
   const paths = listing.output

@@ -28,16 +28,6 @@ const VITE_CONFIG_CANDIDATES = [
   "vite.config.cts",
   "vite.config.cjs",
 ] as const;
-const PREVIEW_ENTRY_CANDIDATES = [
-  "src/main.tsx",
-  "src/main.jsx",
-  "src/main.ts",
-  "src/main.js",
-  "src/web.tsx",
-  "src/web.jsx",
-  "src/web.ts",
-  "src/web.js",
-] as const;
 
 function sandboxNameFor(conversationId: string) {
   const safe = conversationId.toLowerCase().replace(/[^a-z0-9-]/g, "-").slice(0, 48);
@@ -143,37 +133,6 @@ async function writeFile(sandbox: Sandbox, action: ArtifactAction) {
   ]);
 }
 
-async function writeProjectFiles(sandbox: Sandbox, actions: ArtifactAction[]) {
-  const latestByPath = new Map<string, { path: string; content: Buffer }>();
-
-  for (const action of actions) {
-    if (!action.filePath) throw new Error("File action is missing filePath");
-    if (Buffer.byteLength(action.content, "utf8") > MAX_FILE_BYTES) {
-      throw new Error(`Generated file is too large: ${action.filePath}`);
-    }
-    const relative = safeRelativePath(action.filePath);
-    latestByPath.set(relative, {
-      path: `${PROJECT_DIR}/${relative}`,
-      content: Buffer.from(action.content, "utf8"),
-    });
-  }
-
-  const directories = Array.from(
-    new Set(
-      Array.from(latestByPath.keys())
-        .map((relative) => path.posix.dirname(relative))
-        .filter((directory) => directory !== ".")
-        .map((directory) => `${PROJECT_DIR}/${directory}`),
-    ),
-  );
-  if (directories.length > 0) {
-    await sandbox.runCommand("mkdir", ["-p", ...directories]);
-  }
-  if (latestByPath.size > 0) {
-    await sandbox.writeFiles(Array.from(latestByPath.values()));
-  }
-}
-
 async function runInstall(sandbox: Sandbox) {
   const result = await sandbox.runCommand({
     cmd: "npm",
@@ -191,53 +150,11 @@ async function runInstall(sandbox: Sandbox) {
 }
 
 async function ensureDependencies(sandbox: Sandbox) {
-  // npm writes node_modules/.package-lock.json after a successful install. If a
-  // generated package.json is newer than that marker, the persistent sandbox is
-  // carrying dependencies from an older model checkpoint and must be refreshed.
-  const check = await runTextCommand(
-    sandbox,
-    "test -d node_modules && test -f node_modules/.package-lock.json && test ! package.json -nt node_modules/.package-lock.json",
-    { allowFailure: true },
-  );
+  const check = await runTextCommand(sandbox, "test -d node_modules", {
+    allowFailure: true,
+  });
   if (check.exitCode !== 0) return await runInstall(sandbox);
   return "";
-}
-
-async function ensureReactRuntime(sandbox: Sandbox) {
-  const usesReact = await runTextCommand(
-    sandbox,
-    `grep -R -E -q 'react|jsx' src App.tsx 2>/dev/null`,
-    { allowFailure: true },
-  );
-  if (usesReact.exitCode !== 0) return "";
-
-  const check = await runTextCommand(
-    sandbox,
-    `node -e "for (const id of ['react','react/jsx-runtime','react/jsx-dev-runtime','react-dom','react-dom/client']) require.resolve(id)"`,
-    { allowFailure: true },
-  );
-  if (check.exitCode === 0) return "";
-
-  const result = await sandbox.runCommand({
-    cmd: "npm",
-    args: ["install", "react@latest", "react-dom@latest", "--no-audit", "--no-fund", "--prefer-offline"],
-    cwd: PROJECT_DIR,
-  });
-  const stdout = await result.stdout();
-  const stderr = await result.stderr();
-  if (result.exitCode !== 0) {
-    throw new Error(stderr || stdout || "Failed to install the generated React runtime dependencies");
-  }
-
-  const verify = await runTextCommand(
-    sandbox,
-    `node -e "for (const id of ['react','react/jsx-runtime','react/jsx-dev-runtime','react-dom','react-dom/client']) require.resolve(id)"`,
-    { allowFailure: true },
-  );
-  if (verify.exitCode !== 0) {
-    throw new Error(verify.output || "React runtime dependencies are still unresolved after npm install");
-  }
-  return `Installed missing React runtime dependencies.\n${[stdout, stderr].filter(Boolean).join("\n").slice(-8000)}\n`;
 }
 
 function parseVersion(version: string) {
@@ -291,102 +208,14 @@ async function findUserViteConfig(sandbox: Sandbox) {
   return null;
 }
 
-async function findPreviewEntry(sandbox: Sandbox) {
-  for (const candidate of PREVIEW_ENTRY_CANDIDATES) {
-    const result = await runTextCommand(sandbox, `test -f ${candidate}`, {
-      allowFailure: true },
-    );
-    if (result.exitCode === 0) return candidate;
-  }
-  return null;
-}
-
-async function validateViteConfig(
-  sandbox: Sandbox,
-  relativePath: string,
-) {
-  const toolCheck = await runTextCommand(
-    sandbox,
-    "test -x ./node_modules/.bin/esbuild",
-    { allowFailure: true },
-  );
-  if (toolCheck.exitCode !== 0) {
-    return {
-      valid: true,
-      skipped: true,
-      error: null as string | null,
-    };
-  }
-
-  const token = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  const outputRelative = `${RUNTIME_DIR}/vite-config-check-${token}.js`;
-  try {
-    const result = await sandbox.runCommand({
-      cmd: "./node_modules/.bin/esbuild",
-      args: [relativePath, `--outfile=${outputRelative}`, "--log-level=error"],
-      cwd: PROJECT_DIR,
-    });
-    const stdout = await result.stdout();
-    const stderr = await result.stderr();
-    return {
-      valid: result.exitCode === 0,
-      skipped: false,
-      error: result.exitCode === 0
-        ? null
-        : (stderr || stdout || "Vite config contains invalid syntax").slice(-8000),
-    };
-  } finally {
-    await runTextCommand(sandbox, `rm -f ${outputRelative}`, {
-      allowFailure: true },
-    );
-  }
-}
-
-async function replaceInvalidViteConfig(
-  sandbox: Sandbox,
-  relativePath: string,
-) {
-  const token = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  const backupPath = `${PROJECT_DIR}/${RUNTIME_DIR}/rejected-vite-config-${token}-${path.posix.basename(relativePath)}`;
-  const original = await sandbox.readFileToBuffer({
-    path: `${PROJECT_DIR}/${relativePath}`,
-  });
-
-  await sandbox.runCommand("mkdir", ["-p", `${PROJECT_DIR}/${RUNTIME_DIR}`]);
-  if (original) {
-    await sandbox.writeFiles([
-      {
-        path: backupPath,
-        content: original,
-      },
-    ]);
-  }
-
-  const extension = path.posix.extname(relativePath).toLowerCase();
-  const fallback = extension === ".cjs" || extension === ".cts"
-    ? "module.exports = {};\n"
-    : "export default {};\n";
-  await sandbox.writeFiles([
-    {
-      path: `${PROJECT_DIR}/${relativePath}`,
-      content: Buffer.from(fallback, "utf8"),
-    },
-  ]);
-
-  return backupPath;
-}
-
-async function writeRuntimeViteConfig(
-  sandbox: Sandbox,
-  userConfigPath: string | null,
-) {
+async function writeRuntimeViteConfig(sandbox: Sandbox) {
   const publicHost = previewHostFor(sandbox);
+  const userConfigPath = await findUserViteConfig(sandbox);
   const importLine = userConfigPath
     ? `import userConfigExport from ${JSON.stringify(`../${userConfigPath}`)};`
     : "const userConfigExport = {};";
 
-  const source = `import { defineConfig, mergeConfig } from "vite";\n${importLine}\n\nconst cryzoRuntimeConfig = {\n  server: {\n    host: "0.0.0.0",\n    port: ${PREVIEW_PORT},\n    strictPort: true,\n    allowedHosts: [${JSON.stringify(publicHost)}],\n  },\n};\n\nexport default defineConfig(async (env) => {\n  const candidate = typeof userConfigExport === "function"\n    ? await userConfigExport(env)\n    : await userConfigExport;
-  return mergeConfig(candidate || {}, cryzoRuntimeConfig);\n});\n`;
+  const source = `import { defineConfig, mergeConfig } from "vite";\n${importLine}\n\nconst cryzoRuntimeConfig = {\n  server: {\n    host: "0.0.0.0",\n    port: ${PREVIEW_PORT},\n    strictPort: true,\n    allowedHosts: [${JSON.stringify(publicHost)}],\n  },\n};\n\nexport default defineConfig(async (env) => {\n  const candidate = typeof userConfigExport === "function"\n    ? await userConfigExport(env)\n    : await userConfigExport;\n  return mergeConfig(candidate || {}, cryzoRuntimeConfig);\n});\n`;
 
   await sandbox.runCommand("mkdir", ["-p", `${PROJECT_DIR}/${RUNTIME_DIR}`]);
   await sandbox.writeFiles([
@@ -451,35 +280,6 @@ async function checkPublicPreview(sandbox: Sandbox) {
   }
 }
 
-async function checkPreviewEntry(sandbox: Sandbox) {
-  const entry = await findPreviewEntry(sandbox);
-  if (!entry) return { ready: true, entry: null as string | null, error: null as string | null };
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 5000);
-  try {
-    const response = await fetch(`${previewUrlFor(sandbox)}/${entry}`, {
-      cache: "no-store",
-      redirect: "follow",
-      signal: controller.signal,
-      headers: { "User-Agent": "CryzoPreviewModuleHealth/1.0" },
-    });
-    const body = (await response.text()).slice(-8000);
-    return {
-      ready: response.ok,
-      entry,
-      error: response.ok ? null : body || `Preview entry returned HTTP ${response.status}`,
-    };
-  } catch (error) {
-    return {
-      ready: false,
-      entry,
-      error: error instanceof Error ? error.message : String(error),
-    };
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
 async function tailPreviewLog(sandbox: Sandbox) {
   const result = await runTextCommand(
     sandbox,
@@ -502,7 +302,7 @@ async function previewDiagnostics(sandbox: Sandbox) {
   const viteVersion = (await getViteVersion(sandbox)) || "missing";
   const packageInfo = await runTextCommand(
     sandbox,
-    "node -e \"try{const p=require('./package.json'); console.log(JSON.stringify({name:p.name,scripts:p.scripts,dependencies:p.dependencies,devDependencies:p.devDependencies},null,2))}catch(e){console.error(String(e));process.exit(1)}\"",
+    "node -e \"try{const p=require('./package.json'); console.log(JSON.stringify({name:p.name,scripts:p.scripts,devDependencies:p.devDependencies},null,2))}catch(e){console.error(String(e));process.exit(1)}\"",
     { allowFailure: true },
   );
   const processInfo = await runTextCommand(
@@ -557,11 +357,8 @@ pkill -f '[v]ite.*${PREVIEW_PORT}' 2>/dev/null || true
   }
 }
 
-async function launchPreview(
-  sandbox: Sandbox,
-  userConfigPath: string | null,
-) {
-  const runtimeConfig = await writeRuntimeViteConfig(sandbox, userConfigPath);
+async function launchPreview(sandbox: Sandbox) {
+  const runtimeConfig = await writeRuntimeViteConfig(sandbox);
   const command = `
 rm -f ${PREVIEW_LOG_FILE} ${PREVIEW_PID_FILE}
 nohup ./node_modules/.bin/vite --config ${RUNTIME_CONFIG_FILE} > ${PREVIEW_LOG_FILE} 2>&1 &
@@ -574,13 +371,11 @@ echo $! > ${PREVIEW_PID_FILE}
 async function startPreview(sandbox: Sandbox, forceRestart = false) {
   const previewUrl = previewUrlFor(sandbox);
   let output = await ensureDependencies(sandbox);
-  output += await ensureReactRuntime(sandbox);
   output += await ensureCompatibleVite(sandbox);
 
   if (!forceRestart) {
     const existing = await checkPublicPreview(sandbox);
-    const existingEntry = existing.ready ? await checkPreviewEntry(sandbox) : { ready: false };
-    if (existing.ready && existingEntry.ready) {
+    if (existing.ready) {
       return {
         previewUrl,
         output: `${output}Preview already healthy at ${previewUrl}.\n`,
@@ -588,35 +383,13 @@ async function startPreview(sandbox: Sandbox, forceRestart = false) {
     }
   }
 
-  let userConfigPath = await findUserViteConfig(sandbox);
-  if (userConfigPath) {
-    const validation = await validateViteConfig(sandbox, userConfigPath);
-    if (!validation.valid) {
-      const backupPath = await replaceInvalidViteConfig(sandbox, userConfigPath);
-      output += `Replaced invalid ${userConfigPath} with a safe fallback before preview startup. Original saved at ${backupPath}: ${validation.error || "syntax error"}\n`;
-    } else if (validation.skipped) {
-      output += `Could not run the Vite config preflight because esbuild is unavailable; using the generated config as-is.\n`;
-    }
-  }
-
   await stopPreview(sandbox);
-  const runtimeConfig = await launchPreview(sandbox, userConfigPath);
+  const runtimeConfig = await launchPreview(sandbox);
   output += `Cryzo runtime config: ${runtimeConfig.userConfigPath || "no user vite.config found"} + ${runtimeConfig.publicHost}\n`;
 
-  let listening = false;
-  for (let attempt = 0; attempt < 60 && !listening; attempt++) {
-    listening = await isPreviewListening(sandbox).catch(() => false);
-    if (!listening) await new Promise((resolve) => setTimeout(resolve, 250));
-  }
-
-  if (!listening) {
-    const diagnostics = await previewDiagnostics(sandbox);
-    throw new Error(`Preview server did not listen on port ${PREVIEW_PORT}.\n\n${diagnostics}`);
-  }
-
   let lastCheck = await checkPublicPreview(sandbox);
-  for (let attempt = 0; attempt < 4 && !lastCheck.ready; attempt++) {
-    await new Promise((resolve) => setTimeout(resolve, 350));
+  for (let attempt = 0; attempt < 90 && !lastCheck.ready; attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 300));
     lastCheck = await checkPublicPreview(sandbox);
   }
 
@@ -628,16 +401,6 @@ async function startPreview(sandbox: Sandbox, forceRestart = false) {
         ? `Public preview returned HTTP ${lastCheck.status}`
         : `Public preview could not be reached${lastCheck.error ? `: ${lastCheck.error}` : ""}`;
     throw new Error(`${reason}.\n\n${diagnostics}`);
-  }
-
-  let entryCheck = await checkPreviewEntry(sandbox);
-  for (let attempt = 0; attempt < 4 && !entryCheck.ready; attempt++) {
-    await new Promise((resolve) => setTimeout(resolve, 350));
-    entryCheck = await checkPreviewEntry(sandbox);
-  }
-  if (!entryCheck.ready) {
-    const diagnostics = await previewDiagnostics(sandbox);
-    throw new Error(`Preview module ${entryCheck.entry || "entry"} failed to transform: ${entryCheck.error || "unknown module error"}.\n\n${diagnostics}`);
   }
 
   return {
@@ -662,7 +425,6 @@ async function runShell(sandbox: Sandbox, command: string) {
 
 async function buildStaticProject(sandbox: Sandbox) {
   let output = await ensureDependencies(sandbox);
-  output += await ensureReactRuntime(sandbox);
   const build = await sandbox.runCommand({
     cmd: "npm",
     args: ["run", "build"],
@@ -758,9 +520,9 @@ async function restoreProject(sandbox: Sandbox, actions: ArtifactAction[]) {
   const shellActions = actions.filter((action) => action.type === "shell");
   const startActions = actions.filter((action) => action.type === "start");
 
-  await writeProjectFiles(sandbox, fileActions);
+  for (const action of fileActions) await writeFile(sandbox, action);
 
-  let output = `Restored ${fileActions.length} project files in one checkpoint.\n`;
+  let output = `Restored ${fileActions.length} project files.\n`;
   if (shellActions.some((action) => /(^|\s)npm\s+(install|i)(\s|$)/.test(action.content))) {
     output += await ensureDependencies(sandbox);
   }
@@ -782,7 +544,7 @@ async function restoreProject(sandbox: Sandbox, actions: ArtifactAction[]) {
 export async function POST(req: Request) {
   try {
     const body = (await req.json()) as {
-      operation?: "init" | "action" | "actions" | "restore" | "status" | "build" | "restart" | "logs";
+      operation?: "init" | "action" | "restore" | "status" | "build" | "restart" | "logs";
       conversationId?: string;
       action?: ArtifactAction;
       actions?: ArtifactAction[];
@@ -845,25 +607,6 @@ export async function POST(req: Request) {
     if (body.operation === "action" && body.action) {
       const result = await applyAction(sandbox, body.action);
       return Response.json({ sandboxName: sandbox.name, ...result });
-    }
-
-    if (body.operation === "actions") {
-      if (!Array.isArray(body.actions) || body.actions.length > 250) {
-        return Response.json({ error: "Invalid actions" }, { status: 400 });
-      }
-      const fileActions = body.actions.filter((action) => action.type === "file");
-      if (fileActions.length !== body.actions.length) {
-        return Response.json(
-          { error: "Batched actions may only contain files" },
-          { status: 400 },
-        );
-      }
-      await writeProjectFiles(sandbox, fileActions);
-      return Response.json({
-        sandboxName: sandbox.name,
-        progress: "writing",
-        output: `Wrote ${fileActions.length} files in one checkpoint.\n`,
-      });
     }
 
     if (body.operation === "build") {

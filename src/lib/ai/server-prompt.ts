@@ -14,7 +14,7 @@ function buildProjectTargetBlock(projectPlatforms?: ProjectPlatform[]) {
 The current project target is Web.
 - Use Vite + React + TypeScript as the default stack.
 - Build a responsive browser application.
-- New web projects include package.json, tsconfig.json, index.html, src/main.tsx, src/App.tsx, and styles. Cryzo owns the runtime Vite configuration; only emit a custom vite.config.ts when the user explicitly needs custom Vite behavior.
+- New web projects normally include package.json, tsconfig.json, index.html, vite.config.ts, src/main.tsx, src/App.tsx, and styles.
 - New web projects include npm install and finish with <cryzoAction type="start">npm run dev</cryzoAction>.`;
   }
 
@@ -160,6 +160,7 @@ Cryzo Cloud could not be initialized for this request. Do not invent a Cryzo Clo
 <cryzoAction type="file" filePath="package.json">COMPLETE FILE</cryzoAction>
 <cryzoAction type="file" filePath="tsconfig.json">COMPLETE FILE</cryzoAction>
 <cryzoAction type="file" filePath="index.html">COMPLETE FILE</cryzoAction>
+<cryzoAction type="file" filePath="vite.config.ts">COMPLETE FILE</cryzoAction>
 <cryzoAction type="file" filePath="src/index.css">COMPLETE FILE</cryzoAction>
 <cryzoAction type="file" filePath="src/main.tsx">COMPLETE FILE</cryzoAction>
 <cryzoAction type="file" filePath="src/App.tsx">COMPLETE FILE</cryzoAction>
@@ -220,8 +221,7 @@ ${requiredFormat}
 7. For edits, emit only files that changed. Do NOT restart or reinstall unless dependencies changed.
 8. Do not configure Vercel Sandbox infrastructure from generated app code.
 9. Do not add icon packages merely for decorative icons; use an existing icon solution or lightweight inline/vector approaches appropriate to the target.
-10. Treat package.json, tsconfig.json, index.html, and vite.config.* as infrastructure files: every emitted infrastructure file must be complete, standalone, and syntactically valid. Do not emit a custom Vite config for a normal web project unless it is required by the requested feature.
-11. When Cryzo Cloud is needed, include cryzo/cloud.json and the Cryzo Cloud client helper in the same artifact as the app changes.
+10. When Cryzo Cloud is needed, include cryzo/cloud.json and the Cryzo Cloud client helper in the same artifact as the app changes.
 
 ## Design Recipe System
 Cryzo may provide an ACTIVE DESIGN RECIPE below. Treat it as binding visual direction: composition, typography attitude, palette behavior, imagery, section/screen archetypes, and CTA styling should feel native to the reference family rather than like generic AI output. On mobile targets, translate web-oriented recipe ideas into native screens and interactions rather than copying desktop page structure.${recipeBlock}
