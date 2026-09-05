@@ -1,6 +1,6 @@
 import { generateText } from "ai";
 import { fetchQuery } from "convex/nextjs";
-import { api } from "../../../../../convex/_generated/api";
+import { api } from "../../../../../convex/_generated/api";\nimport type { Id } from "../../../../../convex/_generated/dataModel";
 import { resolveServerModel } from "@/lib/server/model-provider";
 import { transientProviderFailure } from "@/lib/ai/request-intent";
 
@@ -38,7 +38,7 @@ export async function POST(req: Request) {
         ? body.conversationId
         : undefined;
     const project = conversationId
-      ? await fetchQuery(api.conversations.get, { id: conversationId as never }, { token })
+      ? await fetchQuery(api.conversations.get, { id: conversationId as Id<"conversations"> }, { token })
       : null;
     const accounts = await fetchQuery(api.social.listAccounts, {}, { token });
     const channels = Array.isArray(body.channels)
