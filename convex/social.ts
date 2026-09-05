@@ -654,10 +654,16 @@ async function validatePublishing(ctx: MutationCtx, post: Doc<"socialPosts">) {
     throw new Error("Choose a numeric Facebook Page ID.");
   }
   if (
-    post.channels.some((channel) => ["youtube", "tiktok"].includes(channel)) &&
+    post.channels.includes("tiktok") &&
     post.mediaStorageIds.length !== 1
   ) {
-    throw new Error("Choose exactly one video for YouTube or TikTok.");
+    throw new Error("Choose exactly one video for TikTok.");
+  }
+  if (
+    post.channels.includes("youtube") &&
+    (post.mediaStorageIds.length < 1 || post.mediaStorageIds.length > 2)
+  ) {
+    throw new Error("YouTube needs one video and supports one optional thumbnail image.");
   }
   if (
     post.channels.includes("instagram") &&
@@ -710,10 +716,21 @@ async function validatePublishing(ctx: MutationCtx, post: Doc<"socialPosts">) {
     throw new Error("X currently supports image uploads only.");
   }
   if (
-    post.channels.some((channel) => channel === "youtube" || channel === "tiktok") &&
+    post.channels.includes("tiktok") &&
     mediaItems.some((media) => !media.contentType.startsWith("video/"))
   ) {
-    throw new Error("YouTube and TikTok require video files.");
+    throw new Error("TikTok requires a video file.");
+  }
+  if (post.channels.includes("youtube")) {
+    const videos = mediaItems.filter((media) =>
+      media.contentType.startsWith("video/"),
+    );
+    const images = mediaItems.filter((media) =>
+      media.contentType.startsWith("image/"),
+    );
+    if (videos.length !== 1 || images.length > 1 || videos.length + images.length !== mediaItems.length) {
+      throw new Error("YouTube needs exactly one video and at most one thumbnail image.");
+    }
   }
   if (
     post.channels.includes("instagram") &&
