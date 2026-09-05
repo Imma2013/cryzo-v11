@@ -30,7 +30,29 @@ type GatewayRequest = ExecuteRequest | UploadRequest;
 let composio: Composio | null = null;
 
 function getComposio() {
-  return (composio ??= new Composio());
+  const apiKey = process.env.COMPOSIO_API_KEY?.trim();
+  if (!apiKey) throw new Error("Composio is not configured in the Vercel runtime.");
+  return (composio ??= new Composio({ apiKey }));
+}
+
+function normalizeComposioResult(value: unknown): unknown {
+  if (!value || typeof value !== "object") return value;
+
+  const record = value as Record<string, unknown>;
+  const normalizeHeaders = (headers: unknown) => {
+    if (headers instanceof Headers) return Object.fromEntries(headers.entries());
+    return headers;
+  };
+
+  const normalized = { ...record };
+  if ("headers" in normalized) normalized.headers = normalizeHeaders(normalized.headers);
+  if (normalized.response && typeof normalized.response === "object") {
+    normalized.response = {
+      ...(normalized.response as Record<string, unknown>),
+      headers: normalizeHeaders((normalized.response as Record<string, unknown>).headers),
+    };
+  }
+  return normalized;
 }
 
 function authorized(request: Request) {
@@ -74,7 +96,7 @@ export async function POST(request: Request) {
   if (!authorized(request)) {
     return Response.json({ error: "Unauthorized." }, { status: 401 });
   }
-  if (!process.env.COMPOSIO_API_KEY) {
+  if (!process.env.COMPOSIO_API_KEY?.trim()) {
     return Response.json(
       { error: "Composio is not configured in the Vercel runtime." },
       { status: 503 },
@@ -129,7 +151,7 @@ export async function POST(request: Request) {
       composioSocialSessionOptions(body.toolkit, body.connectedAccountId),
     );
     const result = await session.execute(body.toolSlug, body.arguments);
-    return Response.json({ result });
+    return Response.json({ result: normalizeComposioResult(result) });
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Composio execution failed.";
