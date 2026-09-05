@@ -1,8 +1,16 @@
 @import "tailwindcss";
 
-:root {
+:root,
+html[data-theme="dark"] {
   --background: #000000;
   --foreground: #ffffff;
+  color-scheme: dark;
+}
+
+html[data-theme="light"] {
+  --background: #f7f8fa;
+  --foreground: #18181b;
+  color-scheme: light;
 }
 
 @theme inline {
@@ -29,4 +37,78 @@ body {
   select {
     font-size: 16px !important;
   }
+}
+
+
+/*
+ * Compatibility theme layer for the existing workspace. New UI should prefer
+ * the background/foreground variables; these rules keep older dark utilities
+ * readable while the app is migrated component by component.
+ */
+html[data-theme="light"] .bg-black {
+  background-color: #ffffff !important;
+}
+
+html[data-theme="light"] .bg-zinc-950,
+html[data-theme="light"] .bg-\[\#111113\],
+html[data-theme="light"] .bg-\[\#151515\] {
+  background-color: #f4f4f5 !important;
+}
+
+html[data-theme="light"] .bg-zinc-900 {
+  background-color: #ffffff !important;
+}
+
+html[data-theme="light"] .bg-zinc-800 {
+  background-color: #e4e4e7 !important;
+}
+
+html[data-theme="light"] .bg-black\/30,
+html[data-theme="light"] .bg-black\/50,
+html[data-theme="light"] .bg-black\/70,
+html[data-theme="light"] .bg-black\/80 {
+  background-color: rgb(244 244 245 / 0.94) !important;
+}
+
+html[data-theme="light"] .text-white {
+  color: #18181b !important;
+}
+
+html[data-theme="light"] .text-zinc-200,
+html[data-theme="light"] .text-zinc-300 {
+  color: #27272a !important;
+}
+
+html[data-theme="light"] .text-zinc-400 {
+  color: #52525b !important;
+}
+
+html[data-theme="light"] .text-zinc-500,
+html[data-theme="light"] .text-zinc-600 {
+  color: #71717a !important;
+}
+
+html[data-theme="light"] .border-zinc-700,
+html[data-theme="light"] .border-zinc-800 {
+  border-color: #d4d4d8 !important;
+}
+
+html[data-theme="light"] .placeholder\:text-zinc-600::placeholder,
+html[data-theme="light"] .placeholder-zinc-500::placeholder {
+  color: #a1a1aa !important;
+}
+
+html[data-theme="light"] .hover\:bg-zinc-800:hover,
+html[data-theme="light"] .hover\:bg-zinc-800\/60:hover {
+  background-color: #e4e4e7 !important;
+}
+
+html[data-theme="light"] .hover\:text-white:hover {
+  color: #18181b !important;
+}
+
+html[data-theme="light"] select,
+html[data-theme="light"] input,
+html[data-theme="light"] textarea {
+  color-scheme: light;
 }
