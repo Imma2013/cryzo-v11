@@ -145,6 +145,7 @@ export default function ProjectMarketing() {
     if (!socialAccounts) return;
     setAccountSelections((current) => {
       const next = { ...current };
+      let changed = false;
       for (const channel of CHANNELS) {
         const options = socialAccounts.filter(
           (account) => account.channel === channel.id,
@@ -155,10 +156,14 @@ export default function ProjectMarketing() {
             (account) => account.connectedAccountId === next[channel.id],
           )
         ) {
-          next[channel.id] = options[0]?.connectedAccountId;
+          const fallback = options[0]?.connectedAccountId;
+          if (next[channel.id] !== fallback) {
+            next[channel.id] = fallback;
+            changed = true;
+          }
         }
       }
-      return next;
+      return changed ? next : current;
     });
   }, [socialAccounts]);
 
