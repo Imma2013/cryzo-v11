@@ -1,5 +1,5 @@
-import ProjectMarketing from "@/components/workspace/ProjectMarketing";
+import ProjectMarketingV2 from "@/components/workspace/ProjectMarketingV2";
 
 export default function MarketingPage() {
-  return <ProjectMarketing />;
+  return <ProjectMarketingV2 />;
 }
