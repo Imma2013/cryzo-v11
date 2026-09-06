@@ -19,6 +19,7 @@ const PREVIEW_PID_FILE = ".cryzo-preview.pid";
 const PREVIEW_LOG_FILE = ".cryzo-preview.log";
 const RUNTIME_DIR = ".cryzo";
 const RUNTIME_CONFIG_FILE = `${RUNTIME_DIR}/vite.runtime.config.ts`;
+const DEPENDENCY_HASH_FILE = `${RUNTIME_DIR}/package.sha256`;
 const SAFE_VITE_5 = "5.4.21";
 const VITE_CONFIG_CANDIDATES = [
   "vite.config.ts",
@@ -30,7 +31,10 @@ const VITE_CONFIG_CANDIDATES = [
 ] as const;
 
 function sandboxNameFor(conversationId: string) {
-  const safe = conversationId.toLowerCase().replace(/[^a-z0-9-]/g, "-").slice(0, 48);
+  const safe = conversationId
+    .toLowerCase()
+    .replace(/[^a-z0-9-]/g, "-")
+    .slice(0, 48);
   return `cryzo-${safe}`;
 }
 
@@ -131,6 +135,51 @@ async function writeFile(sandbox: Sandbox, action: ArtifactAction) {
       content: Buffer.from(action.content, "utf8"),
     },
   ]);
+
+  if (relative === "package.json") {
+    await runTextCommand(sandbox, `rm -f ${DEPENDENCY_HASH_FILE}`, {
+      allowFailure: true,
+    });
+  }
+}
+
+async function packageHash(sandbox: Sandbox) {
+  const result = await runTextCommand(
+    sandbox,
+    `node -e "const fs=require('fs'),c=require('crypto');if(!fs.existsSync('package.json'))process.exit(2);process.stdout.write(c.createHash('sha256').update(fs.readFileSync('package.json')).digest('hex'))"`,
+    { allowFailure: true },
+  );
+  return result.exitCode === 0 ? result.output.trim() : null;
+}
+
+async function storedDependencyHash(sandbox: Sandbox) {
+  const result = await runTextCommand(
+    sandbox,
+    `test -f ${DEPENDENCY_HASH_FILE} && cat ${DEPENDENCY_HASH_FILE} || true`,
+    { allowFailure: true },
+  );
+  return result.output.trim() || null;
+}
+
+async function recordDependencyHash(sandbox: Sandbox) {
+  const hash = await packageHash(sandbox);
+  if (!hash) return;
+  await sandbox.runCommand("mkdir", ["-p", `${PROJECT_DIR}/${RUNTIME_DIR}`]);
+  await sandbox.writeFiles([
+    {
+      path: `${PROJECT_DIR}/${DEPENDENCY_HASH_FILE}`,
+      content: Buffer.from(`${hash}\n`, "utf8"),
+    },
+  ]);
+}
+
+async function verifyRequiredModules(sandbox: Sandbox) {
+  const result = await runTextCommand(
+    sandbox,
+    `node -e "const p=require('./package.json');const d={...(p.dependencies||{}),...(p.devDependencies||{})};const mods=['vite'];if(d.react){mods.push('react','react/jsx-runtime','react/jsx-dev-runtime')}if(d['react-dom'])mods.push('react-dom');for(const m of mods)require.resolve(m);"`,
+    { allowFailure: true },
+  );
+  return result.exitCode === 0;
 }
 
 async function runInstall(sandbox: Sandbox) {
@@ -146,14 +195,35 @@ async function runInstall(sandbox: Sandbox) {
     throw new Error(stderr || stdout || `npm install exited with ${result.exitCode}`);
   }
 
+  await recordDependencyHash(sandbox);
   return [stdout, stderr].filter(Boolean).join("\n").slice(-12000);
 }
 
 async function ensureDependencies(sandbox: Sandbox) {
-  const check = await runTextCommand(sandbox, "test -d node_modules", {
+  const currentHash = await packageHash(sandbox);
+  if (!currentHash) return "";
+
+  const nodeModules = await runTextCommand(sandbox, "test -d node_modules", {
     allowFailure: true,
   });
-  if (check.exitCode !== 0) return await runInstall(sandbox);
+  const installedHash = await storedDependencyHash(sandbox);
+  const modulesHealthy =
+    nodeModules.exitCode === 0 && (await verifyRequiredModules(sandbox));
+
+  if (
+    nodeModules.exitCode !== 0 ||
+    installedHash !== currentHash ||
+    !modulesHealthy
+  ) {
+    const reason =
+      nodeModules.exitCode !== 0
+        ? "node_modules missing"
+        : installedHash !== currentHash
+          ? "package.json changed"
+          : "required module missing";
+    return `Installing dependencies (${reason})...\n${await runInstall(sandbox)}\n`;
+  }
+
   return "";
 }
 
@@ -182,12 +252,19 @@ async function ensureCompatibleVite(sandbox: Sandbox) {
   if (!parsed) return `Vite ${version}\n`;
 
   const [major, minor, patch] = parsed;
-  const unsafeVite5 = major === 5 && (minor < 4 || (minor === 4 && patch < 21));
+  const unsafeVite5 =
+    major === 5 && (minor < 4 || (minor === 4 && patch < 21));
   if (!unsafeVite5) return `Vite ${version}\n`;
 
   const result = await sandbox.runCommand({
     cmd: "npm",
-    args: ["install", "--save-dev", `vite@${SAFE_VITE_5}`, "--no-audit", "--no-fund"],
+    args: [
+      "install",
+      "--save-dev",
+      `vite@${SAFE_VITE_5}`,
+      "--no-audit",
+      "--no-fund",
+    ],
     cwd: PROJECT_DIR,
   });
   const stdout = await result.stdout();
@@ -195,6 +272,7 @@ async function ensureCompatibleVite(sandbox: Sandbox) {
   if (result.exitCode !== 0) {
     throw new Error(stderr || stdout || `Failed to upgrade Vite from ${version}`);
   }
+  await recordDependencyHash(sandbox);
   return `Upgraded Vite ${version} → ${SAFE_VITE_5}\n`;
 }
 
@@ -244,10 +322,44 @@ async function isPreviewListening(sandbox: Sandbox) {
   return result.exitCode === 0;
 }
 
+function moduleScriptSources(html: string) {
+  const sources: string[] = [];
+  const scriptPattern = /<script\b[^>]*type=["']module["'][^>]*src=["']([^"']+)["'][^>]*>/gi;
+  let match: RegExpExecArray | null;
+  while ((match = scriptPattern.exec(html)) !== null && sources.length < 4) {
+    sources.push(match[1]);
+  }
+  return sources;
+}
+
+async function probeModuleScripts(
+  baseUrl: string,
+  html: string,
+  signal: AbortSignal,
+) {
+  for (const source of moduleScriptSources(html)) {
+    const moduleUrl = new URL(source, baseUrl).toString();
+    const response = await fetch(moduleUrl, {
+      cache: "no-store",
+      redirect: "follow",
+      signal,
+      headers: { "User-Agent": "CryzoPreviewHealth/1.0" },
+    });
+    const body = (await response.text()).slice(0, 5000);
+    if (!response.ok) {
+      return `Module ${source} returned HTTP ${response.status}: ${body.slice(0, 800)}`;
+    }
+    if (/Failed to resolve import|Internal Server Error|Pre-transform error/i.test(body)) {
+      return `Module ${source} failed Vite import analysis`;
+    }
+  }
+  return null;
+}
+
 async function checkPublicPreview(sandbox: Sandbox) {
   const url = previewUrlFor(sandbox);
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 3500);
+  const timeout = setTimeout(() => controller.abort(), 5000);
 
   try {
     const response = await fetch(url, {
@@ -258,12 +370,17 @@ async function checkPublicPreview(sandbox: Sandbox) {
         "User-Agent": "CryzoPreviewHealth/1.0",
       },
     });
-    const body = (await response.text()).slice(0, 6000);
+    const body = (await response.text()).slice(0, 12000);
     const blockedHost = body.includes("Blocked request. This host");
+    const moduleError =
+      response.ok && !blockedHost
+        ? await probeModuleScripts(url, body, controller.signal)
+        : null;
     return {
-      ready: response.ok && !blockedHost,
+      ready: response.ok && !blockedHost && !moduleError,
       status: response.status,
       blockedHost,
+      moduleError,
       body,
       error: null as string | null,
     };
@@ -272,6 +389,7 @@ async function checkPublicPreview(sandbox: Sandbox) {
       ready: false,
       status: 0,
       blockedHost: false,
+      moduleError: null as string | null,
       body: "",
       error: error instanceof Error ? error.message : String(error),
     };
@@ -302,9 +420,10 @@ async function previewDiagnostics(sandbox: Sandbox) {
   const viteVersion = (await getViteVersion(sandbox)) || "missing";
   const packageInfo = await runTextCommand(
     sandbox,
-    "node -e \"try{const p=require('./package.json'); console.log(JSON.stringify({name:p.name,scripts:p.scripts,devDependencies:p.devDependencies},null,2))}catch(e){console.error(String(e));process.exit(1)}\"",
+    "node -e \"try{const p=require('./package.json'); console.log(JSON.stringify({name:p.name,scripts:p.scripts,dependencies:p.dependencies,devDependencies:p.devDependencies},null,2))}catch(e){console.error(String(e));process.exit(1)}\"",
     { allowFailure: true },
   );
+  const hashInfo = await storedDependencyHash(sandbox);
   const processInfo = await runTextCommand(
     sandbox,
     `ps -ef | grep -E '[v]ite|[n]pm run dev' || true`,
@@ -321,8 +440,11 @@ async function previewDiagnostics(sandbox: Sandbox) {
   return [
     `Preview URL: ${previewUrlFor(sandbox)}`,
     `Vite: ${viteVersion}`,
+    hashInfo ? `Dependency hash: ${hashInfo}` : "Dependency hash: missing",
     packageInfo.output ? `package.json:\n${packageInfo.output}` : "",
-    runtimeConfig ? `Cryzo runtime Vite config:\n${runtimeConfig}` : "Cryzo runtime Vite config: missing",
+    runtimeConfig
+      ? `Cryzo runtime Vite config:\n${runtimeConfig}`
+      : "Cryzo runtime Vite config: missing",
     processInfo.output ? `Processes:\n${processInfo.output}` : "",
     portInfo.output ? `Port ${PREVIEW_PORT}:\n${portInfo.output}` : "",
     log ? `Vite log:\n${log}` : "Vite log: empty",
@@ -397,9 +519,11 @@ async function startPreview(sandbox: Sandbox, forceRestart = false) {
     const diagnostics = await previewDiagnostics(sandbox);
     const reason = lastCheck.blockedHost
       ? `Vite rejected the sandbox host ${previewHostFor(sandbox)}`
-      : lastCheck.status
-        ? `Public preview returned HTTP ${lastCheck.status}`
-        : `Public preview could not be reached${lastCheck.error ? `: ${lastCheck.error}` : ""}`;
+      : lastCheck.moduleError
+        ? lastCheck.moduleError
+        : lastCheck.status
+          ? `Public preview returned HTTP ${lastCheck.status}`
+          : `Public preview could not be reached${lastCheck.error ? `: ${lastCheck.error}` : ""}`;
     throw new Error(`${reason}.\n\n${diagnostics}`);
   }
 
@@ -451,7 +575,9 @@ async function buildStaticProject(sandbox: Sandbox) {
   }
 
   if (!outputDir) {
-    throw new Error("Build completed but no dist, build, or out directory was found");
+    throw new Error(
+      "Build completed but no dist, build, or out directory was found",
+    );
   }
 
   const listing = await sandbox.runCommand({
@@ -496,11 +622,16 @@ async function buildStaticProject(sandbox: Sandbox) {
 async function applyAction(sandbox: Sandbox, action: ArtifactAction) {
   if (action.type === "file") {
     await writeFile(sandbox, action);
-    return { progress: "writing" as const, output: `Wrote ${action.filePath}\n` };
+    return {
+      progress: "writing" as const,
+      output: `Wrote ${action.filePath}\n`,
+    };
   }
 
   if (action.type === "shell") {
-    const isInstall = /(^|\s)npm\s+(install|i)(\s|$)/.test(action.content.trim());
+    const isInstall = /(^|\s)npm\s+(install|i)(\s|$)/.test(
+      action.content.trim(),
+    );
     const output = isInstall
       ? await runInstall(sandbox)
       : await runShell(sandbox, action.content.trim());
@@ -523,7 +654,11 @@ async function restoreProject(sandbox: Sandbox, actions: ArtifactAction[]) {
   for (const action of fileActions) await writeFile(sandbox, action);
 
   let output = `Restored ${fileActions.length} project files.\n`;
-  if (shellActions.some((action) => /(^|\s)npm\s+(install|i)(\s|$)/.test(action.content))) {
+  if (
+    shellActions.some((action) =>
+      /(^|\s)npm\s+(install|i)(\s|$)/.test(action.content),
+    )
+  ) {
     output += await ensureDependencies(sandbox);
   }
 
@@ -544,7 +679,14 @@ async function restoreProject(sandbox: Sandbox, actions: ArtifactAction[]) {
 export async function POST(req: Request) {
   try {
     const body = (await req.json()) as {
-      operation?: "init" | "action" | "restore" | "status" | "build" | "restart" | "logs";
+      operation?:
+        | "init"
+        | "action"
+        | "restore"
+        | "status"
+        | "build"
+        | "restart"
+        | "logs";
       conversationId?: string;
       action?: ArtifactAction;
       actions?: ArtifactAction[];
@@ -598,7 +740,10 @@ export async function POST(req: Request) {
 
     if (body.operation === "restore") {
       if (!Array.isArray(body.actions) || body.actions.length > 250) {
-        return Response.json({ error: "Invalid restore actions" }, { status: 400 });
+        return Response.json(
+          { error: "Invalid restore actions" },
+          { status: 400 },
+        );
       }
       const result = await restoreProject(sandbox, body.actions);
       return Response.json({ sandboxName: sandbox.name, ...result });
