@@ -47,7 +47,21 @@ function composioApiKey() {
   return apiKey;
 }
 
-function normalizeComposioResult(value: unknown): unknown {
+function publicErrorMessage(message: string, toolkit?: SocialToolkit) {
+  const depleted = /credits depleted|http_depleted|["']?status["']?\s*:\s*402|payment required/i.test(message);
+  if (depleted && toolkit === "twitter") {
+    return "X publishing is unavailable because the connected X developer app has no API credits. Add X API credits, then retry this network.";
+  }
+  if (depleted) {
+    return "The connected provider has no delivery credits available. Refill the provider balance, then retry this network.";
+  }
+  if (/no composio api key|api key.*not provided/i.test(message)) {
+    return "Composio is not configured in the Vercel runtime. Set COMPOSIO_API_KEY for the Vercel Production environment.";
+  }
+  return message;
+}
+
+function normalizeComposioResult(value: unknown, toolkit?: SocialToolkit): unknown {
   if (!value || typeof value !== "object") return value;
 
   const record = value as Record<string, unknown>;
@@ -56,13 +70,16 @@ function normalizeComposioResult(value: unknown): unknown {
     return headers;
   };
 
-  const normalized = { ...record };
+  const normalized: Record<string, unknown> = { ...record };
   if ("headers" in normalized) normalized.headers = normalizeHeaders(normalized.headers);
   if (normalized.response && typeof normalized.response === "object") {
     normalized.response = {
       ...(normalized.response as Record<string, unknown>),
       headers: normalizeHeaders((normalized.response as Record<string, unknown>).headers),
     };
+  }
+  if (typeof normalized.error === "string" && normalized.error) {
+    normalized.error = publicErrorMessage(normalized.error, toolkit);
   }
   return normalized;
 }
@@ -92,16 +109,6 @@ function validSlug(value: unknown) {
     typeof value === "string" &&
     /^[A-Z][A-Z0-9_]{2,160}$/.test(value)
   );
-}
-
-function publicErrorMessage(message: string) {
-  if (/credits depleted|http_depleted|["']?status["']?\s*:\s*402/i.test(message)) {
-    return "Cryzo's Composio delivery credits are depleted. Add credits in Composio, then retry.";
-  }
-  if (/no composio api key|api key.*not provided/i.test(message)) {
-    return "Composio is not configured in the Vercel runtime. Set COMPOSIO_API_KEY for the Vercel Production environment.";
-  }
-  return message;
 }
 
 async function fetchToolSchema(toolSlug: string) {
@@ -189,7 +196,7 @@ export async function POST(request: Request) {
       composioSocialSessionOptions(body.toolkit, body.connectedAccountId),
     );
     const result = await session.execute(body.toolSlug, body.arguments);
-    return Response.json({ result: normalizeComposioResult(result) });
+    return Response.json({ result: normalizeComposioResult(result, body.toolkit) });
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Composio execution failed.";
@@ -199,6 +206,6 @@ export async function POST(request: Request) {
       toolSlug: body.toolSlug,
       error: message,
     });
-    return Response.json({ error: publicErrorMessage(message) }, { status: 502 });
+    return Response.json({ error: publicErrorMessage(message, body.toolkit) }, { status: 502 });
   }
 }
