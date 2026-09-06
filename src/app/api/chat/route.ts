@@ -21,6 +21,13 @@ import {
   buildPlanPrompt,
 } from "@/lib/ai/server-prompt";
 import {
+  backendRepairPrompt,
+  backendRequirementPrompt,
+  backendRequirementsFromPrompt,
+  missingBackendRequirements,
+  parseCryzoCloudResources,
+} from "@/lib/ai/cryzo-cloud-resources";
+import {
   inferProjectPlatforms,
   normalizeProjectPlatforms,
   type ProjectPlatform,
@@ -122,28 +129,6 @@ function needsBuildContinuation(text: string, finishReason: string) {
   return actionOpenCount > actionCloseCount;
 }
 
-type CloudConfig = {
-  name?: string;
-  auth?: { providers?: string[] };
-  entities?: Array<{
-    name?: string;
-    fields?: unknown;
-    access?: "private" | "public-read" | "public";
-  }>;
-};
-
-function parseCloudConfig(text: string): CloudConfig | null {
-  const match = text.match(
-    /<cryzoAction\s+type=["']file["']\s+filePath=["']cryzo\/cloud\.json["']>([\s\S]*?)<\/cryzoAction>/i,
-  );
-  if (!match?.[1]) return null;
-  try {
-    return JSON.parse(match[1].trim()) as CloudConfig;
-  } catch {
-    return null;
-  }
-}
-
 function authedConvexClient(authToken?: string) {
   if (!authToken || !process.env.NEXT_PUBLIC_CONVEX_URL) return null;
   const client = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL);
@@ -224,6 +209,7 @@ export async function POST(req: Request) {
       .filter((message) => message.role === "user")
       .pop();
     const lastUserText = messageText(lastUserMsg);
+    const backendRequirements = backendRequirementsFromPrompt(lastUserText);
     const resolved = await resolveServerModel({
       providerId: modelProvider,
       modelId,
@@ -320,27 +306,31 @@ export async function POST(req: Request) {
       }
     }
 
-    const syncGeneratedCloudConfig = async (text: string) => {
-      if (!conversationId || !authenticatedConvex) return;
-      const config = parseCloudConfig(text);
-      if (!config) return;
-      const entities = (config.entities || [])
-        .filter((entity) => entity.name?.trim())
-        .map((entity) => ({
-          name: entity.name!.trim(),
-          fields: entity.fields,
-          access: entity.access,
-        }));
+    const syncGeneratedCloudResources = async (text: string) => {
+      const resources = parseCryzoCloudResources(text);
+      if (!conversationId || !authenticatedConvex) return resources;
+      if (!resources.entities.length && !resources.authProviders.length && !resources.name) {
+        return resources;
+      }
+      const authProviders = resources.authProviders.filter(
+        (provider): provider is "password" | "google" =>
+          provider === "password" || provider === "google",
+      );
       try {
         await authenticatedConvex.mutation(api.cloudAdmin.configureFromPublish, {
           conversationId: conversationId as any,
-          name: config.name?.trim() || `Cryzo app ${conversationId.slice(-6)}`,
-          entities,
-          authProviders: (config.auth?.providers || []).filter(Boolean),
+          name: resources.name?.trim() || `Cryzo app ${conversationId.slice(-6)}`,
+          entities: resources.entities.map((entity) => ({
+            name: entity.name,
+            fields: entity.fields,
+            access: entity.access,
+          })),
+          ...(authProviders.length ? { authProviders } : {}),
         } as any);
       } catch (error) {
-        console.warn("Unable to apply generated Cryzo Cloud config", error);
+        console.warn("Unable to apply generated Cryzo Cloud resources", error);
       }
+      return resources;
     };
 
     const recipeSlug = pickDesignRecipe(lastUserText);
@@ -406,7 +396,9 @@ export async function POST(req: Request) {
         recipeBlock,
         projectPlatforms: resolvedProjectPlatforms,
         cryzoCloudAppId,
-      }) + currentProjectContext;
+      }) +
+      backendRequirementPrompt(backendRequirements) +
+      currentProjectContext;
 
     let responseSessionId = composioSessionId;
     let response: Response;
@@ -442,7 +434,7 @@ export async function POST(req: Request) {
           }
         },
         onFinish: async ({ text }) => {
-          await syncGeneratedCloudConfig(text || "");
+          await syncGeneratedCloudResources(text || "");
         },
       });
       response = result.toUIMessageStreamResponse();
@@ -493,8 +485,35 @@ export async function POST(req: Request) {
             ];
           }
 
+          let resources = parseCryzoCloudResources(fullText);
+          const missing = missingBackendRequirements(backendRequirements, resources);
+          if (missing.length && cryzoCloudAppId) {
+            const repair = streamText({
+              model: resolved.model,
+              system: systemPrompt,
+              messages: [
+                ...modelMessages,
+                { role: "assistant", content: fullText },
+                { role: "user", content: backendRepairPrompt(missing) },
+              ],
+              maxRetries: 2,
+            });
+            for await (const delta of repair.textStream) {
+              fullText += delta;
+              writer.write({ type: "text-delta", id: textId, delta });
+            }
+            resources = parseCryzoCloudResources(fullText);
+          }
+
+          await syncGeneratedCloudResources(fullText);
+          const stillMissing = missingBackendRequirements(backendRequirements, resources);
+          if (stillMissing.length && cryzoCloudAppId) {
+            throw new Error(
+              `Cryzo Cloud backend setup is incomplete: ${stillMissing.join(", ")}. Retry this build so Cryzo can finish the backend resources.`,
+            );
+          }
+
           writer.write({ type: "text-end", id: textId });
-          await syncGeneratedCloudConfig(fullText);
         },
       });
       response = createUIMessageStreamResponse({ stream: uiStream });
