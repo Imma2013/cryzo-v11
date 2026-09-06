@@ -1,4 +1,5 @@
 import path from "node:path";
+import ts from "typescript";
 import { Sandbox } from "@vercel/sandbox";
 import { fetchQuery } from "convex/nextjs";
 import { api } from "../../../../../convex/_generated/api";
@@ -13,11 +14,8 @@ const PROJECT_DIR = "/vercel/sandbox/project";
 const PREVIEW_PORT = 5173;
 const SANDBOX_TIMEOUT_MS = 45 * 60 * 1000;
 const MAX_FILE_BYTES = 1_500_000;
-const MAX_REPAIR_CHARS = 120_000;
 const MAX_PROJECT_FILES = 150;
-const MAX_REPAIR_ATTEMPTS = 2;
 const VALIDATION_DIR = ".cryzo/validation";
-const REPAIR_MODEL = "minimax/minimax-m3:free";
 
 const MODEL_PROTOCOL_MARKERS = [
   "]<]minimax[>[",
@@ -30,10 +28,22 @@ const MODEL_PROTOCOL_MARKERS = [
   "]~b]",
 ] as const;
 
-const SOURCE_EXTENSIONS = new Set([".js", ".jsx", ".ts", ".tsx", ".mjs", ".mts", ".cjs", ".cts"]);
+const SOURCE_EXTENSIONS = new Set([
+  ".js",
+  ".jsx",
+  ".ts",
+  ".tsx",
+  ".mjs",
+  ".mts",
+  ".cjs",
+  ".cts",
+]);
 
 function sandboxNameFor(conversationId: string) {
-  const safe = conversationId.toLowerCase().replace(/[^a-z0-9-]/g, "-").slice(0, 48);
+  const safe = conversationId
+    .toLowerCase()
+    .replace(/[^a-z0-9-]/g, "-")
+    .slice(0, 48);
   return `cryzo-${safe}`;
 }
 
@@ -108,19 +118,36 @@ async function runTextCommand(
 }
 
 function findProtocolMarker(content: string) {
-  return MODEL_PROTOCOL_MARKERS.find((marker) => content.includes(marker)) ?? null;
+  return (
+    MODEL_PROTOCOL_MARKERS.find((marker) => content.includes(marker)) ?? null
+  );
 }
 
-function stripMarkdownFence(text: string) {
-  const trimmed = text.trim();
-  const fenced = trimmed.match(/^```[^\n]*\n([\s\S]*?)\n```$/);
-  return fenced ? fenced[1] : trimmed;
+function formatDiagnostic(diagnostic: ts.Diagnostic) {
+  return ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n");
+}
+
+function validateJsonFile(filePath: string, content: string) {
+  const basename = path.posix.basename(filePath).toLowerCase();
+  if (basename === "tsconfig.json" || basename === "jsconfig.json") {
+    const parsed = ts.parseConfigFileTextToJson(filePath, content);
+    return parsed.error ? formatDiagnostic(parsed.error) : null;
+  }
+
+  try {
+    JSON.parse(content);
+    return null;
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
 }
 
 async function hasEsbuild(sandbox: Sandbox) {
-  const result = await runTextCommand(sandbox, "test -x ./node_modules/.bin/esbuild", {
-    allowFailure: true,
-  });
+  const result = await runTextCommand(
+    sandbox,
+    "test -x ./node_modules/.bin/esbuild",
+    { allowFailure: true },
+  );
   return result.exitCode === 0;
 }
 
@@ -148,19 +175,27 @@ async function validateSourceSyntax(
   try {
     const result = await sandbox.runCommand({
       cmd: "./node_modules/.bin/esbuild",
-      args: [tempRelative, `--outfile=${outRelative}`, "--log-level=error"],
+      args: [
+        tempRelative,
+        `--outfile=${outRelative}`,
+        "--log-level=error",
+      ],
       cwd: PROJECT_DIR,
     });
     const stdout = await result.stdout();
     const stderr = await result.stderr();
     if (result.exitCode !== 0) {
-      return (stderr || stdout || "Generated source contains invalid syntax").slice(-8000);
+      return (stderr || stdout || "Generated source contains invalid syntax").slice(
+        -8000,
+      );
     }
     return null;
   } finally {
-    await runTextCommand(sandbox, `rm -f ${tempRelative} ${outRelative}`, {
-      allowFailure: true,
-    });
+    await runTextCommand(
+      sandbox,
+      `rm -f ${tempRelative} ${outRelative}`,
+      { allowFailure: true },
+    );
   }
 }
 
@@ -180,105 +215,34 @@ async function validateCandidate(
 
   const extension = path.posix.extname(filePath).toLowerCase();
   if (extension === ".json") {
-    try {
-      JSON.parse(content);
-    } catch (error) {
-      return `Invalid JSON in ${filePath}: ${error instanceof Error ? error.message : String(error)}`;
-    }
+    const jsonError = validateJsonFile(filePath, content);
+    if (jsonError) return `Invalid JSON in ${filePath}: ${jsonError}`;
   }
 
   return await validateSourceSyntax(sandbox, filePath, content);
 }
 
-async function repairFile(
-  sandbox: Sandbox,
-  filePath: string,
-  content: string,
-  validationError: string,
-) {
-  if (!process.env.OPENROUTER_API_KEY) {
-    throw new Error(`Generated file validation failed for ${filePath}: ${validationError}`);
-  }
-  if (content.length > MAX_REPAIR_CHARS) {
-    throw new Error(`Generated file validation failed for ${filePath}, and the file is too large to auto-repair.`);
-  }
-
-  let candidate = content;
-  let lastError = validationError;
-
-  for (let attempt = 1; attempt <= MAX_REPAIR_ATTEMPTS; attempt++) {
-    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
-        "Content-Type": "application/json",
-        "HTTP-Referer": "https://www.cryzo.me",
-        "X-Title": "Cryzo Generated File Repair",
-      },
-      body: JSON.stringify({
-        model: REPAIR_MODEL,
-        temperature: 0.1,
-        max_tokens: 12000,
-        messages: [
-          {
-            role: "system",
-            content:
-              "You repair one generated source file. Return ONLY the complete corrected raw file contents. Do not use Markdown fences, XML, tool calls, commentary, thinking tags, or MiniMax transport tokens. Preserve the intended design and behavior while fixing the reported validation error.",
-          },
-          {
-            role: "user",
-            content: `File: ${filePath}\n\nValidation error:\n${lastError}\n\nCurrent file:\n${candidate}`,
-          },
-        ],
-      }),
-    });
-
-    const payload = (await response.json()) as {
-      choices?: Array<{ message?: { content?: string } }>;
-      error?: { message?: string };
-    };
-
-    if (!response.ok) {
-      throw new Error(payload.error?.message || `Auto-repair request failed with ${response.status}`);
-    }
-
-    const repaired = stripMarkdownFence(payload.choices?.[0]?.message?.content || "");
-    if (!repaired) {
-      lastError = "Repair model returned an empty file";
-      continue;
-    }
-
-    const repairedError = await validateCandidate(sandbox, filePath, repaired);
-    if (!repairedError) {
-      return {
-        content: repaired,
-        output: `Auto-repaired ${filePath} after validation failed: ${validationError}\n`,
-      };
-    }
-
-    candidate = repaired;
-    lastError = repairedError;
-  }
-
-  throw new Error(`Generated file validation failed for ${filePath}: ${lastError}`);
-}
-
-async function validateAndRepairAction(sandbox: Sandbox, action: ArtifactAction) {
+async function validateAction(sandbox: Sandbox, action: ArtifactAction) {
   if (action.type !== "file" || !action.filePath) {
     return { action, output: "", repaired: false };
   }
 
   const filePath = safeRelativePath(action.filePath);
-  const validationError = await validateCandidate(sandbox, filePath, action.content);
-  if (!validationError) {
-    return { action: { ...action, filePath }, output: "", repaired: false };
+  const validationError = await validateCandidate(
+    sandbox,
+    filePath,
+    action.content,
+  );
+  if (validationError) {
+    throw new Error(
+      `Generated file validation failed for ${filePath}: ${validationError}`,
+    );
   }
 
-  const repair = await repairFile(sandbox, filePath, action.content, validationError);
   return {
-    action: { ...action, filePath, content: repair.content },
-    output: repair.output,
-    repaired: true,
+    action: { ...action, filePath },
+    output: "",
+    repaired: false,
   };
 }
 
@@ -294,11 +258,10 @@ async function validateStoredProject(sandbox: Sandbox) {
     .filter(Boolean);
 
   if (paths.length > MAX_PROJECT_FILES) {
-    throw new Error(`Project contains too many source files to validate (${paths.length})`);
+    throw new Error(
+      `Project contains too many source files to validate (${paths.length})`,
+    );
   }
-
-  const repairedFiles: Array<{ path: string; content: string }> = [];
-  let output = "";
 
   for (const relativePath of paths) {
     const extension = path.posix.extname(relativePath).toLowerCase();
@@ -309,21 +272,19 @@ async function validateStoredProject(sandbox: Sandbox) {
     });
     if (!buffer) continue;
     const content = buffer.toString("utf8");
-    const validationError = await validateCandidate(sandbox, relativePath, content);
-    if (!validationError) continue;
-
-    const repair = await repairFile(sandbox, relativePath, content, validationError);
-    await sandbox.writeFiles([
-      {
-        path: `${PROJECT_DIR}/${relativePath}`,
-        content: Buffer.from(repair.content, "utf8"),
-      },
-    ]);
-    repairedFiles.push({ path: relativePath, content: repair.content });
-    output += repair.output;
+    const validationError = await validateCandidate(
+      sandbox,
+      relativePath,
+      content,
+    );
+    if (validationError) {
+      throw new Error(
+        `Generated project validation failed for ${relativePath}: ${validationError}`,
+      );
+    }
   }
 
-  return { repairedFiles, output };
+  return { repairedFiles: [], output: "", repaired: false };
 }
 
 export async function POST(req: Request) {
@@ -345,8 +306,7 @@ export async function POST(req: Request) {
     const sandbox = await getSandbox(body.conversationId);
 
     if (body.operation === "file" && body.action) {
-      const result = await validateAndRepairAction(sandbox, body.action);
-      return Response.json(result);
+      return Response.json(await validateAction(sandbox, body.action));
     }
 
     if (body.operation === "actions") {
@@ -354,15 +314,11 @@ export async function POST(req: Request) {
         return Response.json({ error: "Invalid actions" }, { status: 400 });
       }
       const actions: ArtifactAction[] = [];
-      let output = "";
-      let repaired = false;
       for (const action of body.actions) {
-        const result = await validateAndRepairAction(sandbox, action);
+        const result = await validateAction(sandbox, action);
         actions.push(result.action);
-        output += result.output;
-        repaired ||= result.repaired;
       }
-      return Response.json({ actions, output, repaired });
+      return Response.json({ actions, output: "", repaired: false });
     }
 
     if (body.operation === "project") {
