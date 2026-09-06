@@ -118,9 +118,7 @@ async function runTextCommand(
 }
 
 function findProtocolMarker(content: string) {
-  return (
-    MODEL_PROTOCOL_MARKERS.find((marker) => content.includes(marker)) ?? null
-  );
+  return MODEL_PROTOCOL_MARKERS.find((marker) => content.includes(marker)) ?? null;
 }
 
 function formatDiagnostic(diagnostic: ts.Diagnostic) {
@@ -135,7 +133,17 @@ function validateJsonFile(filePath: string, content: string) {
   }
 
   try {
-    JSON.parse(content);
+    const parsed = JSON.parse(content) as any;
+    if (basename === "package.json") {
+      const dependencies = {
+        ...(parsed?.dependencies || {}),
+        ...(parsed?.devDependencies || {}),
+        ...(parsed?.peerDependencies || {}),
+      } as Record<string, unknown>;
+      if (Object.prototype.hasOwnProperty.call(dependencies, "@cryzo/cloud")) {
+        return "Do not install @cryzo/cloud. Cryzo Cloud is a managed platform API; generated apps must use a local fetch helper against /api/cloud/v1.";
+      }
+    }
     return null;
   } catch (error) {
     return error instanceof Error ? error.message : String(error);
@@ -162,7 +170,9 @@ async function validateSourceSyntax(
 
   const token = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const tempRelative = `${VALIDATION_DIR}/candidate-${token}${extension}`;
-  const outRelative = `${VALIDATION_DIR}/candidate-${token}.js`;
+  // Keep the output path distinct even when the input itself is .js. The old
+  // path collided for JS config files and made esbuild refuse validation.
+  const outRelative = `${VALIDATION_DIR}/candidate-${token}.out.js`;
 
   await sandbox.runCommand("mkdir", ["-p", `${PROJECT_DIR}/${VALIDATION_DIR}`]);
   await sandbox.writeFiles([
@@ -185,9 +195,7 @@ async function validateSourceSyntax(
     const stdout = await result.stdout();
     const stderr = await result.stderr();
     if (result.exitCode !== 0) {
-      return (stderr || stdout || "Generated source contains invalid syntax").slice(
-        -8000,
-      );
+      return (stderr || stdout || "Generated source contains invalid syntax").slice(-8000);
     }
     return null;
   } finally {
@@ -228,11 +236,7 @@ async function validateAction(sandbox: Sandbox, action: ArtifactAction) {
   }
 
   const filePath = safeRelativePath(action.filePath);
-  const validationError = await validateCandidate(
-    sandbox,
-    filePath,
-    action.content,
-  );
+  const validationError = await validateCandidate(sandbox, filePath, action.content);
   if (validationError) {
     throw new Error(
       `Generated file validation failed for ${filePath}: ${validationError}`,
@@ -272,11 +276,7 @@ async function validateStoredProject(sandbox: Sandbox) {
     });
     if (!buffer) continue;
     const content = buffer.toString("utf8");
-    const validationError = await validateCandidate(
-      sandbox,
-      relativePath,
-      content,
-    );
+    const validationError = await validateCandidate(sandbox, relativePath, content);
     if (validationError) {
       throw new Error(
         `Generated project validation failed for ${relativePath}: ${validationError}`,
