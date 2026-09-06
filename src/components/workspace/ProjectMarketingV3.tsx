@@ -43,7 +43,7 @@ type SocialPost = {
   mediaUrls?: string[];
 };
 type PublishingTarget = { id: string; name: string; username?: string };
-type AgentMessage = { role: "user" | "assistant"; content: string };
+type AgentMessage = { role: string; content: string };
 type UploadedMedia = {
   storageId: string;
   url: string;
@@ -217,7 +217,7 @@ export default function ProjectMarketingV3() {
             setFacebookPageId((current) => result.items.some((item) => item.id === current) ? current : result.items[0]?.id || "");
           } else {
             setInstagramTargets(result.items);
-            setInstagramUserId((current) => result.items.some((item) => item.id === current ? true : false) ? current : result.items[0]?.id || "");
+            setInstagramUserId((current) => result.items.some((item) => item.id === current) ? current : result.items[0]?.id || "");
           }
         }
       })
