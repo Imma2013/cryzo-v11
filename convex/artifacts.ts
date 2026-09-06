@@ -133,7 +133,6 @@ async function applyCloudResources(
       createdAt: now,
       updatedAt: now,
     });
-    app = await ctx.db.get(appId);
   } else {
     appId = app._id;
     await ctx.db.patch(appId, {
@@ -188,9 +187,11 @@ export const create = mutation({
       .filter((q) => q.eq(q.field("artifactId"), args.artifactId))
       .first();
 
-    if (existing) return existing._id;
-
+    // Re-apply declarative Cloud resources even when the artifact was already
+    // persisted by an older Cryzo version. This automatically backfills old
+    // projects whose files existed but whose dashboard still showed 0 tables.
     await applyCloudResources(ctx, conversation, args.actions as ArtifactActionInput[]);
+    if (existing) return existing._id;
 
     return await ctx.db.insert("artifacts", {
       conversationId: args.conversationId,
@@ -216,21 +217,17 @@ export const saveManualFile = mutation({
       throw new Error("Invalid project file path");
     }
 
+    const actions: ArtifactActionInput[] = [
+      { type: "file", filePath: path, content: args.content },
+    ];
+    await applyCloudResources(ctx, conversation, actions);
+
     const existing = await ctx.db
       .query("artifacts")
       .withIndex("by_conversation", (q) => q.eq("conversationId", args.conversationId))
       .filter((q) => q.eq(q.field("artifactId"), args.artifactId))
       .first();
     if (existing) return existing._id;
-
-    const actions: ArtifactActionInput[] = [
-      {
-        type: "file",
-        filePath: path,
-        content: args.content,
-      },
-    ];
-    await applyCloudResources(ctx, conversation, actions);
 
     return await ctx.db.insert("artifacts", {
       conversationId: args.conversationId,
