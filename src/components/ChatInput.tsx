@@ -6,8 +6,8 @@ import {
   ChevronDown,
   Globe2,
   Hammer,
-  Lightbulb,
   Loader2,
+  MessageCircle,
   Mic,
   MicOff,
   Plus,
@@ -115,9 +115,9 @@ const MODES: Array<{
   },
   {
     id: "plan",
-    label: "Plan",
-    description: "Discuss before building",
-    icon: Lightbulb,
+    label: "Discuss",
+    description: "Talk through ideas without changing code",
+    icon: MessageCircle,
   },
 ];
 
@@ -196,7 +196,10 @@ export function ChatInput({
       setPrefillNotice(detail.notice || "Prompt added to chat");
 
       if (prefillTimerRef.current) window.clearTimeout(prefillTimerRef.current);
-      prefillTimerRef.current = window.setTimeout(() => setPrefillNotice(null), 4500);
+      prefillTimerRef.current = window.setTimeout(
+        () => setPrefillNotice(null),
+        4500,
+      );
       window.setTimeout(() => {
         textareaRef.current?.focus();
         textareaRef.current?.setSelectionRange(prompt.length, prompt.length);
@@ -204,7 +207,11 @@ export function ChatInput({
     };
 
     window.addEventListener("cryzo:prefill-chat", handlePrefill as EventListener);
-    return () => window.removeEventListener("cryzo:prefill-chat", handlePrefill as EventListener);
+    return () =>
+      window.removeEventListener(
+        "cryzo:prefill-chat",
+        handlePrefill as EventListener,
+      );
   }, [chatMode, onChange, onChatModeChange]);
 
   useEffect(() => {
@@ -243,7 +250,10 @@ export function ChatInput({
       setAttachmentError(`You can attach up to ${MAX_ATTACHMENTS} images.`);
     }
 
-    setAttachments((current) => [...current, ...nextImages.map(createAttachment)]);
+    setAttachments((current) => [
+      ...current,
+      ...nextImages.map(createAttachment),
+    ]);
   };
 
   const removeAttachment = (id: string) => {
@@ -321,8 +331,7 @@ export function ChatInput({
       return;
     }
 
-    const Recognition =
-      window.SpeechRecognition || window.webkitSpeechRecognition;
+    const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!Recognition) return;
 
     const recognition = new Recognition();
@@ -419,7 +428,7 @@ export function ChatInput({
           onPaste={handlePaste}
           placeholder={
             chatMode === "plan"
-              ? "Plan before building..."
+              ? "Ask, debug, or plan without building..."
               : isHero
                 ? "Describe what you want to build..."
                 : "Ask Cryzo to build or edit..."
@@ -443,7 +452,10 @@ export function ChatInput({
                 {activeMode.label}
                 <ChevronDown
                   size={13}
-                  className={cn("transition-transform", modeOpen && "rotate-180")}
+                  className={cn(
+                    "transition-transform",
+                    modeOpen && "rotate-180",
+                  )}
                 />
               </button>
 
@@ -451,7 +463,9 @@ export function ChatInput({
                 <div
                   className={cn(
                     "absolute z-50 w-[min(310px,calc(100vw-2rem))] overflow-hidden rounded-xl border border-zinc-800 bg-zinc-950 p-1.5 shadow-2xl shadow-black/50",
-                    isHero ? "left-0 top-full mt-2" : "bottom-full left-0 mb-2",
+                    isHero
+                      ? "left-0 top-full mt-2"
+                      : "bottom-full left-0 mb-2",
                   )}
                   role="menu"
                 >
@@ -469,7 +483,10 @@ export function ChatInput({
                         className="flex w-full items-start gap-3 rounded-lg px-3 py-3 text-left hover:bg-zinc-900"
                         role="menuitem"
                       >
-                        <Icon size={17} className="mt-0.5 shrink-0 text-zinc-300" />
+                        <Icon
+                          size={17}
+                          className="mt-0.5 shrink-0 text-zinc-300"
+                        />
                         <span className="min-w-0 flex-1">
                           <span className="block text-sm font-medium text-white">
                             {mode.label}
@@ -478,7 +495,9 @@ export function ChatInput({
                             {mode.description}
                           </span>
                         </span>
-                        {selected && <Check size={16} className="mt-0.5 text-white" />}
+                        {selected && (
+                          <Check size={16} className="mt-0.5 text-white" />
+                        )}
                       </button>
                     );
                   })}
@@ -487,48 +506,49 @@ export function ChatInput({
             </div>
 
             <div className="flex min-w-0 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-            <ModelPicker
-              selection={modelSelection}
-              onChange={onModelSelectionChange}
-              compact
-            />
+              <ModelPicker
+                selection={modelSelection}
+                onChange={onModelSelectionChange}
+                compact
+              />
 
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*"
-              multiple
-              className="hidden"
-              onChange={handleFileChange}
-            />
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={disabled || attachments.length >= MAX_ATTACHMENTS}
-              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-zinc-400 transition-colors hover:bg-zinc-900 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
-              title="Upload image"
-            >
-              <Plus size={20} />
-            </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                className="hidden"
+                onChange={handleFileChange}
+              />
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={disabled || attachments.length >= MAX_ATTACHMENTS}
+                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-zinc-400 transition-colors hover:bg-zinc-900 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+                title="Upload image"
+              >
+                <Plus size={20} />
+              </button>
 
-            <button
-              type="button"
-              onClick={toggleListening}
-              disabled={!speechSupported || disabled || isLoading}
-              className={cn(
-                "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-zinc-400 transition-colors hover:bg-zinc-900 hover:text-white disabled:cursor-not-allowed disabled:opacity-40",
-                isListening && "bg-red-500/10 text-red-400 hover:text-red-300",
-              )}
-              title={
-                speechSupported
-                  ? isListening
-                    ? "Stop voice input"
-                    : "Start voice input"
-                  : "Voice input is not supported in this browser"
-              }
-            >
-              {isListening ? <MicOff size={18} /> : <Mic size={18} />}
-            </button>
+              <button
+                type="button"
+                onClick={toggleListening}
+                disabled={!speechSupported || disabled || isLoading}
+                className={cn(
+                  "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-zinc-400 transition-colors hover:bg-zinc-900 hover:text-white disabled:cursor-not-allowed disabled:opacity-40",
+                  isListening &&
+                    "bg-red-500/10 text-red-400 hover:text-red-300",
+                )}
+                title={
+                  speechSupported
+                    ? isListening
+                      ? "Stop voice input"
+                      : "Start voice input"
+                    : "Voice input is not supported in this browser"
+                }
+              >
+                {isListening ? <MicOff size={18} /> : <Mic size={18} />}
+              </button>
             </div>
           </div>
 
@@ -544,8 +564,14 @@ export function ChatInput({
             )}
             aria-label={isLoading ? "Stop generation" : "Send message"}
           >
-            {isLoading ? <Square size={15} fill="currentColor" /> : <Send size={15} />}
-            <span className="hidden md:inline">{isLoading ? "Stop" : "Send"}</span>
+            {isLoading ? (
+              <Square size={15} fill="currentColor" />
+            ) : (
+              <Send size={15} />
+            )}
+            <span className="hidden md:inline">
+              {isLoading ? "Stop" : "Send"}
+            </span>
           </button>
         </div>
 
