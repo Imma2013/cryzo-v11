@@ -1,6 +1,9 @@
 import { Composio } from "@composio/core";
 import { VercelProvider } from "@composio/vercel";
 import {
+  createUIMessageStream,
+  createUIMessageStreamResponse,
+  generateId,
   streamText,
   stepCountIs,
   convertToModelMessages,
@@ -24,6 +27,11 @@ import {
 } from "@/lib/project-platform";
 
 const convex = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
+const MAX_BUILD_SEGMENTS = 3;
+const CONTINUE_BUILD_PROMPT = `Continue the previous build response exactly where it stopped.
+Do not restart the artifact and do not repeat any completed cryzoAction.
+If the response stopped inside a file action, continue that file's raw contents first, then close the action normally.
+Finish every remaining required file/action and close the cryzoArtifact. Output only the continuation.`;
 
 let composio: Composio<VercelProvider>;
 function getComposio() {
@@ -101,6 +109,19 @@ function hasAttachedContent(messages: UIMessage[]) {
   );
 }
 
+function needsBuildContinuation(text: string, finishReason: string) {
+  if (finishReason === "length") return true;
+  if (!text.includes("<cryzoArtifact")) return false;
+
+  const artifactOpen = text.lastIndexOf("<cryzoArtifact");
+  const artifactClose = text.lastIndexOf("</cryzoArtifact>");
+  if (artifactOpen > artifactClose) return true;
+
+  const actionOpenCount = text.match(/<cryzoAction\b/g)?.length ?? 0;
+  const actionCloseCount = text.match(/<\/cryzoAction>/g)?.length ?? 0;
+  return actionOpenCount > actionCloseCount;
+}
+
 type CloudConfig = {
   name?: string;
   auth?: { providers?: string[] };
@@ -134,7 +155,11 @@ function buildCurrentProjectContext(artifacts: any[]) {
   const latest = new Map<string, string>();
   for (const artifact of artifacts || []) {
     for (const action of artifact?.actions || []) {
-      if (action?.type === "file" && action.filePath && typeof action.content === "string") {
+      if (
+        action?.type === "file" &&
+        action.filePath &&
+        typeof action.content === "string"
+      ) {
         latest.set(action.filePath, action.content);
       }
     }
@@ -195,7 +220,9 @@ export async function POST(req: Request) {
     };
 
     const mode = chatMode === "plan" ? "plan" : "build";
-    const lastUserMsg = messages.filter((message) => message.role === "user").pop();
+    const lastUserMsg = messages
+      .filter((message) => message.role === "user")
+      .pop();
     const lastUserText = messageText(lastUserMsg);
     const resolved = await resolveServerModel({
       providerId: modelProvider,
@@ -248,7 +275,10 @@ export async function POST(req: Request) {
           storedProjectPlatforms = stored as ProjectPlatform[];
         }
       } catch (error) {
-        console.warn("Unable to load stored project platform; inferring from prompt", error);
+        console.warn(
+          "Unable to load stored project platform; inferring from prompt",
+          error,
+        );
       }
     }
 
@@ -263,9 +293,12 @@ export async function POST(req: Request) {
     const authenticatedConvex = authedConvexClient(authToken);
     if (conversationId && authenticatedConvex) {
       try {
-        const artifacts = await authenticatedConvex.query(api.artifacts.listByConversation, {
-          conversationId: conversationId as any,
-        });
+        const artifacts = await authenticatedConvex.query(
+          api.artifacts.listByConversation,
+          {
+            conversationId: conversationId as any,
+          },
+        );
         currentProjectContext = buildCurrentProjectContext(artifacts as any[]);
       } catch (error) {
         console.warn("Unable to load current project source for model context", error);
@@ -321,9 +354,12 @@ export async function POST(req: Request) {
     if (mode === "plan") {
       const result = streamText({
         model: resolved.model,
-        system: buildPlanPrompt(recipeBlock, resolvedProjectPlatforms) + currentProjectContext,
+        system:
+          buildPlanPrompt(recipeBlock, resolvedProjectPlatforms) +
+          currentProjectContext,
         messages: modelMessages,
         stopWhen: stepCountIs(5),
+        maxRetries: 2,
       });
 
       if (messageCharge > 0 && userId) {
@@ -364,27 +400,29 @@ export async function POST(req: Request) {
       }
     }
 
-    const systemPrompt = buildCryzoSystemPrompt({
-      useComposioTools,
-      recipeBlock,
-      projectPlatforms: resolvedProjectPlatforms,
-      cryzoCloudAppId,
-    }) + currentProjectContext;
+    const systemPrompt =
+      buildCryzoSystemPrompt({
+        useComposioTools,
+        recipeBlock,
+        projectPlatforms: resolvedProjectPlatforms,
+        cryzoCloudAppId,
+      }) + currentProjectContext;
 
     let responseSessionId = composioSessionId;
-    let result;
+    let response: Response;
 
     if (useComposioTools) {
       const client = getComposio();
       const session = await client.create(userId || "anonymous");
       const tools = await session.tools();
       responseSessionId = session.sessionId;
-      result = streamText({
+      const result = streamText({
         model: resolved.model,
         system: systemPrompt,
         messages: modelMessages,
         tools,
         stopWhen: stepCountIs(10),
+        maxRetries: 2,
         onStepFinish: async (step) => {
           if (!userId) return;
           const calls = Array.isArray((step as any).toolCalls)
@@ -407,16 +445,59 @@ export async function POST(req: Request) {
           await syncGeneratedCloudConfig(text || "");
         },
       });
+      response = result.toUIMessageStreamResponse();
     } else {
-      result = streamText({
-        model: resolved.model,
-        system: systemPrompt,
-        messages: modelMessages,
-        stopWhen: stepCountIs(10),
-        onFinish: async ({ text }) => {
-          await syncGeneratedCloudConfig(text || "");
+      const textId = generateId();
+      const uiStream = createUIMessageStream({
+        originalMessages: messages,
+        onError: (error) => {
+          const message = error instanceof Error ? error.message : String(error);
+          console.error("[chat/build-stream]", error);
+          return message;
+        },
+        execute: async ({ writer }) => {
+          writer.write({ type: "text-start", id: textId });
+
+          let continuationMessages: any[] = [...modelMessages];
+          let fullText = "";
+
+          for (let segment = 0; segment < MAX_BUILD_SEGMENTS; segment++) {
+            const result = streamText({
+              model: resolved.model,
+              system: systemPrompt,
+              messages: continuationMessages,
+              maxRetries: 2,
+            });
+
+            let segmentText = "";
+            for await (const delta of result.textStream) {
+              segmentText += delta;
+              fullText += delta;
+              writer.write({ type: "text-delta", id: textId, delta });
+            }
+
+            const finishReason = await result.finishReason;
+            const needsMore = needsBuildContinuation(fullText, finishReason);
+            if (!needsMore) break;
+
+            if (segment === MAX_BUILD_SEGMENTS - 1) {
+              throw new Error(
+                "The selected model could not finish the build after automatic continuation.",
+              );
+            }
+
+            continuationMessages = [
+              ...continuationMessages,
+              { role: "assistant", content: segmentText },
+              { role: "user", content: CONTINUE_BUILD_PROMPT },
+            ];
+          }
+
+          writer.write({ type: "text-end", id: textId });
+          await syncGeneratedCloudConfig(fullText);
         },
       });
+      response = createUIMessageStreamResponse({ stream: uiStream });
     }
 
     if (messageCharge > 0 && userId) {
@@ -430,18 +511,26 @@ export async function POST(req: Request) {
       });
     }
 
-    return result.toUIMessageStreamResponse({
-      headers: {
-        ...(responseSessionId
-          ? { "x-composio-session-id": responseSessionId }
-          : {}),
-        "x-cryzo-model-provider": resolved.providerId,
-        "x-cryzo-model-id": resolved.modelId,
-        "x-cryzo-billing-tier": resolved.billingTier,
-        "x-cryzo-message-credits": String(messageCharge),
-        "x-cryzo-integration-credits": useComposioTools ? "metered" : "0",
-        ...(cryzoCloudAppId ? { "x-cryzo-cloud-app-id": cryzoCloudAppId } : {}),
-      },
+    const headers = new Headers(response.headers);
+    if (responseSessionId) {
+      headers.set("x-composio-session-id", responseSessionId);
+    }
+    headers.set("x-cryzo-model-provider", resolved.providerId);
+    headers.set("x-cryzo-model-id", resolved.modelId);
+    headers.set("x-cryzo-billing-tier", resolved.billingTier);
+    headers.set("x-cryzo-message-credits", String(messageCharge));
+    headers.set(
+      "x-cryzo-integration-credits",
+      useComposioTools ? "metered" : "0",
+    );
+    if (cryzoCloudAppId) {
+      headers.set("x-cryzo-cloud-app-id", cryzoCloudAppId);
+    }
+
+    return new Response(response.body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Model request failed";
