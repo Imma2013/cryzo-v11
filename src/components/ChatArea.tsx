@@ -34,6 +34,12 @@ import { buildLocalSystemPrompt } from "@/lib/ai/local-prompt";
 import type { ElementInfo } from "./workspace/LivePreview";
 import { Id } from "../../convex/_generated/dataModel";
 
+const MAX_LOCAL_BUILD_SEGMENTS = 3;
+const LOCAL_CONTINUE_BUILD_PROMPT = `Continue the previous build response exactly where it stopped.
+Do not restart the artifact and do not repeat completed cryzoAction blocks.
+If you stopped inside a file action, continue the raw file contents first, close that action, then finish the remaining actions and close the cryzoArtifact.
+Output only the continuation.`;
+
 function hasVisibleAssistantContent(message: UIMessage) {
   return (
     message.parts?.some((part) => {
@@ -49,7 +55,9 @@ function hasVisibleAssistantContent(message: UIMessage) {
 function textFromMessage(message: UIMessage) {
   return (
     message.parts
-      ?.filter((part): part is { type: "text"; text: string } => part.type === "text")
+      ?.filter(
+        (part): part is { type: "text"; text: string } => part.type === "text",
+      )
       .map((part) => part.text)
       .join("\n") || ""
   );
@@ -59,6 +67,25 @@ function localMessageId(prefix: string) {
   return typeof crypto !== "undefined" && "randomUUID" in crypto
     ? `${prefix}-${crypto.randomUUID()}`
     : `${prefix}-${Date.now()}-${Math.random()}`;
+}
+
+function localBuildNeedsContinuation(text: string, finishReason?: string | null) {
+  const artifactOpen = text.lastIndexOf("<cryzoArtifact");
+  const artifactClose = text.lastIndexOf("</cryzoArtifact>");
+  const actionOpenCount = text.match(/<cryzoAction\b/g)?.length ?? 0;
+  const actionCloseCount = text.match(/<\/cryzoAction>/g)?.length ?? 0;
+
+  const completeArtifact =
+    artifactOpen !== -1 &&
+    artifactClose > artifactOpen &&
+    actionOpenCount === actionCloseCount;
+  if (completeArtifact) return false;
+
+  return (
+    finishReason === "length" ||
+    artifactOpen > artifactClose ||
+    actionOpenCount > actionCloseCount
+  );
 }
 
 export function ChatArea({
@@ -118,10 +145,12 @@ export function ChatArea({
     optimisticModel?.conversationId === conversationId
       ? optimisticModel.selection
       : {
-          providerId: conversation?.modelProvider || DEFAULT_MODEL_SELECTION.providerId,
+          providerId:
+            conversation?.modelProvider || DEFAULT_MODEL_SELECTION.providerId,
           modelId: conversation?.modelId || DEFAULT_MODEL_SELECTION.modelId,
           credentialMode:
-            conversation?.modelCredentialMode || DEFAULT_MODEL_SELECTION.credentialMode,
+            conversation?.modelCredentialMode ||
+            DEFAULT_MODEL_SELECTION.credentialMode,
           baseURL: conversation?.modelBaseUrl,
         };
 
@@ -180,7 +209,13 @@ export function ChatArea({
       }
     }
     prevStatusRef.current = status;
-  }, [status, debouncedSave, conversation?.title, conversationId, generateTitle]);
+  }, [
+    status,
+    debouncedSave,
+    conversation?.title,
+    conversationId,
+    generateTitle,
+  ]);
 
   useEffect(() => {
     return () => {
@@ -313,10 +348,7 @@ export function ChatArea({
       const userMessage: UIMessage = {
         id: localMessageId("user"),
         role: "user",
-        parts: [
-          { type: "text", text },
-          ...fileParts,
-        ],
+        parts: [{ type: "text", text }, ...fileParts],
       };
       const assistantId = localMessageId("assistant");
       const assistantMessage: UIMessage = {
@@ -327,7 +359,10 @@ export function ChatArea({
       liveMessageIdsRef.current.add(assistantId);
 
       const history = messagesRef.current
-        .filter((message) => message.role === "user" || message.role === "assistant")
+        .filter(
+          (message) =>
+            message.role === "user" || message.role === "assistant",
+        )
         .map((message) => ({
           role: message.role,
           content: textFromMessage(message),
@@ -344,82 +379,131 @@ export function ChatArea({
         ? [{ type: "text", text }, ...imageParts]
         : text;
 
-      let nextMessages = [...messagesRef.current, userMessage, assistantMessage];
+      let nextMessages = [
+        ...messagesRef.current,
+        userMessage,
+        assistantMessage,
+      ];
       messagesRef.current = nextMessages;
       setMessages(nextMessages);
 
+      let assistantText = "";
+      const updateAssistant = (content: string) => {
+        nextMessages = nextMessages.map((message) =>
+          message.id === assistantId
+            ? {
+                ...message,
+                parts: [{ type: "text" as const, text: content }],
+              }
+            : message,
+        );
+        messagesRef.current = nextMessages;
+        setMessages(nextMessages);
+      };
+
       try {
-        const response = await fetch(`${baseURL}/chat/completions`, {
-          method: "POST",
-          signal: controller.signal,
-          headers: {
-            "Content-Type": "application/json",
-            ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
-          },
-          body: JSON.stringify({
-            model: selection.modelId,
-            stream: true,
-            messages: [
-              { role: "system", content: buildLocalSystemPrompt(mode) },
-              ...history,
-              { role: "user", content: localUserContent },
-            ],
-          }),
-        });
-        if (!response.ok) {
-          const detail = await response.text();
-          throw new Error(detail || `Local model returned HTTP ${response.status}`);
-        }
-        if (!response.body) throw new Error("Local model returned no response body");
+        let wireMessages: any[] = [
+          { role: "system", content: buildLocalSystemPrompt(mode) },
+          ...history,
+          { role: "user", content: localUserContent },
+        ];
 
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = "";
-        let assistantText = "";
+        const segmentLimit = mode === "build" ? MAX_LOCAL_BUILD_SEGMENTS : 1;
+        for (let segment = 0; segment < segmentLimit; segment++) {
+          const response = await fetch(`${baseURL}/chat/completions`, {
+            method: "POST",
+            signal: controller.signal,
+            headers: {
+              "Content-Type": "application/json",
+              ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+            },
+            body: JSON.stringify({
+              model: selection.modelId,
+              stream: true,
+              messages: wireMessages,
+            }),
+          });
+          if (!response.ok) {
+            const detail = await response.text();
+            throw new Error(
+              detail || `Local model returned HTTP ${response.status}`,
+            );
+          }
+          if (!response.body) {
+            throw new Error("Local model returned no response body");
+          }
 
-        const updateAssistant = (content: string) => {
-          nextMessages = nextMessages.map((message) =>
-            message.id === assistantId
-              ? { ...message, parts: [{ type: "text" as const, text: content }] }
-              : message,
-          );
-          messagesRef.current = nextMessages;
-          setMessages(nextMessages);
-        };
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = "";
+          let segmentText = "";
+          let finishReason: string | null = null;
 
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split("\n");
-          buffer = lines.pop() || "";
-          for (const raw of lines) {
-            const line = raw.trim();
-            if (!line || !line.startsWith("data:")) continue;
-            const payload = line.slice(5).trim();
-            if (!payload || payload === "[DONE]") continue;
+          const consumePayload = (payload: string) => {
+            if (!payload || payload === "[DONE]") return;
             try {
               const parsed = JSON.parse(payload);
+              const choice = parsed.choices?.[0];
               const delta =
-                parsed.choices?.[0]?.delta?.content ??
-                parsed.choices?.[0]?.message?.content ??
-                "";
+                choice?.delta?.content ?? choice?.message?.content ?? "";
               if (typeof delta === "string" && delta) {
+                segmentText += delta;
                 assistantText += delta;
                 updateAssistant(assistantText);
+              }
+              if (typeof choice?.finish_reason === "string") {
+                finishReason = choice.finish_reason;
               }
             } catch {
               // Some local servers emit keepalive/non-JSON SSE frames.
             }
-          }
-        }
+          };
 
-        if (!assistantText && buffer.trim()) {
-          try {
-            const parsed = JSON.parse(buffer.replace(/^data:\s*/, ""));
-            assistantText = parsed.choices?.[0]?.message?.content || "";
-            if (assistantText) updateAssistant(assistantText);
-          } catch {}
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split("\n");
+            buffer = lines.pop() || "";
+            for (const raw of lines) {
+              const line = raw.trim();
+              if (!line || !line.startsWith("data:")) continue;
+              consumePayload(line.slice(5).trim());
+            }
+          }
+
+          buffer += decoder.decode();
+          const tail = buffer.trim();
+          if (tail) {
+            if (tail.startsWith("data:")) {
+              consumePayload(tail.slice(5).trim());
+            } else {
+              consumePayload(tail);
+            }
+          }
+
+          if (!segmentText && !assistantText) {
+            throw new Error("Local model returned an empty response");
+          }
+
+          if (
+            mode !== "build" ||
+            !localBuildNeedsContinuation(assistantText, finishReason)
+          ) {
+            break;
+          }
+
+          if (segment === segmentLimit - 1) {
+            throw new Error(
+              "The local model could not finish the build after automatic continuation.",
+            );
+          }
+
+          wireMessages = [
+            ...wireMessages,
+            { role: "assistant", content: segmentText },
+            { role: "user", content: LOCAL_CONTINUE_BUILD_PROMPT },
+          ];
         }
 
         debouncedSave();
@@ -428,14 +512,22 @@ export function ChatArea({
         }
       } catch (error) {
         if (!(error instanceof DOMException && error.name === "AbortError")) {
-          setLocalError(error instanceof Error ? error.message : "Local model request failed");
+          setLocalError(
+            error instanceof Error ? error.message : "Local model request failed",
+          );
         }
       } finally {
         localAbortRef.current = null;
         setLocalLoading(false);
       }
     },
-    [conversation?.title, conversationId, debouncedSave, generateTitle, setMessages],
+    [
+      conversation?.title,
+      conversationId,
+      debouncedSave,
+      generateTitle,
+      setMessages,
+    ],
   );
 
   const sendPreparedMessage = useCallback(
@@ -470,7 +562,8 @@ export function ChatArea({
             modelCredentialMode: selection.credentialMode,
             modelBaseUrl,
             modelApiKey,
-            authToken: selection.credentialMode === "account" ? authToken : undefined,
+            authToken:
+              selection.credentialMode === "account" ? authToken : undefined,
           },
         },
       );
@@ -613,7 +706,8 @@ export function ChatArea({
                                     tasks={[
                                       {
                                         id: "build",
-                                        title: streamingTitle || "Building project",
+                                        title:
+                                          streamingTitle || "Building project",
                                         description: "Generating your application",
                                         status: "in-progress",
                                         priority: "high",
@@ -652,7 +746,9 @@ export function ChatArea({
                             <ToolCallDisplay
                               key={i}
                               state={
-                                part.state === "output-available" ? "result" : "call"
+                                part.state === "output-available"
+                                  ? "result"
+                                  : "call"
                               }
                               hideWhenComplete={hasAssistantContent}
                             />
@@ -674,7 +770,8 @@ export function ChatArea({
               )}
 
               {(error || localError) &&
-                (error?.message?.includes("no_credits") || error?.message?.includes("402") ? (
+                (error?.message?.includes("no_credits") ||
+                error?.message?.includes("402") ? (
                   <div className="rounded-xl border border-yellow-800 bg-yellow-900/20 px-4 py-3 text-sm text-yellow-300">
                     <p className="font-medium">Out of credits</p>
                     <p className="mt-1 text-yellow-400/80">
