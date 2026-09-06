@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  ACTIVE_MARKETING_TOOLKITS,
   SOCIAL_TOOLKITS,
   composioSocialSessionOptions,
+  isActiveMarketingToolkit,
   socialAuthConfig,
 } from "../src/lib/server/composio-social";
 
@@ -16,7 +18,7 @@ afterEach(() => {
 });
 
 describe("social Composio configuration", () => {
-  it("supports every Marketing network", () => {
+  it("keeps every wired social integration available for future re-enabling", () => {
     expect(SOCIAL_TOOLKITS).toEqual([
       "twitter",
       "facebook",
@@ -26,6 +28,19 @@ describe("social Composio configuration", () => {
       "tiktok",
       "linkedin",
     ]);
+  });
+
+  it("exposes only funded/supported networks in the current Marketing product", () => {
+    expect(ACTIVE_MARKETING_TOOLKITS).toEqual([
+      "facebook",
+      "instagram",
+      "youtube",
+      "linkedin",
+    ]);
+    expect(isActiveMarketingToolkit("linkedin")).toBe(true);
+    expect(isActiveMarketingToolkit("twitter")).toBe(false);
+    expect(isActiveMarketingToolkit("reddit")).toBe(false);
+    expect(isActiveMarketingToolkit("tiktok")).toBe(false);
   });
 
   it("uses the custom LinkedIn auth config and exact connected account", () => {

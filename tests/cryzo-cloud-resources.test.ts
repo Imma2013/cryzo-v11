@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  backendRequirementPrompt,
   backendRequirementsFromPrompt,
   missingBackendRequirements,
   parseCryzoCloudResources,
@@ -27,7 +28,7 @@ describe("Cryzo Cloud build resources", () => {
   });
 
   it("gates explicit database and auth requests", () => {
-    const requirements = backendRequirementsFromPrompt("add a database and Google login");
+    const requirements = backendRequirementsFromPrompt("add a db and Google login");
     expect(requirements.database).toBe(true);
     expect(requirements.auth).toBe(true);
     expect(requirements.googleAuth).toBe(true);
@@ -36,5 +37,13 @@ describe("Cryzo Cloud build resources", () => {
       entities: [],
       functions: [],
     })).toEqual(["database entities", "authentication config", "Google authentication"]);
+  });
+
+  it("forbids the nonexistent generated-app @cryzo/cloud package", () => {
+    const requirements = backendRequirementsFromPrompt("add a database for saved meals");
+    const prompt = backendRequirementPrompt(requirements);
+    expect(prompt).toContain("NEVER add @cryzo/cloud");
+    expect(prompt).toContain("src/lib/cryzo-cloud.ts");
+    expect(prompt).toContain("managed HTTPS API");
   });
 });

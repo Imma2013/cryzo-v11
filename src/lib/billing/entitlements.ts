@@ -36,14 +36,15 @@ export function canUseExternalCustomDomains(plan?: string | null) {
   return atLeast(plan, "builder");
 }
 
-// App creation and store delivery are not Cryzo subscription gates. Users
-// provide their own Expo/store credentials and pay Apple/Google fees directly.
-export function canUseManagedMobileBuilds(_plan?: string | null) {
-  return true;
+// Native Expo source and store-readiness scans stay free/open. Cryzo-managed
+// EAS compute and one-click store delivery are hosted convenience features and
+// start on Builder. Self-hosted users can always export and run EAS themselves.
+export function canUseManagedMobileBuilds(plan?: string | null) {
+  return atLeast(plan, "builder");
 }
 
-export function canUseManagedStoreSubmission(_plan?: string | null) {
-  return true;
+export function canUseManagedStoreSubmission(plan?: string | null) {
+  return atLeast(plan, "builder");
 }
 
 export function canUseManagedBackendProvisioning(_plan?: string | null) {
@@ -72,8 +73,8 @@ export function entitlementSnapshot(plan?: string | null) {
     managedBrandingRemoval: canRemoveManagedBranding(normalized),
     managedCryzoUrlRename: true,
     managedCustomDomains: canUseExternalCustomDomains(normalized),
-    managedMobileBuilds: true,
-    managedStoreSubmission: true,
+    managedMobileBuilds: canUseManagedMobileBuilds(normalized),
+    managedStoreSubmission: canUseManagedStoreSubmission(normalized),
     managedBackendProvisioning: true,
     customBackendFunctions: canUseCustomBackendFunctions(normalized),
   };
