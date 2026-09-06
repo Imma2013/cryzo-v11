@@ -1,6 +1,14 @@
 export const SOCIAL_TOOLKITS = ["twitter", "facebook", "instagram", "youtube", "reddit", "tiktok", "linkedin"] as const;
 export type SocialToolkit = typeof SOCIAL_TOOLKITS[number];
 
+// Marketing currently exposes only the networks we want to actively support.
+// The other integrations remain wired so they can be re-enabled without a
+// schema migration or reconnect flow.
+export const ACTIVE_MARKETING_TOOLKITS = ["facebook", "instagram", "youtube", "linkedin"] as const;
+export type ActiveMarketingToolkit = typeof ACTIVE_MARKETING_TOOLKITS[number];
+
+export const ACTIVE_MARKETING_CHANNELS = ["facebook", "instagram", "youtube", "linkedin"] as const;
+
 export const MANAGED_SOCIAL_TOOLKITS = ["facebook", "instagram", "youtube", "reddit", "linkedin"] as const;
 export const CUSTOM_SOCIAL_TOOLKITS = ["twitter", "tiktok"] as const;
 
@@ -13,6 +21,12 @@ export function supportsManagedSocialAuth(toolkit: string) {
 export function requiresCustomSocialAuth(toolkit: string) {
   return CUSTOM_SOCIAL_TOOLKITS.includes(
     toolkit as (typeof CUSTOM_SOCIAL_TOOLKITS)[number],
+  );
+}
+
+export function isActiveMarketingToolkit(toolkit: string) {
+  return ACTIVE_MARKETING_TOOLKITS.includes(
+    toolkit as (typeof ACTIVE_MARKETING_TOOLKITS)[number],
   );
 }
 
