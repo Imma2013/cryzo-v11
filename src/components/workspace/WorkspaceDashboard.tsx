@@ -12,17 +12,19 @@ import {
   Globe2,
   KeyRound,
   Loader2,
+  Server,
   Users,
 } from "lucide-react";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { useAuth } from "@/providers/AuthProvider";
 
-type DashboardSection = "data" | "users" | "apps" | "code" | "domains";
+type DashboardSection = "data" | "users" | "backend" | "apps" | "code" | "domains";
 
 const NAVIGATION = [
   { id: "data" as const, label: "Data", icon: Database },
-  { id: "users" as const, label: "Users", icon: Users },
+  { id: "users" as const, label: "Auth & Users", icon: Users },
+  { id: "backend" as const, label: "Backend", icon: Server },
   { id: "apps" as const, label: "Apps", icon: AppWindow },
   { id: "code" as const, label: "Code", icon: Code2 },
   { id: "domains" as const, label: "Domains", icon: Globe2 },
@@ -64,6 +66,8 @@ function WorkspaceDashboardContent({
 
   const users = (overview?.users || []) as Array<Record<string, unknown>>;
   const entities = overview?.entities || [];
+  const usage = overview?.usage || [];
+  const authProviders = overview?.app?.authProviders || ["password"];
   const target = publishTarget as
     | { url?: string; customDomain?: string; slug?: string }
     | null
@@ -83,9 +87,20 @@ function WorkspaceDashboardContent({
     if (section === "users") {
       return (
         <section className="mx-auto w-full max-w-5xl p-5 sm:p-8">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-400">Authentication</p>
-          <h2 className="mt-2 text-2xl font-semibold text-white">Users</h2>
-          <p className="mt-1 text-sm text-zinc-500">People signed in to this generated app.</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-400">Cryzo Cloud authentication</p>
+          <div className="mt-2 flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <h2 className="text-2xl font-semibold text-white">Auth & Users</h2>
+              <p className="mt-1 text-sm text-zinc-500">Managed identities and sessions for this generated app.</p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {authProviders.map((provider) => (
+                <span key={provider} className="rounded-full border border-sky-500/20 bg-sky-500/10 px-3 py-1 text-xs font-medium capitalize text-sky-300">
+                  {provider}
+                </span>
+              ))}
+            </div>
+          </div>
           <div className="mt-6 overflow-hidden rounded-2xl border border-zinc-800 bg-black/40">
             {users.length === 0 ? (
               <div className="px-5 py-12 text-center text-sm text-zinc-500">No app users yet.</div>
@@ -103,6 +118,42 @@ function WorkspaceDashboardContent({
                 </div>
               ))
             )}
+          </div>
+        </section>
+      );
+    }
+
+    if (section === "backend") {
+      return (
+        <section className="mx-auto w-full max-w-5xl p-5 sm:p-8">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-violet-400">Cryzo Cloud backend</p>
+          <h2 className="mt-2 text-2xl font-semibold text-white">Backend</h2>
+          <p className="mt-1 text-sm text-zinc-500">The managed API boundary powering database and authentication for this app.</p>
+          <div className="mt-6 grid gap-3 sm:grid-cols-3">
+            <div className="rounded-2xl border border-zinc-800 bg-black/40 p-5">
+              <p className="text-xs text-zinc-500">Database</p>
+              <p className="mt-2 text-2xl font-semibold text-white">{entities.length}</p>
+              <p className="mt-1 text-xs text-zinc-600">{entities.length === 1 ? "entity" : "entities"}</p>
+            </div>
+            <div className="rounded-2xl border border-zinc-800 bg-black/40 p-5">
+              <p className="text-xs text-zinc-500">Authentication</p>
+              <p className="mt-2 text-sm font-semibold text-white">{authProviders.map((provider) => provider[0].toUpperCase() + provider.slice(1)).join(" + ")}</p>
+              <p className="mt-1 text-xs text-zinc-600">managed sessions</p>
+            </div>
+            <div className="rounded-2xl border border-zinc-800 bg-black/40 p-5">
+              <p className="text-xs text-zinc-500">Recent backend usage</p>
+              <p className="mt-2 text-2xl font-semibold text-white">{usage.length}</p>
+              <p className="mt-1 text-xs text-zinc-600">tracked operations</p>
+            </div>
+          </div>
+          <div className="mt-4 rounded-2xl border border-zinc-800 bg-black/40 p-5">
+            <div className="flex items-start gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-violet-500/10 text-violet-300"><Server size={18} /></div>
+              <div>
+                <p className="text-sm font-semibold text-white">Managed API</p>
+                <p className="mt-1 text-xs leading-5 text-zinc-500">Generated apps call Cryzo Cloud through the managed <code className="text-zinc-300">/api/cloud/v1</code> endpoint. App IDs are public; identity, authorization, data access, and usage enforcement stay server-side.</p>
+              </div>
+            </div>
           </div>
         </section>
       );
@@ -171,7 +222,7 @@ function WorkspaceDashboardContent({
 
     return (
       <section className="mx-auto w-full max-w-6xl p-5 sm:p-8">
-        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-rose-400">Convex Cloud</p>
+        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-rose-400">Cryzo Cloud</p>
         <div className="mt-2 flex flex-wrap items-end justify-between gap-3">
           <div>
             <h2 className="text-2xl font-semibold text-white">Data</h2>
@@ -185,7 +236,7 @@ function WorkspaceDashboardContent({
           <div className="mt-6 rounded-2xl border border-dashed border-zinc-800 py-16 text-center">
             <Database className="mx-auto text-zinc-700" size={30} />
             <p className="mt-3 text-sm font-medium text-zinc-300">No data tables yet</p>
-            <p className="mt-1 text-xs text-zinc-600">Tables appear here when Cryzo adds cloud entities to the app.</p>
+            <p className="mt-1 text-xs text-zinc-600">Ask Cryzo to add a database or persistent data. Tables appear here as part of the build.</p>
           </div>
         ) : (
           <div className="mt-6 grid min-h-0 gap-4 lg:grid-cols-[240px_minmax(0,1fr)]">
@@ -226,10 +277,10 @@ function WorkspaceDashboardContent({
   })();
 
   return (
-    <div className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] bg-[#08090b] md:grid-cols-[190px_minmax(0,1fr)] md:grid-rows-1">
+    <div className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] bg-[#08090b] md:grid-cols-[210px_minmax(0,1fr)] md:grid-rows-1">
       <nav className="flex gap-1 overflow-x-auto border-b border-zinc-800 bg-[#0b0d10] p-2 md:block md:border-b-0 md:border-r md:p-3">
         <div className="mb-4 hidden px-2 pt-2 md:block">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-zinc-600">Project</p>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-zinc-600">Cryzo Cloud</p>
           <p className="mt-1 truncate text-sm font-semibold text-white">{overview?.app?.name || "Cryzo app"}</p>
         </div>
         {NAVIGATION.map((item) => {
@@ -252,7 +303,6 @@ function WorkspaceDashboardContent({
     </div>
   );
 }
-
 
 type DashboardBoundaryProps = {
   children: ReactNode;
