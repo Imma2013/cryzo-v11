@@ -7,7 +7,7 @@ The hosted product lives at **cryzo.me**. This repository is the community/self-
 ## What Cryzo includes
 
 - **AI builder** — build and edit apps by chatting with managed models, BYOK providers, or supported local OpenAI-compatible models.
-- **Web apps** — React + Vite projects run inside persistent Vercel Sandbox workspaces during hosted development.
+- **Web apps** — React + Vite projects run in disposable remote Linux sandboxes during hosted development. Cryzo prefers Modal Sandboxes when configured and can fall back to non-persistent Vercel Sandbox compute.
 - **Native mobile apps** — one Expo + React Native codebase can target iOS and Android. New mobile projects are native source, not a WebView wrapper.
 - **Cryzo Cloud** — Convex-powered database, app authentication/users, ownership rules, and the managed application API.
 - **Connections** — optional Composio-powered external tools and OAuth connections.
@@ -25,7 +25,9 @@ Browser / Cryzo UI
 Next.js application on Vercel
   ├─ AI SDK + provider adapters
   ├─ Composio (optional external actions)
-  ├─ Vercel Sandbox (generated project runtime)
+  ├─ Remote Sandbox adapter
+  │    ├─ Modal Sandbox (preferred)
+  │    └─ ephemeral Vercel Sandbox (fallback)
   ├─ Expo / EAS (native mobile delivery)
   └─ Cryzo Cloud API
           │
@@ -39,6 +41,8 @@ Next.js application on Vercel
   ├─ billing/usage
   └─ social scheduling state
 ```
+
+Generated source and artifacts live in Cryzo/Convex and are independent from preview compute. A sandbox can be discarded and recreated without losing the project.
 
 ### Cryzo Cloud
 
@@ -78,24 +82,54 @@ npm run dev
 
 Then open `http://localhost:3000`.
 
+## Remote preview compute
+
+Cryzo's hosted preview layer is provider-independent. Generated source remains in Cryzo and is restored into disposable remote compute when a preview is needed.
+
+### Modal (preferred)
+
+Set:
+
+```bash
+MODAL_TOKEN_ID=...
+MODAL_TOKEN_SECRET=...
+CRYZO_SANDBOX_PROVIDER=modal
+```
+
+Optional tuning:
+
+```bash
+CRYZO_MODAL_APP_NAME=cryzo-sandboxes
+CRYZO_MODAL_IMAGE=node:22-bookworm-slim
+CRYZO_MODAL_REGION=us-east-1
+```
+
+When Modal credentials are present, Cryzo creates/reuses a named Modal Sandbox, exposes the Vite preview port through an encrypted Modal tunnel, and runs the same generated-project lifecycle there.
+
+### Vercel fallback
+
+Without Modal credentials, Cryzo can use Vercel Sandbox as a fallback. These preview sandboxes are deliberately **non-persistent** because project source is already durable in Convex; this avoids accumulating Vercel filesystem snapshots just to keep temporary preview machines alive.
+
+Use `CRYZO_SANDBOX_PROVIDER=vercel` to force the fallback. Set `CRYZO_SANDBOX_STRICT_MODAL=1` if a hosted deployment should fail rather than fall back when Modal is unavailable.
+
 ## Optional services
 
 Cryzo is designed so self-hosting does not require buying Cryzo-hosted AI credits.
 
 - **AI providers:** connect supported provider keys or local compatible endpoints.
-- **Vercel Sandbox:** required for the same remote generated-project runtime used by cryzo.me. A self-host fork may swap this runtime.
+- **Remote sandbox provider:** Modal is preferred for hosted previews; ephemeral Vercel Sandbox remains a fallback.
 - **Composio:** optional for connected apps and social actions.
 - **Stripe:** optional for running your own hosted billing implementation.
 - **Expo/EAS:** optional for managed iOS/Android cloud builds and store submission.
 - **Supabase / BYO Convex:** generated projects may use these only when explicitly requested instead of Cryzo Cloud.
 
-Never commit production API keys, OAuth secrets, store credentials, or Stripe secrets to a fork.
+Never commit production API keys, OAuth secrets, store credentials, Modal tokens, or Stripe secrets to a fork.
 
 ## Web and mobile targets
 
 ### Web
 
-Cryzo's default web target is React + TypeScript + Vite. Hosted previews execute in Vercel Sandbox.
+Cryzo's default web target is React + TypeScript + Vite. Hosted previews execute in disposable remote Linux sandboxes; the preview machine is not the source of truth for project files.
 
 ### iOS + Android
 
