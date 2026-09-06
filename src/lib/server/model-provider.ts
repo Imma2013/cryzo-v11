@@ -1,4 +1,3 @@
-import { reasoningConfig } from "@/lib/ai/reasoning-config";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
@@ -7,7 +6,6 @@ import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { getProvider } from "@/lib/ai/models";
 import { getManagedModel } from "@/lib/ai/managed-models";
 import { resolveAccountProviderSecret } from "@/lib/server/provider-secrets";
-import { managedCatalog } from "@/lib/server/openrouter";
 import { resolveModelCapabilities } from "@/lib/server/model-capabilities";
 
 export type ServerModelRequest = {
@@ -43,39 +41,46 @@ function cryzoHeaders() {
 
 async function resolveManagedCryzoModel(requestedModel?: string) {
   const definition = getManagedModel(requestedModel);
-  if (requestedModel && requestedModel !== definition.id && requestedModel !== "cryzo/kimi-k3") throw new Error("This model is no longer supported. Choose another model.");
-  const managed = (await managedCatalog()).find(model => model.id === definition.id);
-  if (!managed) throw new Error("This model is unavailable. Choose another model.");
-  const apiKey = process.env.OPENROUTER_API_KEY?.trim();
+  if (
+    requestedModel &&
+    requestedModel !== definition.id &&
+    requestedModel !== "cryzo/kimi-k3"
+  ) {
+    throw new Error("This model is no longer supported. Choose another model.");
+  }
 
+  const apiKey = process.env.OPENROUTER_API_KEY?.trim();
   if (!apiKey) {
     throw new Error("OPENROUTER_API_KEY is not configured");
   }
 
+  const capabilities = await resolveModelCapabilities(
+    "openrouter",
+    definition.upstreamModel,
+  );
   const provider = createOpenRouter({
     apiKey,
     headers: cryzoHeaders(),
   });
 
   return {
-    model: provider.chat(managed.upstreamModel, {
+    model: provider.chat(definition.upstreamModel, {
       usage: { include: true },
-      ...(managed.reasoning ? { reasoning: reasoningConfig(managed.reasoningOptions) } : {}),
       extraBody: { provider: { allow_fallbacks: true } },
     }),
     providerId: "cryzo",
-    modelId: managed.id,
-    upstreamModelId: managed.upstreamModel,
-    billingTier: managed.tier,
-    usesCryzoCredits: managed.tier === "premium",
-    creditMultiplier: managed.creditMultiplier,
-    minimumPlan: managed.minimumPlan ?? "free",
-    supportsTools: Boolean(managed.toolCall),
-    supportsVision: Boolean(managed.attachments),
-    contextWindow: managed.context,
-    maxOutputTokens: managed.output,
-    capabilitySource: "managed" as const,
-    profile: managed,
+    modelId: definition.id,
+    upstreamModelId: definition.upstreamModel,
+    billingTier: definition.tier,
+    usesCryzoCredits: definition.tier === "premium",
+    creditMultiplier: definition.creditMultiplier,
+    minimumPlan: definition.minimumPlan ?? "free",
+    supportsTools: definition.toolCall ?? capabilities.supportsTools,
+    supportsVision: definition.multimodal ?? capabilities.supportsVision,
+    contextWindow: capabilities.contextWindow,
+    maxOutputTokens: capabilities.maxOutputTokens,
+    capabilitySource: capabilities.source,
+    profile: undefined,
   } as const;
 }
 
@@ -88,8 +93,13 @@ export async function resolveServerModel(request: ServerModelRequest) {
   }
 
   if (providerId === "cryzo") {
-    if (request.modelApiKey || (request.credentialMode && request.credentialMode !== "cryzo")) {
-      throw new Error("Choose OpenRouter and apply your key to use BYOK. A personal key cannot be used with an included selection.");
+    if (
+      request.modelApiKey ||
+      (request.credentialMode && request.credentialMode !== "cryzo")
+    ) {
+      throw new Error(
+        "Choose OpenRouter and apply your key to use BYOK. A personal key cannot be used with an included selection.",
+      );
     }
     return resolveManagedCryzoModel(requestedModel);
   }
@@ -98,7 +108,11 @@ export async function resolveServerModel(request: ServerModelRequest) {
   let apiKey = request.modelApiKey?.trim() || "";
   // The marketing copilot deliberately uses the server-managed OpenRouter
   // credential. BYOK requests still provide their own device/account key.
-  if (providerId === "openrouter" && request.credentialMode === "cryzo" && !apiKey) {
+  if (
+    providerId === "openrouter" &&
+    request.credentialMode === "cryzo" &&
+    !apiKey
+  ) {
     apiKey = process.env.OPENROUTER_API_KEY?.trim() || "";
   }
   let baseURL =
@@ -109,14 +123,18 @@ export async function resolveServerModel(request: ServerModelRequest) {
 
   if (request.credentialMode === "account") {
     if (!request.authToken?.trim()) {
-      throw new Error("Your Cryzo session is required to use an account-saved API key");
+      throw new Error(
+        "Your Cryzo session is required to use an account-saved API key",
+      );
     }
     const saved = await resolveAccountProviderSecret(
       request.authToken.trim(),
       providerId,
     );
     if (!saved) {
-      throw new Error(`No saved ${definition.name} API key was found on your Cryzo account`);
+      throw new Error(
+        `No saved ${definition.name} API key was found on your Cryzo account`,
+      );
     }
     apiKey = saved.apiKey;
     baseURL = saved.baseURL?.trim() || baseURL;
@@ -133,37 +151,48 @@ export async function resolveServerModel(request: ServerModelRequest) {
   }
 
   if (apiKey.startsWith("sk-or-") && providerId !== "openrouter") {
-    throw new Error("This is an OpenRouter key. Select OpenRouter, not a direct provider.");
+    throw new Error(
+      "This is an OpenRouter key. Select OpenRouter, not a direct provider.",
+    );
   }
-  if (providerId === "openrouter" && baseURL.replace(/\/$/, "") !== PROVIDER_BASE_URLS.openrouter) {
-    throw new Error("OpenRouter keys must use https://openrouter.ai/api/v1.");
+  if (
+    providerId === "openrouter" &&
+    baseURL.replace(/\/$/, "") !== PROVIDER_BASE_URLS.openrouter
+  ) {
+    throw new Error(
+      "OpenRouter keys must use https://openrouter.ai/api/v1.",
+    );
   }
 
-  const capabilities = await resolveModelCapabilities(providerId, requestedModel);
+  const capabilities = await resolveModelCapabilities(
+    providerId,
+    requestedModel,
+  );
   const provider = createOpenAI({
     baseURL,
     apiKey: apiKey || "not-required",
-    headers:
-      providerId === "openrouter"
-        ? {
-            "HTTP-Referer": "https://www.cryzo.me",
-            "X-Title": "Cryzo",
-          }
-        : undefined,
+    headers: providerId === "openrouter" ? cryzoHeaders() : undefined,
   });
 
   return {
-    model: providerId === "openrouter"
-      ? createOpenRouter({ apiKey, headers: cryzoHeaders() }).chat(requestedModel, {
-          usage: { include: true },
-          reasoning: { effort: "medium" },
-          extraBody: { provider: { allow_fallbacks: true } },
-        })
-      : providerId === "anthropic" ? createAnthropic({ apiKey, baseURL })(requestedModel)
-      : providerId === "google" ? createGoogleGenerativeAI({ apiKey })(requestedModel)
-      : providerId === "xai" ? createXai({ apiKey, baseURL })(requestedModel)
-      : providerId === "openai" ? provider.responses(requestedModel)
-      : provider.chat(requestedModel),
+    model:
+      providerId === "openrouter"
+        ? createOpenRouter({ apiKey, headers: cryzoHeaders() }).chat(
+            requestedModel,
+            {
+              usage: { include: true },
+              extraBody: { provider: { allow_fallbacks: true } },
+            },
+          )
+        : providerId === "anthropic"
+          ? createAnthropic({ apiKey, baseURL })(requestedModel)
+          : providerId === "google"
+            ? createGoogleGenerativeAI({ apiKey })(requestedModel)
+            : providerId === "xai"
+              ? createXai({ apiKey, baseURL })(requestedModel)
+              : providerId === "openai"
+                ? provider.responses(requestedModel)
+                : provider.chat(requestedModel),
     providerId,
     modelId: requestedModel,
     upstreamModelId: requestedModel,
