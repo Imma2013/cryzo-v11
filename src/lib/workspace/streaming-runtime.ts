@@ -18,12 +18,33 @@ export type SandboxBuildFile = {
 
 type Listener = (snapshot: StreamingRuntimeSnapshot) => void;
 
+type PendingAction = {
+  type?: ArtifactAction["type"];
+  filePath?: string;
+  operation?: ArtifactAction["operation"];
+  content: string;
+};
+
+type StreamingParserState = {
+  position: number;
+  insideArtifact: boolean;
+  insideAction: boolean;
+  currentAction: PendingAction;
+};
+
 type RuntimeState = StreamingRuntimeSnapshot & {
   listeners: Set<Listener>;
-  processedActionsByMessage: Map<string, number>;
+  parserByMessage: Map<string, StreamingParserState>;
   queue: Promise<void>;
   initialized: boolean;
+  installPromise: Promise<void> | null;
+  dependenciesReady: boolean;
 };
+
+const ARTIFACT_OPEN = "<cryzoArtifact";
+const ARTIFACT_CLOSE = "</cryzoArtifact>";
+const ACTION_OPEN = "<cryzoAction";
+const ACTION_CLOSE = "</cryzoAction>";
 
 const runtimes = new Map<string, RuntimeState>();
 let sandboxAuthToken: string | null = null;
@@ -40,6 +61,15 @@ async function waitForSandboxAuthToken() {
   throw new Error("Authentication is still loading. Please retry.");
 }
 
+function createParserState(): StreamingParserState {
+  return {
+    position: 0,
+    insideArtifact: false,
+    insideAction: false,
+    currentAction: { content: "" },
+  };
+}
+
 function createState(): RuntimeState {
   return {
     active: false,
@@ -49,9 +79,11 @@ function createState(): RuntimeState {
     progress: "writing",
     error: null,
     listeners: new Set(),
-    processedActionsByMessage: new Map(),
+    parserByMessage: new Map(),
     queue: Promise.resolve(),
     initialized: false,
+    installPromise: null,
+    dependenciesReady: false,
   };
 }
 
@@ -129,27 +161,119 @@ function fileMapFromActions(actions: ArtifactAction[]) {
   return files;
 }
 
+function extractActionAttribute(raw: string, name: string) {
+  return raw.match(new RegExp(`${name}=["']([^"']+)["']`, "i"))?.[1];
+}
+
 function parseActionAttributes(raw: string) {
-  const type = raw.match(/type="([^"]+)"/)?.[1] as ArtifactAction["type"] | undefined;
-  const filePath = raw.match(/filePath="([^"]+)"/)?.[1];
-  const operation = raw.match(/operation="([^"]+)"/)?.[1] as ArtifactAction["operation"] | undefined;
+  const type = extractActionAttribute(raw, "type") as
+    | ArtifactAction["type"]
+    | undefined;
+  const filePath = extractActionAttribute(raw, "filePath");
+  const operation = extractActionAttribute(raw, "operation") as
+    | ArtifactAction["operation"]
+    | undefined;
   return { type, filePath, operation };
 }
 
-function parseCompletedActions(text: string): ArtifactAction[] {
-  if (!text.includes("<cryzoArtifact")) return [];
-
-  const actions: ArtifactAction[] = [];
-  const pattern = /<cryzoAction([^>]*)>([\s\S]*?)<\/cryzoAction>/g;
-  let match: RegExpExecArray | null;
-
-  while ((match = pattern.exec(text)) !== null) {
-    const { type, filePath, operation } = parseActionAttributes(match[1]);
-    if (!type) continue;
-    actions.push({ type, filePath, operation, content: match[2] });
+function parseStreamingActions(
+  runtime: RuntimeState,
+  messageId: string,
+  text: string,
+) {
+  let parser = runtime.parserByMessage.get(messageId);
+  if (!parser || text.length < parser.position) {
+    parser = createParserState();
+    runtime.parserByMessage.set(messageId, parser);
   }
 
-  return actions;
+  const completed: ArtifactAction[] = [];
+  let i = parser.position;
+
+  while (i < text.length) {
+    if (parser.insideArtifact) {
+      if (parser.insideAction) {
+        const closeIndex = text.indexOf(ACTION_CLOSE, i);
+        if (closeIndex !== -1) {
+          parser.currentAction.content += text.slice(i, closeIndex);
+          const current = parser.currentAction;
+          if (current.type) {
+            const action: ArtifactAction = {
+              type: current.type,
+              filePath: current.filePath,
+              operation: current.operation,
+              content: current.content,
+            };
+            completed.push(action);
+            updateFileMap(runtime, action);
+            emit(runtime);
+          }
+          parser.insideAction = false;
+          parser.currentAction = { content: "" };
+          i = closeIndex + ACTION_CLOSE.length;
+          continue;
+        }
+
+        if (
+          parser.currentAction.type === "file" &&
+          parser.currentAction.filePath
+        ) {
+          updateFileMap(runtime, {
+            type: "file",
+            filePath: parser.currentAction.filePath,
+            content: parser.currentAction.content + text.slice(i),
+          });
+          emit(runtime);
+        }
+        break;
+      }
+
+      const actionOpenIndex = text.indexOf(ACTION_OPEN, i);
+      const artifactCloseIndex = text.indexOf(ARTIFACT_CLOSE, i);
+
+      if (
+        actionOpenIndex !== -1 &&
+        (artifactCloseIndex === -1 || actionOpenIndex < artifactCloseIndex)
+      ) {
+        const actionEndIndex = text.indexOf(">", actionOpenIndex);
+        if (actionEndIndex === -1) break;
+
+        parser.insideAction = true;
+        parser.currentAction = {
+          ...parseActionAttributes(text.slice(actionOpenIndex, actionEndIndex + 1)),
+          content: "",
+        };
+        i = actionEndIndex + 1;
+        continue;
+      }
+
+      if (artifactCloseIndex !== -1) {
+        parser.insideArtifact = false;
+        i = artifactCloseIndex + ARTIFACT_CLOSE.length;
+        continue;
+      }
+
+      break;
+    }
+
+    const artifactOpenIndex = text.indexOf(ARTIFACT_OPEN, i);
+    if (artifactOpenIndex === -1) {
+      i = Math.max(i, text.length - ARTIFACT_OPEN.length);
+      break;
+    }
+
+    const artifactEndIndex = text.indexOf(">", artifactOpenIndex);
+    if (artifactEndIndex === -1) {
+      i = artifactOpenIndex;
+      break;
+    }
+
+    parser.insideArtifact = true;
+    i = artifactEndIndex + 1;
+  }
+
+  parser.position = i;
+  return completed;
 }
 
 type SandboxResponse = {
@@ -170,7 +294,10 @@ type GuardResponse = {
   error?: string;
 };
 
-async function authenticatedPost<T>(url: string, body: Record<string, unknown>): Promise<T> {
+async function authenticatedPost<T>(
+  url: string,
+  body: Record<string, unknown>,
+): Promise<T> {
   const authToken = await waitForSandboxAuthToken();
   const response = await fetch(url, {
     method: "POST",
@@ -188,7 +315,9 @@ async function authenticatedPost<T>(url: string, body: Record<string, unknown>):
   return data;
 }
 
-async function callSandbox(body: Record<string, unknown>): Promise<SandboxResponse> {
+async function callSandbox(
+  body: Record<string, unknown>,
+): Promise<SandboxResponse> {
   return await authenticatedPost<SandboxResponse>("/api/sandbox/runtime", body);
 }
 
@@ -201,14 +330,74 @@ function applyResponse(state: RuntimeState, response: SandboxResponse) {
   if (response.previewUrl) state.previewUrl = response.previewUrl;
   if (response.progress) {
     const keepReadyDuringHmr = state.previewUrl && response.progress === "writing";
-    state.progress = keepReadyDuringHmr ? "ready" : response.progress;
+    const keepInstalling =
+      !state.previewUrl && state.installPromise && response.progress === "writing";
+    state.progress = keepReadyDuringHmr
+      ? "ready"
+      : keepInstalling
+        ? "installing"
+        : response.progress;
   }
   state.error = null;
   emit(state);
 }
 
 function isInstallAction(action: ArtifactAction) {
-  return action.type === "shell" && /(^|\s)npm\s+(install|i)(\s|$)/.test(action.content.trim());
+  return (
+    action.type === "shell" &&
+    /(^|\s)npm\s+(install|i)(\s|$)/.test(action.content.trim())
+  );
+}
+
+function isPackageJsonAction(action: ArtifactAction) {
+  return (
+    action.type === "file" &&
+    !!action.filePath &&
+    /(^|\/)package\.json$/i.test(action.filePath)
+  );
+}
+
+async function validateProjectAfterInstall(
+  conversationId: string,
+  state: RuntimeState,
+) {
+  const validation = await callGuard({
+    operation: "project",
+    conversationId,
+  });
+  if (validation.output) appendOutput(state, validation.output);
+  if (applyRepairedFiles(state, validation.repairedFiles)) emit(state);
+}
+
+function ensureBackgroundInstall(
+  conversationId: string,
+  state: RuntimeState,
+) {
+  if (state.installPromise) return state.installPromise;
+  if (state.dependenciesReady) return Promise.resolve();
+
+  state.progress = state.previewUrl ? "ready" : "installing";
+  appendOutput(state, "\nInstalling dependencies while generation continues...\n");
+  emit(state);
+
+  const promise = (async () => {
+    const response = await callSandbox({
+      operation: "action",
+      conversationId,
+      action: { type: "shell", content: "npm install" },
+    });
+    applyResponse(state, response);
+    await validateProjectAfterInstall(conversationId, state);
+    state.dependenciesReady = true;
+  })();
+
+  state.installPromise = promise;
+  void promise
+    .catch((error) => setError(state, error))
+    .finally(() => {
+      if (state.installPromise === promise) state.installPromise = null;
+    });
+  return promise;
 }
 
 async function executeSupabaseAction(
@@ -218,7 +407,9 @@ async function executeSupabaseAction(
 ) {
   const context = readSupabaseRuntimeContext();
   if (!context) {
-    throw new Error("This project requested a Supabase action, but no Supabase project is selected in Developer Connections.");
+    throw new Error(
+      "This project requested a Supabase action, but no Supabase project is selected in Developer Connections.",
+    );
   }
 
   state.progress = state.previewUrl ? "ready" : "writing";
@@ -271,6 +462,11 @@ async function executeRemoteAction(
     return;
   }
 
+  if (isInstallAction(action)) {
+    await ensureBackgroundInstall(conversationId, state);
+    return;
+  }
+
   let safeAction = action;
 
   if (action.type === "file") {
@@ -280,7 +476,9 @@ async function executeRemoteAction(
       action,
     });
     if (!validation.action) {
-      throw new Error(`Generated file validation returned no action for ${action.filePath || "unknown file"}`);
+      throw new Error(
+        `Generated file validation returned no action for ${action.filePath || "unknown file"}`,
+      );
     }
     safeAction = validation.action;
     if (validation.output) appendOutput(state, validation.output);
@@ -288,10 +486,8 @@ async function executeRemoteAction(
     updateFileMap(state, safeAction);
     state.progress = state.previewUrl ? "ready" : "writing";
     emit(state);
-  } else if (action.type === "shell") {
-    state.progress = "installing";
-    emit(state);
   } else {
+    if (state.installPromise) await state.installPromise;
     state.progress = "starting";
     emit(state);
   }
@@ -303,13 +499,9 @@ async function executeRemoteAction(
   });
   applyResponse(state, response);
 
-  if (isInstallAction(safeAction)) {
-    const validation = await callGuard({
-      operation: "project",
-      conversationId,
-    });
-    if (validation.output) appendOutput(state, validation.output);
-    if (applyRepairedFiles(state, validation.repairedFiles)) emit(state);
+  if (isPackageJsonAction(safeAction)) {
+    state.dependenciesReady = false;
+    void ensureBackgroundInstall(conversationId, state);
   }
 }
 
@@ -332,7 +524,11 @@ export async function saveStreamingRuntimeFile(
     conversationId,
     action: requested,
   });
-  if (!validation.action || validation.action.type !== "file" || !validation.action.filePath) {
+  if (
+    !validation.action ||
+    validation.action.type !== "file" ||
+    !validation.action.filePath
+  ) {
     throw new Error(`File validation returned no writable action for ${filePath}`);
   }
 
@@ -350,23 +546,24 @@ export async function saveStreamingRuntimeFile(
   applyResponse(state, response);
 
   const needsInstall = /(^|\/)package\.json$/i.test(safeAction.filePath);
-  const needsRestart = needsInstall || /(^|\/)(vite\.config\.(ts|js|mts|mjs|cts|cjs)|index\.html)$/i.test(safeAction.filePath);
+  const needsRestart =
+    needsInstall ||
+    /(^|\/)(vite\.config\.(ts|js|mts|mjs|cts|cjs)|index\.html)$/i.test(
+      safeAction.filePath,
+    );
 
   if (needsInstall) {
-    state.progress = "installing";
-    emit(state);
-    const install = await callSandbox({
-      operation: "action",
-      conversationId,
-      action: { type: "shell", content: "npm install" },
-    });
-    applyResponse(state, install);
+    state.dependenciesReady = false;
+    await ensureBackgroundInstall(conversationId, state);
   }
 
   if (needsRestart) {
     state.progress = "starting";
     emit(state);
-    const restarted = await callSandbox({ operation: "restart", conversationId });
+    const restarted = await callSandbox({
+      operation: "restart",
+      conversationId,
+    });
     applyResponse(state, restarted);
   }
 
@@ -381,9 +578,10 @@ export function processStreamingArtifactText(
   messageId: string,
   text: string,
 ) {
-  if (!text.includes("<cryzoArtifact")) return false;
-
   const state = getState(conversationId);
+  const parser = state.parserByMessage.get(messageId);
+  if (!parser && !text.includes(ARTIFACT_OPEN)) return false;
+
   if (!state.active) {
     state.active = true;
     state.progress = "writing";
@@ -391,13 +589,7 @@ export function processStreamingArtifactText(
     emit(state);
   }
 
-  const actions = parseCompletedActions(text);
-  const processed = state.processedActionsByMessage.get(messageId) ?? 0;
-  if (actions.length <= processed) return true;
-
-  const newActions = actions.slice(processed);
-  state.processedActionsByMessage.set(messageId, actions.length);
-
+  const newActions = parseStreamingActions(state, messageId, text);
   for (const action of newActions) {
     state.queue = state.queue
       .then(() => executeRemoteAction(conversationId, state, action))
@@ -438,6 +630,7 @@ export async function restoreStreamingRuntime(
   state.active = true;
   state.progress = "writing";
   state.error = null;
+  state.dependenciesReady = false;
   appendOutput(state, "Restoring project in Vercel Sandbox...\n");
   emit(state);
 
@@ -447,7 +640,8 @@ export async function restoreStreamingRuntime(
       conversationId,
       actions: actions.filter((action) => action.type !== "supabase"),
     });
-    const safeNonSupabase = guarded.actions || actions.filter((action) => action.type !== "supabase");
+    const safeNonSupabase =
+      guarded.actions || actions.filter((action) => action.type !== "supabase");
     const safeActions = [
       ...safeNonSupabase,
       ...actions.filter((action) => action.type === "supabase"),
@@ -471,6 +665,7 @@ export async function restoreStreamingRuntime(
     });
     if (validation.output) appendOutput(state, validation.output);
     if (applyRepairedFiles(state, validation.repairedFiles)) emit(state);
+    state.dependenciesReady = true;
   } catch (error) {
     state.active = false;
     setError(state, error);
@@ -486,6 +681,7 @@ export async function restartStreamingRuntime(conversationId: string) {
   emit(state);
 
   try {
+    if (state.installPromise) await state.installPromise;
     await syncSupabaseRuntime(conversationId).catch(() => false);
     const validation = await callGuard({
       operation: "project",
@@ -512,7 +708,10 @@ export async function refreshStreamingRuntimeLogs(conversationId: string) {
     conversationId,
   });
   if (response.output) {
-    appendOutput(state, `\n--- Preview diagnostics ---\n${response.output}\n`);
+    appendOutput(
+      state,
+      `\n--- Preview diagnostics ---\n${response.output}\n`,
+    );
     emit(state);
   }
   return response.output || "";
@@ -520,6 +719,7 @@ export async function refreshStreamingRuntimeLogs(conversationId: string) {
 
 export async function buildStreamingRuntime(conversationId: string) {
   const state = getState(conversationId);
+  if (state.installPromise) await state.installPromise;
   await syncSupabaseRuntime(conversationId).catch(() => false);
   const validation = await callGuard({
     operation: "project",
