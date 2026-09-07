@@ -1,5 +1,13 @@
 import type { ArtifactAction, FileMap } from "./types";
 import type { ProgressStage } from "./action-runner";
+import {
+  collectDirectoryFiles,
+  directoryExists,
+  getWebContainer,
+  runCommand,
+  teardownWebContainer,
+  writeFiles,
+} from "./webcontainer";
 import { readSupabaseRuntimeContext } from "@/lib/developer-connections";
 
 export interface StreamingRuntimeSnapshot {
@@ -17,16 +25,22 @@ export type SandboxBuildFile = {
 };
 
 type Listener = (snapshot: StreamingRuntimeSnapshot) => void;
+type KillableProcess = { kill: () => void };
 
 type RuntimeState = StreamingRuntimeSnapshot & {
   listeners: Set<Listener>;
   processedActionsByMessage: Map<string, number>;
   queue: Promise<void>;
   initialized: boolean;
+  devProcess: KillableProcess | null;
+  startCommand: string | null;
+  installedPackageJson: string | null;
+  serverReadyTimer: ReturnType<typeof setTimeout> | null;
 };
 
 const runtimes = new Map<string, RuntimeState>();
 let sandboxAuthToken: string | null = null;
+let activeConversationId: string | null = null;
 
 export function setStreamingRuntimeAuthToken(token: string | null) {
   sandboxAuthToken = token;
@@ -52,6 +66,10 @@ function createState(): RuntimeState {
     processedActionsByMessage: new Map(),
     queue: Promise.resolve(),
     initialized: false,
+    devProcess: null,
+    startCommand: null,
+    installedPackageJson: null,
+    serverReadyTimer: null,
   };
 }
 
@@ -85,7 +103,13 @@ function appendOutput(state: RuntimeState, data: string) {
   state.terminalOutput = `${state.terminalOutput}${data}`.slice(-50000);
 }
 
+function clearServerReadyTimer(state: RuntimeState) {
+  if (state.serverReadyTimer) clearTimeout(state.serverReadyTimer);
+  state.serverReadyTimer = null;
+}
+
 function setError(state: RuntimeState, error: unknown) {
+  clearServerReadyTimer(state);
   const message = error instanceof Error ? error.message : String(error);
   state.error = message;
   state.progress = "error";
@@ -95,32 +119,22 @@ function setError(state: RuntimeState, error: unknown) {
 
 function updateFileMap(state: RuntimeState, action: ArtifactAction) {
   if (action.type !== "file" || !action.filePath) return;
-  state.files[action.filePath] = { type: "file", content: action.content };
-  const parts = action.filePath.split("/");
+  const filePath = action.filePath.replace(/^\.\//, "").replace(/^\/+/, "");
+  state.files[filePath] = { type: "file", content: action.content };
+  const parts = filePath.split("/");
   for (let i = 1; i < parts.length; i++) {
     const dir = parts.slice(0, i).join("/");
     if (!state.files[dir]) state.files[dir] = { type: "folder" };
   }
 }
 
-function applyRepairedFiles(state: RuntimeState, files?: SandboxBuildFile[]) {
-  if (!files?.length) return false;
-  for (const file of files) {
-    updateFileMap(state, {
-      type: "file",
-      filePath: file.path,
-      content: file.content,
-    });
-  }
-  return true;
-}
-
 function fileMapFromActions(actions: ArtifactAction[]) {
   const files: FileMap = {};
   for (const action of actions) {
     if (action.type !== "file" || !action.filePath) continue;
-    files[action.filePath] = { type: "file", content: action.content };
-    const parts = action.filePath.split("/");
+    const filePath = action.filePath.replace(/^\.\//, "").replace(/^\/+/, "");
+    files[filePath] = { type: "file", content: action.content };
+    const parts = filePath.split("/");
     for (let i = 1; i < parts.length; i++) {
       const dir = parts.slice(0, i).join("/");
       if (!files[dir]) files[dir] = { type: "folder" };
@@ -158,15 +172,6 @@ function hasUnclosedArtifact(text: string) {
   return openCount > closeCount;
 }
 
-type SandboxResponse = {
-  sandboxName?: string;
-  previewUrl?: string | null;
-  progress?: ProgressStage;
-  output?: string;
-  files?: SandboxBuildFile[];
-  error?: string;
-};
-
 type GuardResponse = {
   action?: ArtifactAction;
   actions?: ArtifactAction[];
@@ -194,23 +199,188 @@ async function authenticatedPost<T>(url: string, body: Record<string, unknown>):
   return data;
 }
 
-async function callSandbox(body: Record<string, unknown>): Promise<SandboxResponse> {
-  return await authenticatedPost<SandboxResponse>("/api/sandbox/runtime", body);
-}
-
 async function callGuard(body: Record<string, unknown>): Promise<GuardResponse> {
   return await authenticatedPost<GuardResponse>("/api/sandbox/validate", body);
 }
 
-function applyResponse(state: RuntimeState, response: SandboxResponse) {
-  if (response.output) appendOutput(state, response.output);
-  if (response.previewUrl) state.previewUrl = response.previewUrl;
-  if (response.progress) {
-    const keepReadyDuringHmr = state.previewUrl && response.progress === "writing";
-    state.progress = keepReadyDuringHmr ? "ready" : response.progress;
+function stopDevProcess(state: RuntimeState) {
+  clearServerReadyTimer(state);
+  const current = state.devProcess;
+  state.devProcess = null;
+  if (current) {
+    try {
+      current.kill();
+    } catch {
+      // The process may already have exited.
+    }
   }
-  state.error = null;
+}
+
+async function ensureContainer(conversationId: string, state: RuntimeState) {
+  if (activeConversationId && activeConversationId !== conversationId) {
+    const previous = getState(activeConversationId);
+    stopDevProcess(previous);
+    previous.active = false;
+    previous.previewUrl = null;
+    previous.initialized = false;
+    emit(previous);
+    await teardownWebContainer();
+    activeConversationId = null;
+  }
+
+  const wc = await getWebContainer();
+  if (activeConversationId !== conversationId) {
+    activeConversationId = conversationId;
+
+    wc.on("server-ready", (_port, url) => {
+      if (activeConversationId !== conversationId) return;
+      clearServerReadyTimer(state);
+      state.previewUrl = url;
+      state.progress = "ready";
+      state.error = null;
+      appendOutput(state, `\nPreview ready at ${url}\n`);
+      emit(state);
+    });
+
+    wc.on("preview-message", (message: any) => {
+      if (activeConversationId !== conversationId) return;
+      if (
+        message?.type !== "PREVIEW_UNCAUGHT_EXCEPTION" &&
+        message?.type !== "PREVIEW_UNHANDLED_REJECTION"
+      ) {
+        return;
+      }
+      const title =
+        message.type === "PREVIEW_UNHANDLED_REJECTION"
+          ? "Unhandled promise rejection"
+          : "Uncaught preview exception";
+      appendOutput(
+        state,
+        `\n${title}: ${message.message || "Unknown error"}${message.stack ? `\n${message.stack}` : ""}\n`,
+      );
+      emit(state);
+    });
+  }
+
+  return wc;
+}
+
+async function applyRepairedFiles(
+  conversationId: string,
+  state: RuntimeState,
+  files?: SandboxBuildFile[],
+) {
+  if (!files?.length) return false;
+  const wc = await ensureContainer(conversationId, state);
+  const actions: ArtifactAction[] = files.map((file) => ({
+    type: "file",
+    filePath: file.path,
+    content: file.content,
+  }));
+  await writeFiles(wc, actions);
+  for (const action of actions) updateFileMap(state, action);
   emit(state);
+  return true;
+}
+
+function packageJsonContent(state: RuntimeState) {
+  return state.files["package.json"]?.type === "file"
+    ? state.files["package.json"]?.content || ""
+    : "";
+}
+
+function detectStartCommand(state: RuntimeState) {
+  const packageJson = packageJsonContent(state);
+  if (!packageJson) return null;
+  try {
+    const pkg = JSON.parse(packageJson) as { scripts?: Record<string, string> };
+    if (pkg.scripts?.dev) return "npm run dev";
+    if (pkg.scripts?.start) return "npm run start";
+    if (pkg.scripts?.preview) return "npm run preview";
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+async function ensureDependencies(conversationId: string, state: RuntimeState) {
+  const packageJson = packageJsonContent(state);
+  if (!packageJson) return;
+
+  const wc = await ensureContainer(conversationId, state);
+  const nodeModules = await directoryExists(wc, "node_modules");
+  if (nodeModules && state.installedPackageJson === packageJson) return;
+
+  state.progress = "installing";
+  state.error = null;
+  appendOutput(
+    state,
+    nodeModules
+      ? "\npackage.json changed; updating dependencies...\n"
+      : "\nInstalling dependencies in WebContainer...\n",
+  );
+  emit(state);
+
+  const exitCode = await runCommand(
+    wc,
+    "npm install --no-audit --no-fund",
+    (data) => {
+      appendOutput(state, data);
+      emit(state);
+    },
+  );
+  if (exitCode !== 0) {
+    throw new Error(`npm install exited with code ${exitCode}`);
+  }
+  state.installedPackageJson = packageJson;
+}
+
+async function startDevServer(
+  conversationId: string,
+  state: RuntimeState,
+  command: string,
+) {
+  const wc = await ensureContainer(conversationId, state);
+  stopDevProcess(state);
+  state.startCommand = command.trim();
+  state.previewUrl = null;
+  state.progress = "starting";
+  state.error = null;
+  appendOutput(state, `\n$ ${state.startCommand}\n`);
+  emit(state);
+
+  const process = await wc.spawn("jsh", ["-c", state.startCommand]);
+  state.devProcess = process;
+
+  void process.output
+    .pipeTo(
+      new WritableStream({
+        write(data) {
+          if (state.devProcess !== process) return;
+          appendOutput(state, data);
+          emit(state);
+        },
+      }),
+    )
+    .catch(() => {});
+
+  state.serverReadyTimer = setTimeout(() => {
+    if (state.devProcess === process && !state.previewUrl) {
+      setError(
+        state,
+        "The WebContainer dev server did not expose a preview URL. Check the terminal output and the project's dev script.",
+      );
+    }
+  }, 60000);
+
+  void process.exit.then((code) => {
+    if (state.devProcess !== process) return;
+    state.devProcess = null;
+    clearServerReadyTimer(state);
+    if (code !== 0 && !state.previewUrl) {
+      setError(state, `Preview process exited with code ${code}`);
+    }
+  });
 }
 
 function isInstallAction(action: ArtifactAction) {
@@ -224,7 +394,9 @@ async function executeSupabaseAction(
 ) {
   const context = readSupabaseRuntimeContext();
   if (!context) {
-    throw new Error("This project requested a Supabase action, but no Supabase project is selected in Developer Connections.");
+    throw new Error(
+      "This project requested a Supabase action, but no Supabase project is selected in Developer Connections.",
+    );
   }
 
   state.progress = state.previewUrl ? "ready" : "writing";
@@ -267,7 +439,7 @@ export async function syncSupabaseRuntime(conversationId: string) {
   return true;
 }
 
-async function executeRemoteAction(
+async function executeWebContainerAction(
   conversationId: string,
   state: RuntimeState,
   action: ArtifactAction,
@@ -277,6 +449,7 @@ async function executeRemoteAction(
     return;
   }
 
+  const wc = await ensureContainer(conversationId, state);
   let safeAction = action;
 
   if (action.type === "file") {
@@ -286,37 +459,48 @@ async function executeRemoteAction(
       action,
     });
     if (!validation.action) {
-      throw new Error(`Generated file validation returned no action for ${action.filePath || "unknown file"}`);
+      throw new Error(
+        `Generated file validation returned no action for ${action.filePath || "unknown file"}`,
+      );
     }
     safeAction = validation.action;
     if (validation.output) appendOutput(state, validation.output);
 
+    await writeFiles(wc, [safeAction]);
     updateFileMap(state, safeAction);
+    if (safeAction.filePath === "package.json") state.installedPackageJson = null;
     state.progress = state.previewUrl ? "ready" : "writing";
+    state.error = null;
+    appendOutput(state, `Wrote ${safeAction.filePath}\n`);
     emit(state);
-  } else if (action.type === "shell") {
-    state.progress = "installing";
-    emit(state);
-  } else {
-    state.progress = "starting";
-    emit(state);
+    return;
   }
 
-  const response = await callSandbox({
-    operation: "action",
-    conversationId,
-    action: safeAction,
-  });
-  applyResponse(state, response);
+  if (action.type === "shell") {
+    state.progress = isInstallAction(action) ? "installing" : state.previewUrl ? "ready" : "writing";
+    state.error = null;
+    appendOutput(state, `\n$ ${action.content}\n`);
+    emit(state);
 
-  if (isInstallAction(safeAction)) {
-    const validation = await callGuard({
-      operation: "project",
-      conversationId,
+    const exitCode = await runCommand(wc, action.content.trim(), (data) => {
+      appendOutput(state, data);
+      emit(state);
     });
-    if (validation.output) appendOutput(state, validation.output);
-    if (applyRepairedFiles(state, validation.repairedFiles)) emit(state);
+    if (exitCode !== 0) throw new Error(`Command exited with code ${exitCode}: ${action.content}`);
+
+    if (isInstallAction(action)) {
+      state.installedPackageJson = packageJsonContent(state) || state.installedPackageJson;
+      const validation = await callGuard({ operation: "project", conversationId });
+      if (validation.output) appendOutput(state, validation.output);
+      await applyRepairedFiles(conversationId, state, validation.repairedFiles);
+    }
+    state.error = null;
+    emit(state);
+    return;
   }
+
+  await ensureDependencies(conversationId, state);
+  await startDevServer(conversationId, state, action.content);
 }
 
 export async function saveStreamingRuntimeFile(
@@ -343,37 +527,29 @@ export async function saveStreamingRuntimeFile(
   }
 
   const safeAction = validation.action as ArtifactAction & { filePath: string };
-  if (validation.output) appendOutput(state, validation.output);
+  const wc = await ensureContainer(conversationId, state);
+  await writeFiles(wc, [safeAction]);
   updateFileMap(state, safeAction);
+  if (validation.output) appendOutput(state, validation.output);
+  appendOutput(state, `Wrote ${safeAction.filePath}\n`);
   state.progress = state.previewUrl ? "ready" : "writing";
   emit(state);
 
-  const response = await callSandbox({
-    operation: "action",
-    conversationId,
-    action: safeAction,
-  });
-  applyResponse(state, response);
-
   const needsInstall = /(^|\/)package\.json$/i.test(safeAction.filePath);
-  const needsRestart = needsInstall || /(^|\/)(vite\.config\.(ts|js|mts|mjs|cts|cjs)|index\.html)$/i.test(safeAction.filePath);
+  const needsRestart =
+    needsInstall ||
+    /(^|\/)(vite\.config\.(ts|js|mts|mjs|cts|cjs)|next\.config\.(ts|js|mts|mjs|cts|cjs)|index\.html)$/i.test(
+      safeAction.filePath,
+    );
 
   if (needsInstall) {
-    state.progress = "installing";
-    emit(state);
-    const install = await callSandbox({
-      operation: "action",
-      conversationId,
-      action: { type: "shell", content: "npm install" },
-    });
-    applyResponse(state, install);
+    state.installedPackageJson = null;
+    await ensureDependencies(conversationId, state);
   }
 
   if (needsRestart) {
-    state.progress = "starting";
-    emit(state);
-    const restarted = await callSandbox({ operation: "restart", conversationId });
-    applyResponse(state, restarted);
+    const startCommand = state.startCommand || detectStartCommand(state);
+    if (startCommand) await startDevServer(conversationId, state, startCommand);
   }
 
   return {
@@ -397,9 +573,7 @@ export function processStreamingArtifactText(
     emit(state);
   }
 
-  // Streaming is presentation-only. Do not mutate the sandbox until the
-  // model has closed the artifact so a partial file can never trigger an
-  // install, restart, validation pass, or HMR refresh mid-generation.
+  // Streaming is presentation-only. Do not execute a partial artifact.
   if (hasUnclosedArtifact(text)) return true;
 
   const actions = parseCompletedActions(text);
@@ -411,7 +585,7 @@ export function processStreamingArtifactText(
 
   for (const action of newActions) {
     state.queue = state.queue
-      .then(() => executeRemoteAction(conversationId, state, action))
+      .then(() => executeWebContainerAction(conversationId, state, action))
       .catch((error) => setError(state, error));
   }
 
@@ -422,19 +596,20 @@ export async function prebootStreamingRuntime(conversationId: string) {
   const state = getState(conversationId);
   if (state.initialized) return;
   state.initialized = true;
+  state.active = true;
+  state.error = null;
+  state.progress = "writing";
+  emit(state);
 
   try {
-    const response = await callSandbox({
-      operation: "init",
-      conversationId,
-    });
-    if (response.previewUrl) {
-      state.active = true;
-      applyResponse(state, response);
-    }
+    await ensureContainer(conversationId, state);
+    appendOutput(state, "WebContainer ready.\n");
+    emit(state);
     await syncSupabaseRuntime(conversationId).catch(() => false);
   } catch (error) {
     state.initialized = false;
+    state.active = false;
+    setError(state, error);
     throw error;
   }
 }
@@ -444,21 +619,22 @@ export async function restoreStreamingRuntime(
   actions: ArtifactAction[],
 ) {
   const state = getState(conversationId);
-  if (state.active || actions.length === 0) return;
+  if ((state.files && Object.keys(state.files).length > 0) || actions.length === 0) return;
 
   state.active = true;
   state.progress = "writing";
   state.error = null;
-  appendOutput(state, "Restoring project in Vercel Sandbox...\n");
+  appendOutput(state, "Restoring project in WebContainer...\n");
   emit(state);
 
   try {
+    const nonSupabase = actions.filter((action) => action.type !== "supabase");
     const guarded = await callGuard({
       operation: "actions",
       conversationId,
-      actions: actions.filter((action) => action.type !== "supabase"),
+      actions: nonSupabase,
     });
-    const safeNonSupabase = guarded.actions || actions.filter((action) => action.type !== "supabase");
+    const safeNonSupabase = guarded.actions || nonSupabase;
     const safeActions = [
       ...safeNonSupabase,
       ...actions.filter((action) => action.type === "supabase"),
@@ -467,21 +643,33 @@ export async function restoreStreamingRuntime(
     state.files = fileMapFromActions(safeActions);
     emit(state);
 
+    const wc = await ensureContainer(conversationId, state);
+    const fileActions = safeNonSupabase.filter((action) => action.type === "file");
+    await writeFiles(wc, fileActions);
+    appendOutput(state, `Restored ${fileActions.length} project files.\n`);
+
     await syncSupabaseRuntime(conversationId).catch(() => false);
 
-    const response = await callSandbox({
-      operation: "restore",
-      conversationId,
-      actions: safeNonSupabase,
-    });
-    applyResponse(state, response);
+    if (safeNonSupabase.some(isInstallAction) || packageJsonContent(state)) {
+      await ensureDependencies(conversationId, state);
+    }
 
-    const validation = await callGuard({
-      operation: "project",
-      conversationId,
-    });
+    const validation = await callGuard({ operation: "project", conversationId });
     if (validation.output) appendOutput(state, validation.output);
-    if (applyRepairedFiles(state, validation.repairedFiles)) emit(state);
+    await applyRepairedFiles(conversationId, state, validation.repairedFiles);
+
+    const startActions = safeNonSupabase.filter((action) => action.type === "start");
+    const explicitStart = startActions.length
+      ? startActions[startActions.length - 1].content
+      : null;
+    const startCommand = explicitStart || detectStartCommand(state);
+    if (startCommand) {
+      await startDevServer(conversationId, state, startCommand);
+    } else {
+      state.progress = "writing";
+      appendOutput(state, "No dev/start script found; project files are available in the editor.\n");
+      emit(state);
+    }
   } catch (error) {
     state.active = false;
     setError(state, error);
@@ -493,23 +681,20 @@ export async function restartStreamingRuntime(conversationId: string) {
   state.active = true;
   state.progress = "starting";
   state.error = null;
-  appendOutput(state, "\nRestarting preview server...\n");
+  appendOutput(state, "\nRestarting WebContainer preview server...\n");
   emit(state);
 
   try {
+    await ensureContainer(conversationId, state);
     await syncSupabaseRuntime(conversationId).catch(() => false);
-    const validation = await callGuard({
-      operation: "project",
-      conversationId,
-    });
+    const validation = await callGuard({ operation: "project", conversationId });
     if (validation.output) appendOutput(state, validation.output);
-    if (applyRepairedFiles(state, validation.repairedFiles)) emit(state);
+    await applyRepairedFiles(conversationId, state, validation.repairedFiles);
+    await ensureDependencies(conversationId, state);
 
-    const response = await callSandbox({
-      operation: "restart",
-      conversationId,
-    });
-    applyResponse(state, response);
+    const startCommand = state.startCommand || detectStartCommand(state);
+    if (!startCommand) throw new Error("No dev/start script found in package.json");
+    await startDevServer(conversationId, state, startCommand);
   } catch (error) {
     setError(state, error);
     throw error;
@@ -518,42 +703,64 @@ export async function restartStreamingRuntime(conversationId: string) {
 
 export async function refreshStreamingRuntimeLogs(conversationId: string) {
   const state = getState(conversationId);
-  const response = await callSandbox({
-    operation: "logs",
-    conversationId,
-  });
-  if (response.output) {
-    appendOutput(state, `\n--- Preview diagnostics ---\n${response.output}\n`);
-    emit(state);
-  }
-  return response.output || "";
+  const diagnostics = [
+    "--- WebContainer diagnostics ---",
+    `Conversation: ${conversationId}`,
+    `Cross-origin isolated: ${typeof window !== "undefined" ? window.crossOriginIsolated : "unknown"}`,
+    `Preview URL: ${state.previewUrl || "not ready"}`,
+    `Start command: ${state.startCommand || detectStartCommand(state) || "none"}`,
+  ].join("\n");
+  appendOutput(state, `\n${diagnostics}\n`);
+  emit(state);
+  return diagnostics;
 }
 
 export async function buildStreamingRuntime(conversationId: string) {
   const state = getState(conversationId);
+  const wc = await ensureContainer(conversationId, state);
   await syncSupabaseRuntime(conversationId).catch(() => false);
-  const validation = await callGuard({
-    operation: "project",
-    conversationId,
-  });
+  const validation = await callGuard({ operation: "project", conversationId });
   if (validation.output) appendOutput(state, validation.output);
-  if (applyRepairedFiles(state, validation.repairedFiles)) emit(state);
+  await applyRepairedFiles(conversationId, state, validation.repairedFiles);
+  await ensureDependencies(conversationId, state);
 
-  const response = await callSandbox({
-    operation: "build",
-    conversationId,
-  });
-  if (response.output) {
-    appendOutput(state, `\n${response.output}\n`);
+  const packageJson = packageJsonContent(state);
+  if (!packageJson) throw new Error("Project has no package.json to build");
+  try {
+    const pkg = JSON.parse(packageJson) as { scripts?: Record<string, string> };
+    if (!pkg.scripts?.build) throw new Error("Project has no npm build script");
+  } catch (error) {
+    if (error instanceof SyntaxError) throw new Error("Project package.json is invalid");
+    throw error;
+  }
+
+  appendOutput(state, "\n$ npm run build (WebContainer)\n");
+  emit(state);
+  let buildOutput = "";
+  const exitCode = await runCommand(wc, "npm run build", (data) => {
+    buildOutput = `${buildOutput}${data}`.slice(-12000);
+    appendOutput(state, data);
     emit(state);
+  });
+  if (exitCode !== 0) throw new Error(`npm run build exited with code ${exitCode}`);
+
+  let outputDir: string | null = null;
+  for (const candidate of ["dist", "build", "out"]) {
+    if (await directoryExists(wc, candidate)) {
+      outputDir = candidate;
+      break;
+    }
   }
-  if (!response.files || response.files.length === 0) {
-    throw new Error("Sandbox build produced no publishable files");
+  if (!outputDir) {
+    throw new Error("Build completed but no dist, build, or out directory was found");
   }
-  return {
-    files: response.files,
-    output: response.output || "",
-  };
+
+  const files = await collectDirectoryFiles(wc, outputDir, {
+    maxFiles: 500,
+    maxBytes: 15_000_000,
+  });
+  if (files.length === 0) throw new Error("WebContainer build produced no publishable files");
+  return { files, output: buildOutput };
 }
 
 export function subscribeStreamingRuntime(
@@ -573,5 +780,6 @@ export function getStreamingRuntimeSnapshot(conversationId: string) {
 }
 
 export function isStreamingRuntimeActive(conversationId: string) {
-  return getState(conversationId).active;
+  const state = getState(conversationId);
+  return state.active && Object.keys(state.files).length > 0;
 }
