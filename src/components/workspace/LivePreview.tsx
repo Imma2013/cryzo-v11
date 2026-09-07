@@ -161,6 +161,7 @@ export function LivePreview({
           title="Cryzo live preview"
           className="block h-full w-full border-0 bg-white"
           sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-storage-access-by-user-activation"
+          allow="cross-origin-isolated"
           loading="eager"
           onLoad={handleFrameLoad}
         />
@@ -237,6 +238,7 @@ export function LivePreview({
           className="h-full rounded bg-white shadow-lg"
           style={{ width: device.width, maxWidth: "100%" }}
           sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-storage-access-by-user-activation"
+          allow="cross-origin-isolated"
           loading="eager"
           onLoad={handleFrameLoad}
         />

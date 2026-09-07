@@ -9,9 +9,8 @@ export async function getWebContainer(): Promise<WebContainer> {
   if (bootPromise) return bootPromise;
 
   bootPromise = WebContainer.boot({
-    // next.config.ts serves Cryzo with COEP: require-corp. Keep the runtime
-    // mode matched to the page, which is especially important on Safari/iOS.
     coep: "require-corp",
+    workdirName: "cryzo-project",
     forwardPreviewErrors: true,
   })
     .then(async (webcontainer) => {
@@ -19,9 +18,13 @@ export async function getWebContainer(): Promise<WebContainer> {
 
       try {
         const res = await fetch("/inspector-script.js");
-        const script = await res.text();
-        await webcontainer.setPreviewScript(script);
-      } catch {}
+        if (res.ok) {
+          const script = await res.text();
+          await webcontainer.setPreviewScript(script);
+        }
+      } catch {
+        // Inspector injection is optional; preview execution should still work.
+      }
 
       return webcontainer;
     })
@@ -40,45 +43,94 @@ export async function teardownWebContainer() {
   if (bootPromise) {
     try {
       await bootPromise;
-    } catch {}
+    } catch {
+      // A failed boot has nothing to tear down.
+    }
   }
+
   if (instance) {
     instance.teardown();
     instance = null;
   }
+  bootPromise = null;
 }
 
 export async function writeFiles(wc: WebContainer, actions: ArtifactAction[]) {
   for (const action of actions) {
-    if (action.type === "file" && action.filePath) {
-      const parts = action.filePath.split("/");
-      if (parts.length > 1) {
-        const dir = parts.slice(0, -1).join("/");
-        await wc.fs.mkdir(dir, { recursive: true });
-      }
-      await wc.fs.writeFile(action.filePath, action.content);
+    if (action.type !== "file" || !action.filePath) continue;
+
+    const normalized = action.filePath.replace(/^\.\//, "").replace(/^\/+/, "");
+    const parts = normalized.split("/").filter(Boolean);
+    if (parts.length > 1) {
+      await wc.fs.mkdir(parts.slice(0, -1).join("/"), { recursive: true });
     }
+    await wc.fs.writeFile(normalized, action.content);
   }
 }
 
 export async function runCommand(
   wc: WebContainer,
   command: string,
-  onOutput: (data: string) => void
+  onOutput: (data: string) => void,
 ): Promise<number> {
-  const parts = command.trim().split(/\s+/);
-  const cmd = parts.shift()!;
-  const process = await wc.spawn(cmd, parts);
-
+  const process = await wc.spawn("jsh", ["-c", command]);
   const outputPromise = process.output.pipeTo(
     new WritableStream({
       write(data) {
         onOutput(data);
       },
-    })
+    }),
   );
 
   const exitCode = await process.exit;
   await outputPromise.catch(() => {});
   return exitCode;
+}
+
+export async function directoryExists(wc: WebContainer, path: string) {
+  try {
+    await wc.fs.readdir(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function collectDirectoryFiles(
+  wc: WebContainer,
+  root: string,
+  options: { maxFiles?: number; maxBytes?: number } = {},
+) {
+  const maxFiles = options.maxFiles ?? 500;
+  const maxBytes = options.maxBytes ?? 15_000_000;
+  const files: Array<{ path: string; content: string }> = [];
+  let totalBytes = 0;
+
+  async function walk(directory: string) {
+    const entries = await wc.fs.readdir(directory, { withFileTypes: true });
+    for (const entry of entries) {
+      const fullPath = `${directory}/${entry.name}`.replace(/^\.\//, "");
+      if (entry.isDirectory()) {
+        await walk(fullPath);
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      if (files.length >= maxFiles) {
+        throw new Error(`Build produced too many files (more than ${maxFiles})`);
+      }
+
+      const bytes = await wc.fs.readFile(fullPath);
+      totalBytes += bytes.byteLength;
+      if (totalBytes > maxBytes) {
+        throw new Error("Build output is too large to publish from Cryzo");
+      }
+      files.push({
+        path: fullPath.slice(root.length).replace(/^\//, ""),
+        content: new TextDecoder().decode(bytes),
+      });
+    }
+  }
+
+  await walk(root);
+  return files;
 }
