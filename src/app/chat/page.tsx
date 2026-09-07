@@ -8,6 +8,7 @@ import { ArrowUpRight, CalendarDays, Clock3, Sparkles } from "lucide-react";
 import { api } from "../../../convex/_generated/api";
 import { useAuth } from "@/providers/AuthProvider";
 import { ChatInput, type ChatMode } from "@/components/ChatInput";
+import { ProjectImport } from "@/components/ProjectImport";
 import {
   filesToUIParts,
   saveInitialChatMessage,
@@ -124,6 +125,7 @@ export default function ChatEmptyPage() {
               }}
               variant="hero"
             />
+            {userId && <ProjectImport userId={userId} modelSelection={modelSelection} />}
           </div>
         </div>
 
