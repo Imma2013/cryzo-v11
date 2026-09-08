@@ -8,9 +8,10 @@ export type ManagedModelDefinition = {
 };
 
 const seeds = [
-  ["cryzo/ling-3-flash-free", "Ling 3.0 Flash Fin", "inclusionai/ling-3.0-flash-fin:free"],
   ["cryzo/nemotron-3.5-lightning-free", "Nemotron 3.5 Lightning", "nvidia/nemotron-3.5-lightning:free"],
+  ["cryzo/ling-3-flash-free", "Ling 3.0 Flash Fin", "inclusionai/ling-3.0-flash-fin:free"],
   ["cryzo/nemotron-3-ultra-free", "Nemotron 3 Ultra", "nvidia/nemotron-3-ultra-550b-a55b:free"],
+  // Kept only so old conversations remain resolvable. It is never advertised.
   ["cryzo/minimax-m3", "MiniMax M3", "minimax/minimax-m3"],
   ["cryzo/openai-gpt-5.6-luna", "GPT-5.6 Luna", "openai/gpt-5.6-luna"],
   ["cryzo/openai-gpt-5.6-sol", "GPT-5.6 Sol", "openai/gpt-5.6-sol"],
@@ -42,9 +43,13 @@ export const CRYZO_MANAGED_MODELS = seeds.map(([, name, upstream]) => managedDef
 // Legacy selections remain resolvable, but are not advertised as new managed choices.
 export const MANAGED_PICKER_MODELS = CRYZO_MANAGED_MODELS.filter(model =>
   !["minimax/minimax-m3", "moonshotai/kimi-k3"].includes(model.upstreamModel));
-export const DEFAULT_MANAGED_MODEL_ID = "cryzo/ling-3-flash-free";
+export const DEFAULT_MANAGED_MODEL_ID = "cryzo/nemotron-3.5-lightning-free";
+
 export function normalizeManagedModelId(modelId?: string | null) {
-  const aliases: Record<string, string> = { "cryzo/kimi-k3": "cryzo/moonshot-kimi-k3" };
+  const aliases: Record<string, string> = {
+    "cryzo/kimi-k3": "cryzo/moonshot-kimi-k3",
+    "cryzo/minimax-m3": "cryzo/nemotron-3.5-lightning-free",
+  };
   const raw = modelId?.trim();
   const id = raw ? aliases[raw] ?? raw : undefined;
   return id && (CRYZO_MANAGED_MODELS.some(model => model.id === id) || /^cryzo\/router\/[^/]+\/.+/.test(id))
@@ -55,4 +60,3 @@ export function getManagedModel(modelId?: string | null) {
   return CRYZO_MANAGED_MODELS.find(model => model.id === id) ??
     managedDefinition(id.slice("cryzo/router/".length));
 }
-
