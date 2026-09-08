@@ -2,14 +2,28 @@
 
 :root,
 html[data-theme="dark"] {
-  --background: #000000;
-  --foreground: #ffffff;
+  --background: #09090b;
+  --foreground: #f4f4f5;
+  --cryzo-canvas: #09090b;
+  --cryzo-panel: #0f0f12;
+  --cryzo-card: #18181b;
+  --cryzo-border: #2a2a2f;
+  --cryzo-text: #f4f4f5;
+  --cryzo-muted: #a1a1aa;
+  --cryzo-accent: #60a5fa;
   color-scheme: dark;
 }
 
 html[data-theme="light"] {
-  --background: #f7f8fa;
+  --background: #f4f4f5;
   --foreground: #18181b;
+  --cryzo-canvas: #f4f4f5;
+  --cryzo-panel: #ffffff;
+  --cryzo-card: #ffffff;
+  --cryzo-border: #e4e4e7;
+  --cryzo-text: #18181b;
+  --cryzo-muted: #71717a;
+  --cryzo-accent: #2563eb;
   color-scheme: light;
 }
 
@@ -28,7 +42,11 @@ body {
 
 * {
   scrollbar-width: thin;
-  scrollbar-color: #27272a transparent;
+  scrollbar-color: #3f3f46 transparent;
+}
+
+html[data-theme="light"] * {
+  scrollbar-color: #d4d4d8 transparent;
 }
 
 @media (max-width: 767px) {
@@ -39,11 +57,10 @@ body {
   }
 }
 
-
 /*
- * Compatibility theme layer for the existing workspace. New UI should prefer
- * the background/foreground variables; these rules keep older dark utilities
- * readable while the app is migrated component by component.
+ * Compatibility theme layer for the existing workspace. New builder UI uses
+ * semantic --cryzo-* surfaces; these rules keep older dark Tailwind utilities
+ * coherent in light mode while the rest of the app migrates gradually.
  */
 html[data-theme="light"] .bg-black {
   background-color: #ffffff !important;
@@ -58,20 +75,23 @@ html[data-theme="light"] .bg-\[\#0b0d10\],
 html[data-theme="light"] .bg-\[\#0c0c0c\],
 html[data-theme="light"] .bg-\[\#0d0d0d\],
 html[data-theme="light"] .bg-\[\#0e0e10\] {
-  background-color: #f7f8fa !important;
+  background-color: #f4f4f5 !important;
 }
 
 html[data-theme="light"] .bg-\[\#101010\],
 html[data-theme="light"] .bg-\[\#111113\],
 html[data-theme="light"] .bg-\[\#151515\] {
-  background-color: #f4f4f5 !important;
+  background-color: #ffffff !important;
 }
 
 html[data-theme="light"] .bg-\[\#15110f\] {
   background-color: #fff7ed !important;
 }
 
-html[data-theme="light"] .bg-zinc-900 {
+html[data-theme="light"] .bg-zinc-900,
+html[data-theme="light"] .bg-zinc-900\/70,
+html[data-theme="light"] .bg-zinc-900\/60,
+html[data-theme="light"] .bg-zinc-900\/50 {
   background-color: #ffffff !important;
 }
 
@@ -83,13 +103,14 @@ html[data-theme="light"] .bg-black\/30,
 html[data-theme="light"] .bg-black\/50,
 html[data-theme="light"] .bg-black\/70,
 html[data-theme="light"] .bg-black\/80 {
-  background-color: rgb(244 244 245 / 0.94) !important;
+  background-color: rgb(244 244 245 / 0.96) !important;
 }
 
 html[data-theme="light"] .text-white {
   color: #18181b !important;
 }
 
+html[data-theme="light"] .text-zinc-100,
 html[data-theme="light"] .text-zinc-200,
 html[data-theme="light"] .text-zinc-300 {
   color: #27272a !important;
@@ -104,9 +125,18 @@ html[data-theme="light"] .text-zinc-600 {
   color: #71717a !important;
 }
 
+html[data-theme="light"] .text-blue-400 {
+  color: #2563eb !important;
+}
+
 html[data-theme="light"] .border-zinc-700,
-html[data-theme="light"] .border-zinc-800 {
+html[data-theme="light"] .border-zinc-800,
+html[data-theme="light"] .border-zinc-900 {
   border-color: #d4d4d8 !important;
+}
+
+html[data-theme="light"] .border-t-blue-400 {
+  border-top-color: #2563eb !important;
 }
 
 html[data-theme="light"] .placeholder\:text-zinc-600::placeholder,
@@ -114,13 +144,18 @@ html[data-theme="light"] .placeholder-zinc-500::placeholder {
   color: #a1a1aa !important;
 }
 
+html[data-theme="light"] .hover\:bg-zinc-900:hover,
 html[data-theme="light"] .hover\:bg-zinc-800:hover,
 html[data-theme="light"] .hover\:bg-zinc-800\/60:hover {
-  background-color: #e4e4e7 !important;
+  background-color: #f4f4f5 !important;
 }
 
 html[data-theme="light"] .hover\:text-white:hover {
   color: #18181b !important;
+}
+
+html[data-theme="light"] .shadow-\[0_18px_50px_rgba\(0\,0\,0\,0\.28\)\] {
+  box-shadow: 0 14px 40px rgb(24 24 27 / 0.08) !important;
 }
 
 html[data-theme="light"] select,
