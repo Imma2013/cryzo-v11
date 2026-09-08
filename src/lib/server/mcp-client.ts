@@ -15,7 +15,7 @@ type McpToolMeta = {
   enabled?: boolean;
 };
 
-type McpServerRecord = {
+export type McpServerRecord = {
   _id: string;
   name: string;
   url: string;
@@ -78,16 +78,14 @@ function parseCredential(raw?: string | null) {
 }
 
 async function resolveCredential(authToken: string, server: McpServerRecord) {
-  if (server.authType === "none") return null;
   const stored = await resolveAccountProviderSecret(authToken, `mcp:${server._id}`);
-  if (!stored?.apiKey) throw new Error(`${server.name} needs ${server.authType === "oauth" ? "OAuth authorization" : "an API key"}.`);
+  if (!stored?.apiKey) return null;
   return parseCredential(stored.apiKey);
 }
 
-function authHeaders(server: McpServerRecord, credential: McpCredential | null) {
-  if (server.authType === "none") return {};
+function authHeaders(credential: McpCredential | null) {
   const token = credential?.access_token?.trim();
-  if (!token) throw new Error(`${server.name} is missing credentials.`);
+  if (!token) return {};
   return { Authorization: `${credential?.token_type || "Bearer"} ${token}` };
 }
 
@@ -127,7 +125,7 @@ async function rpc(
       headers: {
         "Content-Type": "application/json",
         Accept: "application/json, text/event-stream",
-        ...authHeaders(server, credential),
+        ...authHeaders(credential),
         ...(sessionId ? { "Mcp-Session-Id": sessionId } : {}),
       },
       body: JSON.stringify(payload),
@@ -219,11 +217,11 @@ function safeToolName(serverName: string, toolName: string) {
   return `mcp_${clean(serverName).slice(0, 24)}_${clean(toolName).slice(0, 36)}`.slice(0, 64);
 }
 
-export async function buildProjectMcpTools(authToken: string | undefined, conversationId: string | undefined) {
-  if (!authToken || !conversationId) return { tools: {} as Record<string, any>, servers: [] as McpServerRecord[] };
+export async function buildProjectMcpTools(authToken: string | undefined) {
+  if (!authToken) return { tools: {} as Record<string, any>, servers: [] as McpServerRecord[] };
   const servers = (await fetchQuery(
-    (api as any).mcpServers.listForProject,
-    { conversationId: conversationId as any },
+    (api as any).mcpServers.list,
+    {},
     { token: authToken },
   )) as McpServerRecord[];
 
