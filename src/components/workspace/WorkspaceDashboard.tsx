@@ -18,6 +18,7 @@ import {
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { useAuth } from "@/providers/AuthProvider";
+import { SupabaseConnectionModal } from "@/components/SupabaseConnectionModal";
 
 type DashboardSection = "data" | "users" | "backend" | "apps" | "code" | "domains";
 
@@ -43,6 +44,7 @@ function WorkspaceDashboardContent({
   const ready = !authLoading && isAuthenticated && Boolean(authToken);
   const [section, setSection] = useState<DashboardSection>("data");
   const [entityName, setEntityName] = useState("");
+  const [supabaseOpen, setSupabaseOpen] = useState(false);
   const overview = useQuery(
     api.cloudAdmin.getOverview,
     ready ? { conversationId } : "skip",
@@ -172,6 +174,18 @@ function WorkspaceDashboardContent({
           <h2 className="mt-2 text-2xl font-semibold text-white">Apps</h2>
           <p className="mt-1 text-sm text-zinc-500">Manage the services attached to this project.</p>
           <div className="mt-6 grid gap-3 sm:grid-cols-2">
+            <button
+              type="button"
+              onClick={() => setSupabaseOpen(true)}
+              className="group rounded-2xl border border-zinc-800 bg-black/40 p-5 text-left transition hover:border-zinc-600 hover:bg-zinc-900/60"
+            >
+              <div className="flex items-center justify-between">
+                <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-300"><Database size={18} /></span>
+                <ChevronRight size={16} className="text-zinc-600 transition group-hover:translate-x-0.5 group-hover:text-white" />
+              </div>
+              <h3 className="mt-5 font-semibold text-white">Supabase</h3>
+              <p className="mt-1 text-xs leading-5 text-zinc-500">Connect an access token and choose the Supabase project for this Cryzo app.</p>
+            </button>
             {apps.map((app) => {
               const Icon = app.icon;
               return (
@@ -277,30 +291,37 @@ function WorkspaceDashboardContent({
   })();
 
   return (
-    <div className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] bg-[#08090b] md:grid-cols-[210px_minmax(0,1fr)] md:grid-rows-1">
-      <nav className="flex gap-1 overflow-x-auto border-b border-zinc-800 bg-[#0b0d10] p-2 md:block md:border-b-0 md:border-r md:p-3">
-        <div className="mb-4 hidden px-2 pt-2 md:block">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-zinc-600">Cryzo Cloud</p>
-          <p className="mt-1 truncate text-sm font-semibold text-white">{overview?.app?.name || "Cryzo app"}</p>
-        </div>
-        {NAVIGATION.map((item) => {
-          const Icon = item.icon;
-          const active = section === item.id;
-          return (
-            <button
-              key={item.id}
-              type="button"
-              onClick={() => selectSection(item.id)}
-              className={`flex min-w-max items-center gap-2 rounded-xl px-3 py-2 text-xs transition md:mb-1 md:w-full ${active ? "bg-white text-black" : "text-zinc-400 hover:bg-zinc-900 hover:text-white"}`}
-            >
-              <Icon size={15} />
-              {item.label}
-            </button>
-          );
-        })}
-      </nav>
-      <main className="min-h-0 overflow-auto">{content}</main>
-    </div>
+    <>
+      <div className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] bg-[#08090b] md:grid-cols-[210px_minmax(0,1fr)] md:grid-rows-1">
+        <nav className="flex gap-1 overflow-x-auto border-b border-zinc-800 bg-[#0b0d10] p-2 md:block md:border-b-0 md:border-r md:p-3">
+          <div className="mb-4 hidden px-2 pt-2 md:block">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-zinc-600">Cryzo Cloud</p>
+            <p className="mt-1 truncate text-sm font-semibold text-white">{overview?.app?.name || "Cryzo app"}</p>
+          </div>
+          {NAVIGATION.map((item) => {
+            const Icon = item.icon;
+            const active = section === item.id;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => selectSection(item.id)}
+                className={`flex min-w-max items-center gap-2 rounded-xl px-3 py-2 text-xs transition md:mb-1 md:w-full ${active ? "bg-white text-black" : "text-zinc-400 hover:bg-zinc-900 hover:text-white"}`}
+              >
+                <Icon size={15} />
+                {item.label}
+              </button>
+            );
+          })}
+        </nav>
+        <main className="min-h-0 overflow-auto">{content}</main>
+      </div>
+      <SupabaseConnectionModal
+        open={supabaseOpen}
+        onClose={() => setSupabaseOpen(false)}
+        conversationId={String(conversationId)}
+      />
+    </>
   );
 }
 
@@ -312,10 +333,7 @@ type DashboardBoundaryState = {
   error: string | null;
 };
 
-class DashboardBoundary extends Component<
-  DashboardBoundaryProps,
-  DashboardBoundaryState
-> {
+class DashboardBoundary extends Component<DashboardBoundaryProps, DashboardBoundaryState> {
   state: DashboardBoundaryState = { error: null };
 
   static getDerivedStateFromError(error: unknown): DashboardBoundaryState {
