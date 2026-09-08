@@ -43,11 +43,11 @@ const PLANS: PlanDefinition[] = [
     integrationCredits: 100,
     features: [
       "Core Cryzo builder features",
-      "Unlimited projects",
+      "Unlimited web and native app building",
+      "App Store and Google Play workflow",
       "Bring your own AI keys",
       "GitHub sync and code export",
       "Deploy with your own Vercel or Netlify",
-      "Native mobile source and store-readiness scans",
     ],
   },
   {
@@ -77,8 +77,6 @@ const PLANS: PlanDefinition[] = [
       "Everything in Starter",
       "Choose your AI model",
       "In-app code editing",
-      "Managed iOS and Android builds",
-      "App Store and Google Play submission",
       "Higher managed-hosting capacity",
     ],
   },
@@ -486,11 +484,12 @@ export default function BillingPage() {
           </div>
         </section>
 
-        {plan === "free" && (
-          <p className="mx-auto mt-4 max-w-6xl text-center text-xs text-[var(--cryzo-muted)]">
-            Free includes 25 message credits per month, up to 5 per day, plus 100 integration credits.
-          </p>
-        )}
+        <p className="mx-auto mt-4 max-w-6xl text-center text-xs leading-5 text-[var(--cryzo-muted)]">
+          Web and native app building, including the App Store and Google Play workflow, is included on every plan.
+          {plan === "free"
+            ? " Free includes 25 message credits per month, up to 5 per day, plus 100 integration credits."
+            : ""}
+        </p>
 
         {recentHistory.length > 0 && (
           <section className="mx-auto mt-8 max-w-6xl rounded-2xl border border-[var(--cryzo-border)] bg-[var(--cryzo-panel)] p-5">
