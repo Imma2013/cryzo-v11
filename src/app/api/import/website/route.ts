@@ -9,6 +9,7 @@ const MAX_CSS_BYTES = 300_000;
 const MAX_TOTAL_CSS_BYTES = 1_000_000;
 const MAX_STYLESHEETS = 10;
 const MAX_REDIRECTS = 5;
+const LOCAL_STYLE_PREFIX = "/styles/imported-";
 
 type ImportedFile = { path: string; content: string };
 
@@ -93,10 +94,6 @@ async function safeFetch(input: string | URL, accept: string) {
   throw new Error("Website redirected too many times.");
 }
 
-function escapeHtmlAttribute(value: string) {
-  return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
-}
-
 function rewriteCssUrls(css: string, stylesheetUrl: URL) {
   return css.replace(
     /url\(\s*(["']?)([^"')]+)\1\s*\)/gi,
@@ -111,6 +108,60 @@ function rewriteCssUrls(css: string, stylesheetUrl: URL) {
       }
     },
   );
+}
+
+function absoluteHtmlUrl(rawValue: string, pageUrl: URL) {
+  const value = rawValue.trim();
+  if (
+    !value ||
+    value.startsWith("#") ||
+    value.startsWith(LOCAL_STYLE_PREFIX) ||
+    /^(data:|blob:|mailto:|tel:|javascript:)/i.test(value)
+  ) {
+    return rawValue;
+  }
+  try {
+    return new URL(value, pageUrl).toString();
+  } catch {
+    return rawValue;
+  }
+}
+
+function rewriteSrcSet(rawValue: string, pageUrl: URL) {
+  if (/^\s*data:/i.test(rawValue)) return rawValue;
+  return rawValue
+    .split(",")
+    .map((candidate) => {
+      const trimmed = candidate.trim();
+      if (!trimmed) return trimmed;
+      const space = trimmed.search(/\s/);
+      const urlPart = space === -1 ? trimmed : trimmed.slice(0, space);
+      const descriptor = space === -1 ? "" : trimmed.slice(space);
+      return `${absoluteHtmlUrl(urlPart, pageUrl)}${descriptor}`;
+    })
+    .join(", ");
+}
+
+function rewriteHtmlAssetUrls(html: string, pageUrl: URL) {
+  let next = html.replace(/<base\b[^>]*>/gi, "");
+  next = next.replace(
+    /\b(src|href|poster|action)=(['"])(.*?)\2/gi,
+    (_match, attribute: string, quote: string, value: string) =>
+      `${attribute}=${quote}${absoluteHtmlUrl(value, pageUrl)}${quote}`,
+  );
+  next = next.replace(
+    /\bsrcset=(['"])(.*?)\1/gi,
+    (_match, quote: string, value: string) => `srcset=${quote}${rewriteSrcSet(value, pageUrl)}${quote}`,
+  );
+  next = next.replace(
+    /\bstyle=(['"])(.*?)\1/gi,
+    (_match, quote: string, value: string) => `style=${quote}${rewriteCssUrls(value, pageUrl)}${quote}`,
+  );
+  next = next.replace(
+    /<style\b([^>]*)>([\s\S]*?)<\/style>/gi,
+    (_match, attributes: string, css: string) => `<style${attributes}>${rewriteCssUrls(css, pageUrl)}</style>`,
+  );
+  return next;
 }
 
 function pageTitle(html: string, fallback: string) {
@@ -212,15 +263,10 @@ export async function POST(req: Request) {
       }
     }
 
-    const baseHref = finalUrl.toString();
-    if (!/<base\b/i.test(html)) {
-      const baseTag = `<base href="${escapeHtmlAttribute(baseHref)}">`;
-      if (/<head\b[^>]*>/i.test(html)) {
-        html = html.replace(/<head\b[^>]*>/i, (head) => `${head}\n    ${baseTag}`);
-      } else {
-        html = `${baseTag}\n${html}`;
-      }
-    }
+    // Keep localized Cryzo CSS local while making the remaining deployed-page assets explicit.
+    // A <base> tag cannot be used here because it would redirect /styles/imported-*.css back
+    // to the source website instead of the WebContainer preview origin.
+    html = rewriteHtmlAssetUrls(html, finalUrl);
 
     files.unshift({ path: "index.html", content: html });
     files.push({
