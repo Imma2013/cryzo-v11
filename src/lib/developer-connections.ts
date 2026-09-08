@@ -7,6 +7,14 @@ export const DEVELOPER_CONNECTION_KEYS = {
 } as const;
 
 const SUPABASE_PROJECT_KEY = "cryzo:supabase-project";
+const SUPABASE_PROJECT_PREFIX = "cryzo:supabase-project:";
+const RESERVED_CHAT_ROUTES = new Set([
+  "apps",
+  "billing",
+  "cloud",
+  "login",
+  "settings",
+]);
 
 export type DeveloperConnection = keyof typeof DEVELOPER_CONNECTION_KEYS;
 
@@ -16,6 +24,18 @@ export type SupabaseProjectSelection = {
   url: string;
   publicKey: string;
 };
+
+function activeConversationId() {
+  if (typeof window === "undefined") return "";
+  const match = window.location.pathname.match(/^\/chat\/([^/]+)\/?$/);
+  const candidate = match?.[1] || "";
+  return candidate && !RESERVED_CHAT_ROUTES.has(candidate) ? candidate : "";
+}
+
+function projectStorageKey(conversationId?: string | null) {
+  const id = conversationId?.trim() || activeConversationId();
+  return id ? `${SUPABASE_PROJECT_PREFIX}${id}` : SUPABASE_PROJECT_KEY;
+}
 
 export function readDeveloperToken(connection: DeveloperConnection) {
   if (typeof window === "undefined") return "";
@@ -37,9 +57,7 @@ export function storeDeveloperToken(
   );
 }
 
-export function readSupabaseProject(): SupabaseProjectSelection | null {
-  if (typeof window === "undefined") return null;
-  const raw = localStorage.getItem(SUPABASE_PROJECT_KEY);
+function parseSupabaseProject(raw: string | null): SupabaseProjectSelection | null {
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw) as Partial<SupabaseProjectSelection>;
@@ -50,16 +68,37 @@ export function readSupabaseProject(): SupabaseProjectSelection | null {
   }
 }
 
-export function storeSupabaseProject(project: SupabaseProjectSelection | null) {
-  if (typeof window === "undefined") return;
-  if (project) localStorage.setItem(SUPABASE_PROJECT_KEY, JSON.stringify(project));
-  else localStorage.removeItem(SUPABASE_PROJECT_KEY);
-  window.dispatchEvent(new Event("cryzo:supabase-project-changed"));
+export function readSupabaseProject(
+  conversationId?: string | null,
+): SupabaseProjectSelection | null {
+  if (typeof window === "undefined") return null;
+  const scopedKey = projectStorageKey(conversationId);
+  const scoped = parseSupabaseProject(localStorage.getItem(scopedKey));
+  if (scoped) return scoped;
+  if (scopedKey !== SUPABASE_PROJECT_KEY) {
+    return parseSupabaseProject(localStorage.getItem(SUPABASE_PROJECT_KEY));
+  }
+  return null;
 }
 
-export function readSupabaseRuntimeContext() {
+export function storeSupabaseProject(
+  project: SupabaseProjectSelection | null,
+  conversationId?: string | null,
+) {
+  if (typeof window === "undefined") return;
+  const key = projectStorageKey(conversationId);
+  if (project) localStorage.setItem(key, JSON.stringify(project));
+  else localStorage.removeItem(key);
+  window.dispatchEvent(
+    new CustomEvent("cryzo:supabase-project-changed", {
+      detail: { conversationId: conversationId || activeConversationId() || null },
+    }),
+  );
+}
+
+export function readSupabaseRuntimeContext(conversationId?: string | null) {
   const token = readDeveloperToken("supabase");
-  const project = readSupabaseProject();
+  const project = readSupabaseProject(conversationId);
   if (!token || !project) return null;
   return { token, project };
 }

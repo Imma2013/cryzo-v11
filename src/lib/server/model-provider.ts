@@ -4,7 +4,10 @@ import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createXai } from "@ai-sdk/xai";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { getProvider } from "@/lib/ai/models";
-import { getManagedModel } from "@/lib/ai/managed-models";
+import {
+  getManagedModel,
+  normalizeManagedModelId,
+} from "@/lib/ai/managed-models";
 import { resolveAccountProviderSecret } from "@/lib/server/provider-secrets";
 import { resolveModelCapabilities } from "@/lib/server/model-capabilities";
 
@@ -40,12 +43,10 @@ function cryzoHeaders() {
 }
 
 async function resolveManagedCryzoModel(requestedModel?: string) {
-  const definition = getManagedModel(requestedModel);
-  if (
-    requestedModel &&
-    requestedModel !== definition.id &&
-    requestedModel !== "cryzo/kimi-k3"
-  ) {
+  const normalizedRequested = normalizeManagedModelId(requestedModel);
+  const definition = getManagedModel(normalizedRequested);
+
+  if (requestedModel && normalizedRequested !== definition.id) {
     throw new Error("This model is no longer supported. Choose another model.");
   }
 
@@ -106,8 +107,6 @@ export async function resolveServerModel(request: ServerModelRequest) {
 
   const definition = getProvider(providerId);
   let apiKey = request.modelApiKey?.trim() || "";
-  // The marketing copilot deliberately uses the server-managed OpenRouter
-  // credential. BYOK requests still provide their own device/account key.
   if (
     providerId === "openrouter" &&
     request.credentialMode === "cryzo" &&

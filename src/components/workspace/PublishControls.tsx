@@ -1,14 +1,15 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import type { ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useAuthToken } from "@convex-dev/auth/react";
 import {
   CheckCircle2,
   Cloud,
+  Database,
   ExternalLink,
   Globe2,
   Loader2,
+  QrCode,
   RefreshCw,
   Rocket,
   Smartphone,
@@ -23,6 +24,7 @@ import {
   readSupabaseProject,
   storeDeveloperToken,
 } from "@/lib/developer-connections";
+import { SupabaseConnectionModal } from "@/components/SupabaseConnectionModal";
 import {
   StoreReadinessReport,
   type StoreReadinessReportData,
@@ -55,6 +57,8 @@ type MobileBuild = {
   artifactUrl?: string;
 };
 
+type MobileOperation = "check" | "preview" | "build" | "status" | "submit";
+
 const SOURCE_EXCLUDES = [
   "node_modules/",
   ".git/",
@@ -68,6 +72,16 @@ const SOURCE_EXCLUDES = [
   "package-lock.json",
   "pnpm-lock.yaml",
   "yarn.lock",
+];
+
+const SCAN_STAGES = [
+  "Loading current app source…",
+  "Checking Expo configuration…",
+  "Reviewing safe areas & navigation…",
+  "Checking permissions & privacy…",
+  "Reviewing native-like layouts…",
+  "Running Nemotron 3.5 Lightning review…",
+  "Finalizing store readiness…",
 ];
 
 function GitHubMark({ size = 16 }: { size?: number }) {
@@ -158,18 +172,26 @@ async function buildAndCollectStaticFiles(
   conversationId: string,
   onOutput: (line: string) => void,
 ) {
-  onOutput("$ npm run build (Vercel Sandbox)\n");
+  onOutput("$ npm run build (Cryzo WebContainer)\n");
   const { buildStreamingRuntime } = await import("@/lib/workspace/streaming-runtime");
   const result = await buildStreamingRuntime(conversationId);
   if (result.output) onOutput(`${result.output}\n`);
   return result.files;
 }
 
-function Modal({ title, children, onClose }: { title: string; children: ReactNode; onClose: () => void }) {
+function Modal({
+  title,
+  children,
+  onClose,
+}: {
+  title: string;
+  children: ReactNode;
+  onClose: () => void;
+}) {
   return (
-    <div className="fixed inset-0 z-[180] flex items-end justify-center bg-black/75 p-0 backdrop-blur-sm sm:items-center sm:p-4">
+    <div className="fixed inset-0 z-[180] flex items-end justify-center bg-black/75 backdrop-blur-sm sm:items-center sm:p-4">
       <button type="button" className="absolute inset-0" onClick={onClose} aria-label="Close" />
-      <div className="relative z-10 max-h-[94dvh] w-full max-w-xl overflow-hidden rounded-t-[28px] border border-zinc-800 bg-zinc-950 shadow-2xl shadow-black sm:max-h-[90vh] sm:rounded-2xl">
+      <div className="relative z-10 max-h-[94dvh] w-full max-w-2xl overflow-hidden rounded-t-[28px] border border-zinc-800 bg-zinc-950 shadow-2xl sm:max-h-[90vh] sm:rounded-2xl">
         <div className="flex items-center justify-between border-b border-zinc-800 px-5 py-4">
           <h2 className="text-base font-semibold text-white">{title}</h2>
           <button type="button" onClick={onClose} className="rounded-lg p-2 text-zinc-500 hover:bg-zinc-900 hover:text-white" aria-label="Close">
@@ -185,14 +207,16 @@ function Modal({ title, children, onClose }: { title: string; children: ReactNod
 function StatusBlock({ status }: { status: PublishStatus }) {
   if (status.type === "idle") return null;
   return (
-    <div className={cn(
-      "mt-4 rounded-xl border px-3 py-2 text-sm",
-      status.type === "success"
-        ? "border-green-900 bg-green-950/40 text-green-300"
-        : status.type === "error"
-          ? "border-red-900 bg-red-950/40 text-red-300"
-          : "border-zinc-800 bg-zinc-900 text-zinc-300",
-    )}>
+    <div
+      className={cn(
+        "mt-4 rounded-xl border px-3 py-2 text-sm",
+        status.type === "success"
+          ? "border-green-900 bg-green-950/40 text-green-300"
+          : status.type === "error"
+            ? "border-red-900 bg-red-950/40 text-red-300"
+            : "border-zinc-800 bg-zinc-900 text-zinc-300",
+      )}
+    >
       <div className="flex items-center gap-2">
         {status.type === "loading" && <Loader2 size={14} className="animate-spin" />}
         {status.type === "success" && <CheckCircle2 size={14} />}
@@ -200,7 +224,7 @@ function StatusBlock({ status }: { status: PublishStatus }) {
       </div>
       {status.url && (
         <a href={status.url} target="_blank" rel="noreferrer" className="mt-2 inline-flex items-center gap-1 text-xs text-blue-300 hover:text-blue-200">
-          {status.url}<ExternalLink size={12} />
+          Open <ExternalLink size={12} />
         </a>
       )}
     </div>
@@ -220,29 +244,79 @@ export function PublishControls({
 }) {
   const authToken = useAuthToken();
   const [githubOpen, setGithubOpen] = useState(false);
+  const [supabaseOpen, setSupabaseOpen] = useState(false);
   const [publishOpen, setPublishOpen] = useState(false);
+  const [supabaseConnected, setSupabaseConnected] = useState(false);
   const sourceFiles = useMemo(() => sourceFilesFromFileMap(files), [files]);
-  const defaultName = useMemo(() => projectNameFromFiles(files, conversationId), [files, conversationId]);
+  const defaultName = useMemo(
+    () => projectNameFromFiles(files, conversationId),
+    [files, conversationId],
+  );
   const unavailable = disabled || sourceFiles.length === 0;
+
+  useEffect(() => {
+    const refresh = () => setSupabaseConnected(Boolean(readSupabaseProject(conversationId)));
+    refresh();
+    window.addEventListener("cryzo:supabase-project-changed", refresh);
+    return () => window.removeEventListener("cryzo:supabase-project-changed", refresh);
+  }, [conversationId]);
 
   return (
     <>
       {variant === "mobile" ? (
-        <button type="button" onClick={() => setPublishOpen(true)} disabled={unavailable} className="inline-flex h-12 shrink-0 items-center justify-center rounded-full bg-blue-600 px-5 text-base font-medium text-white hover:bg-blue-500 disabled:opacity-40">
+        <button
+          type="button"
+          onClick={() => setPublishOpen(true)}
+          disabled={unavailable}
+          className="inline-flex h-12 shrink-0 items-center justify-center rounded-full bg-blue-600 px-5 text-base font-medium text-white hover:bg-blue-500 disabled:opacity-40"
+        >
           Publish
         </button>
       ) : (
         <div className="flex items-center gap-2">
-          <button type="button" onClick={() => setGithubOpen(true)} disabled={unavailable} className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-zinc-800 bg-zinc-900 text-zinc-300 hover:text-white disabled:opacity-40" title="Sync to GitHub">
+          <button
+            type="button"
+            onClick={() => setGithubOpen(true)}
+            disabled={unavailable}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-zinc-800 bg-zinc-900 text-zinc-300 hover:text-white disabled:opacity-40"
+            title="Sync to GitHub"
+          >
             <GitHubMark size={15} />
           </button>
-          <button type="button" onClick={() => setPublishOpen(true)} disabled={unavailable} className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-blue-600 px-3 text-xs font-medium text-white hover:bg-blue-500 disabled:opacity-40">
+          <button
+            type="button"
+            onClick={() => setSupabaseOpen(true)}
+            className="relative inline-flex h-8 w-8 items-center justify-center rounded-lg border border-zinc-800 bg-zinc-900 text-zinc-300 hover:text-white"
+            title="Supabase connection"
+          >
+            <Database size={15} />
+            {supabaseConnected && (
+              <span className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-emerald-400" />
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={() => setPublishOpen(true)}
+            disabled={unavailable}
+            className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-blue-600 px-3 text-xs font-medium text-white hover:bg-blue-500 disabled:opacity-40"
+          >
             <Rocket size={14} /> Publish
           </button>
         </div>
       )}
 
-      {githubOpen && <GitHubPublishModal files={sourceFiles} defaultName={defaultName} onClose={() => setGithubOpen(false)} />}
+      {githubOpen && (
+        <GitHubPublishModal
+          files={sourceFiles}
+          defaultName={defaultName}
+          onClose={() => setGithubOpen(false)}
+        />
+      )}
+      <SupabaseConnectionModal
+        open={supabaseOpen}
+        onClose={() => setSupabaseOpen(false)}
+        conversationId={conversationId}
+      />
       {publishOpen && (
         <DeployPublishModal
           files={sourceFiles}
@@ -256,14 +330,22 @@ export function PublishControls({
   );
 }
 
-function GitHubPublishModal({ files, defaultName, onClose }: { files: PublishFile[]; defaultName: string; onClose: () => void }) {
+function GitHubPublishModal({
+  files,
+  defaultName,
+  onClose,
+}: {
+  files: PublishFile[];
+  defaultName: string;
+  onClose: () => void;
+}) {
   const [token, setToken] = useState(() => readDeveloperToken("github"));
   const [repoName, setRepoName] = useState(defaultName);
   const [isPrivate, setIsPrivate] = useState(false);
   const [status, setStatus] = useState<PublishStatus>({ type: "idle" });
 
   const publish = async () => {
-    setStatus({ type: "loading", message: "Pushing files to GitHub..." });
+    setStatus({ type: "loading", message: "Pushing files to GitHub…" });
     storeDeveloperToken("github", token);
     const response = await fetch("/api/publish/github", {
       method: "POST",
@@ -271,20 +353,39 @@ function GitHubPublishModal({ files, defaultName, onClose }: { files: PublishFil
       body: JSON.stringify({ token, repoName, isPrivate, files }),
     });
     const data = await response.json();
-    if (!response.ok) return setStatus({ type: "error", message: data.error || "GitHub publish failed" });
-    setStatus({ type: "success", message: `Pushed ${data.files} files to ${data.owner}/${data.repo}.`, url: data.url });
+    if (!response.ok) {
+      return setStatus({ type: "error", message: data.error || "GitHub publish failed" });
+    }
+    setStatus({
+      type: "success",
+      message: `Pushed ${data.files} files to ${data.owner}/${data.repo}.`,
+      url: data.url,
+    });
   };
 
   return (
     <Modal title="Sync to GitHub" onClose={onClose}>
       <div className="space-y-4">
-        <TextField label="GitHub access token" value={token} onChange={setToken} type="password" placeholder="github_pat_... or ghp_..." helper={<TokenHelp href="https://github.com/settings/tokens/new" note="You can also save this under Developer Apps." />} />
+        <TextField
+          label="GitHub access token"
+          value={token}
+          onChange={setToken}
+          type="password"
+          placeholder="github_pat_... or ghp_..."
+          helper={<TokenHelp href="https://github.com/settings/tokens/new" note="You can also save this under Developer Apps." />}
+        />
         <TextField label="Repository name" value={repoName} onChange={setRepoName} />
         <label className="flex items-center gap-2 text-sm text-zinc-300">
           <input type="checkbox" checked={isPrivate} onChange={(event) => setIsPrivate(event.target.checked)} /> Private repository
         </label>
-        <button type="button" onClick={() => void publish()} disabled={!token.trim() || !repoName.trim() || status.type === "loading"} className="inline-flex h-10 items-center gap-2 rounded-lg bg-white px-4 text-sm font-medium text-black disabled:opacity-40">
-          {status.type === "loading" ? <Loader2 size={15} className="animate-spin" /> : <GitHubMark size={15} />} Sync repository
+        <button
+          type="button"
+          onClick={() => void publish()}
+          disabled={!token.trim() || !repoName.trim() || status.type === "loading"}
+          className="inline-flex h-10 items-center gap-2 rounded-lg bg-white px-4 text-sm font-medium text-black disabled:opacity-40"
+        >
+          {status.type === "loading" ? <Loader2 size={15} className="animate-spin" /> : <GitHubMark size={15} />}
+          Sync repository
         </button>
         <StatusBlock status={status} />
       </div>
@@ -317,7 +418,6 @@ function DeployPublishModal({
   const [hostingDomain, setHostingDomain] = useState("cryzo.me");
   const [hostingConfigured, setHostingConfigured] = useState<boolean | null>(null);
   const [existingTarget, setExistingTarget] = useState<CryzoHostingTarget | null>(null);
-  const [desiredCryzoUrl, setDesiredCryzoUrl] = useState(`https://${defaultName}.cryzo.me`);
   const [status, setStatus] = useState<PublishStatus>({ type: "idle" });
   const [buildLog, setBuildLog] = useState("");
   const [plan, setPlan] = useState("free");
@@ -326,12 +426,17 @@ function DeployPublishModal({
 
   const [mobilePlatform, setMobilePlatform] = useState<"ios" | "android">("ios");
   const [mobileAppName, setMobileAppName] = useState(defaultName.replace(/-/g, " "));
-  const [mobileIdentifier, setMobileIdentifier] = useState(`com.cryzo.${sanitizeName(defaultName, "app").replace(/-/g, "")}`);
+  const [mobileIdentifier, setMobileIdentifier] = useState(
+    `com.cryzo.${sanitizeName(defaultName, "app").replace(/-/g, "")}`,
+  );
   const [mobileWebUrl, setMobileWebUrl] = useState("");
   const [mobileStatus, setMobileStatus] = useState<PublishStatus>({ type: "idle" });
   const [mobileCheckPassed, setMobileCheckPassed] = useState(false);
   const [mobileBuild, setMobileBuild] = useState<MobileBuild | null>(null);
   const [mobileReport, setMobileReport] = useState<StoreReadinessReportData | null>(null);
+  const [scanStage, setScanStage] = useState<string | null>(null);
+  const [expoPreviewUrl, setExpoPreviewUrl] = useState("");
+  const [expoPreviewLoading, setExpoPreviewLoading] = useState(false);
   const [iosKeyContent, setIosKeyContent] = useState("");
   const [iosKeyId, setIosKeyId] = useState("");
   const [iosIssuerId, setIosIssuerId] = useState("");
@@ -345,10 +450,11 @@ function DeployPublishModal({
   useEffect(() => {
     if (!authToken) return;
     let cancelled = false;
-    async function loadHosting() {
-      const response = await fetch(`/api/publish/cryzo?conversationId=${encodeURIComponent(conversationId)}`, {
-        headers: { Authorization: `Bearer ${authToken}` },
-      });
+    void (async () => {
+      const response = await fetch(
+        `/api/publish/cryzo?conversationId=${encodeURIComponent(conversationId)}`,
+        { headers: { Authorization: `Bearer ${authToken}` } },
+      );
       const data = await response.json();
       if (cancelled || !response.ok) return;
       setHostingConfigured(Boolean(data.configured));
@@ -356,28 +462,29 @@ function DeployPublishModal({
       setBrandingRequired(Boolean(data.brandingRequired));
       setCloudBackend(data.cloudBackend || null);
       if (data.hostingDomain) setHostingDomain(data.hostingDomain);
-      if (data.desiredUrl) setDesiredCryzoUrl(data.desiredUrl);
       if (data.target) {
         setExistingTarget(data.target);
         if (data.target.slug) setCryzoSlug(data.target.slug);
         if (data.target.url) setMobileWebUrl(data.target.url);
-        if (data.target.customDomain && !String(data.target.customDomain).endsWith(`.${data.hostingDomain || "cryzo.me"}`)) {
+        if (
+          data.target.customDomain &&
+          !String(data.target.customDomain).endsWith(`.${data.hostingDomain || "cryzo.me"}`)
+        ) {
           setCustomDomain(data.target.customDomain);
         }
       }
-    }
-    void loadHosting();
-    return () => { cancelled = true; };
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [authToken, conversationId]);
 
-  useEffect(() => {
-    setDesiredCryzoUrl(`https://${cryzoSlug}.${hostingDomain}`);
-  }, [cryzoSlug, hostingDomain]);
-
   const deployCryzo = async () => {
-    if (!authToken) return setStatus({ type: "error", message: "Your Cryzo session is still loading. Try again." });
-    setStatus({ type: "loading", message: existingTarget ? "Publishing a new version and syncing Cryzo Cloud..." : "Creating your Cryzo app and Cloud backend..." });
-    const supabase = readSupabaseProject();
+    if (!authToken) {
+      return setStatus({ type: "error", message: "Your Cryzo session is still loading. Try again." });
+    }
+    setStatus({ type: "loading", message: existingTarget ? "Publishing a new version…" : "Publishing your Cryzo app…" });
+    const supabase = readSupabaseProject(conversationId);
     const response = await fetch("/api/publish/cryzo", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${authToken}` },
@@ -395,43 +502,28 @@ function DeployPublishModal({
       if (data.code === "CRYZO_HOSTING_NOT_CONFIGURED") setHostingConfigured(false);
       return setStatus({ type: "error", message: data.error || "Cryzo Hosting publish failed" });
     }
-
     setHostingConfigured(true);
     setPlan(data.plan || plan);
     setBrandingRequired(Boolean(data.brandingRequired));
     setCloudBackend(data.cloudBackend || null);
     setCryzoSlug(data.slug);
-    if (data.customDomain) setCustomDomain(data.customDomain);
-    setDesiredCryzoUrl(data.desiredUrl || `https://${data.slug}.${hostingDomain}`);
+    setMobileWebUrl(data.url || data.desiredUrl || "");
     setExistingTarget({
       targetId: data.projectId,
       slug: data.slug,
       url: data.url,
       deploymentId: data.deploymentId,
-      customDomain: data.customDomain || (data.subdomainAssigned ? `${data.slug}.${hostingDomain}` : undefined),
+      customDomain: data.customDomain,
     });
-    setMobileWebUrl(data.url || data.desiredUrl || "");
-
-    const dnsText = data.customDomainDns
-      ? ` DNS: ${data.customDomainDns.type} ${data.customDomainDns.name} → ${data.customDomainDns.value}.`
-      : data.dns
-        ? ` DNS: ${data.dns.type} ${data.dns.name} → ${data.dns.value}.`
-        : "";
-    if (data.customDomainRequested && !data.customDomainAssigned) {
-      return setStatus({
-        type: "error",
-        message: `The app is published, but ${data.customDomain} still needs domain verification.${dnsText}${data.customDomainError ? ` ${data.customDomainError}` : ""}`,
-        url: data.fallbackUrl || data.desiredUrl,
-      });
-    }
-    if (data.subdomainAssigned || data.customDomainAssigned) {
-      return setStatus({ type: "success", message: "Published with Cryzo Cloud.", url: data.url });
-    }
-    setStatus({ type: "error", message: `The app deployed, but its Cryzo URL is not routed yet.${dnsText}${data.domainError ? ` ${data.domainError}` : ""}`, url: data.fallbackUrl });
+    setStatus({
+      type: data.url ? "success" : "error",
+      message: data.url ? "Published with Cryzo Cloud." : "The app deployed, but its public domain is still being configured.",
+      url: data.url || data.fallbackUrl,
+    });
   };
 
   const deployVercel = async () => {
-    setStatus({ type: "loading", message: "Creating deployment in your Vercel account..." });
+    setStatus({ type: "loading", message: "Creating deployment in your Vercel account…" });
     storeDeveloperToken("vercel", vercelToken);
     const response = await fetch("/api/publish/vercel", {
       method: "POST",
@@ -446,11 +538,13 @@ function DeployPublishModal({
   };
 
   const deployNetlify = async () => {
-    setStatus({ type: "loading", message: "Building project in Vercel Sandbox..." });
+    setStatus({ type: "loading", message: "Building project in Cryzo WebContainer…" });
     setBuildLog("");
     storeDeveloperToken("netlify", netlifyToken);
     try {
-      const builtFiles = await buildAndCollectStaticFiles(conversationId, (line) => setBuildLog((current) => current + line));
+      const builtFiles = await buildAndCollectStaticFiles(conversationId, (line) =>
+        setBuildLog((current) => current + line),
+      );
       const siteId = localStorage.getItem(`cryzo:netlify-site:${conversationId}`) || undefined;
       const response = await fetch("/api/publish/netlify", {
         method: "POST",
@@ -467,15 +561,20 @@ function DeployPublishModal({
     }
   };
 
-  const mobileRequest = async (operation: "check" | "build" | "status" | "submit", extra: Record<string, unknown> = {}) => {
+  const mobileRequest = async (
+    operation: MobileOperation,
+    extra: Record<string, unknown> = {},
+  ) => {
     if (!authToken) throw new Error("Your Cryzo session is still loading.");
-    storeDeveloperToken("expo", expoToken);
+    if (expoToken.trim()) storeDeveloperToken("expo", expoToken);
+    const includeSource = operation === "check" || operation === "preview" || operation === "build";
     const response = await fetch("/api/publish/mobile", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${authToken}` },
       body: JSON.stringify({
         operation,
         conversationId,
+        sourceFiles: includeSource ? files : undefined,
         expoToken,
         expoAccount,
         appName: mobileAppName,
@@ -490,33 +589,67 @@ function DeployPublishModal({
     return data;
   };
 
+  const previewPhone = async () => {
+    setExpoPreviewLoading(true);
+    setExpoPreviewUrl("");
+    setMobileStatus({ type: "loading", message: "Starting Expo phone preview…" });
+    try {
+      const data = await mobileRequest("preview");
+      setExpoPreviewUrl(data.previewUrl || data.qrValue || "");
+      setMobileStatus({ type: "success", message: "Expo phone preview is ready. Scan the QR code with Expo Go." });
+    } catch (error) {
+      setMobileStatus({ type: "error", message: error instanceof Error ? error.message : "Phone preview failed" });
+    } finally {
+      setExpoPreviewLoading(false);
+    }
+  };
+
   const checkMobile = async () => {
-    setMobileStatus({ type: "loading", message: "Scanning store readiness..." });
+    setMobileStatus({ type: "loading", message: "Scanning store readiness…" });
     setMobileReport(null);
+    setMobileCheckPassed(false);
+    let stageIndex = 0;
+    setScanStage(SCAN_STAGES[stageIndex]);
+    const timer = window.setInterval(() => {
+      stageIndex = Math.min(stageIndex + 1, SCAN_STAGES.length - 1);
+      setScanStage(SCAN_STAGES[stageIndex]);
+    }, 1300);
     try {
       const data = await mobileRequest("check");
       setMobileReport(data.storeReadiness || null);
       setPlan(data.plan || plan);
       if (!data.ready) {
-        setMobileCheckPassed(false);
-        return setMobileStatus({ type: "error", message: (data.issues || []).join(" ") || "App has blocking store-readiness issues." });
+        return setMobileStatus({
+          type: "error",
+          message: (data.issues || []).join(" ") || "App has blocking store-readiness issues.",
+        });
       }
       setMobileCheckPassed(true);
       setMobileStatus({
         type: "success",
-        message: (data.warnings || []).length ? "Scan complete. No blocking issues; review warnings below." : "Scan complete. No blocking issues found.",
+        message: (data.warnings || []).length
+          ? "Scan complete. No blocking issues; review the warnings below."
+          : "Scan complete. No blocking issues found.",
       });
     } catch (error) {
-      setMobileCheckPassed(false);
       setMobileStatus({ type: "error", message: error instanceof Error ? error.message : "Check failed" });
+    } finally {
+      window.clearInterval(timer);
+      setScanStage(null);
     }
   };
 
   const buildMobile = async () => {
-    setMobileStatus({ type: "loading", message: `Starting ${mobilePlatform === "ios" ? "iOS" : "Android"} EAS build...` });
+    setMobileStatus({ type: "loading", message: `Starting ${mobilePlatform === "ios" ? "iOS" : "Android"} EAS build…` });
     try {
       const data = await mobileRequest("build");
-      setMobileBuild({ platform: mobilePlatform, buildId: data.buildId, status: data.status, buildUrl: data.buildUrl, artifactUrl: data.artifactUrl });
+      setMobileBuild({
+        platform: mobilePlatform,
+        buildId: data.buildId,
+        status: data.status,
+        buildUrl: data.buildUrl,
+        artifactUrl: data.artifactUrl,
+      });
       setMobileStatus({ type: "success", message: `EAS build ${data.status || "queued"}.`, url: data.buildUrl });
     } catch (error) {
       setMobileStatus({ type: "error", message: error instanceof Error ? error.message : "Build failed" });
@@ -525,10 +658,19 @@ function DeployPublishModal({
 
   const refreshMobile = async () => {
     if (!mobileBuild) return;
-    setMobileStatus({ type: "loading", message: "Refreshing EAS build status..." });
+    setMobileStatus({ type: "loading", message: "Refreshing EAS build status…" });
     try {
       const data = await mobileRequest("status", { buildId: mobileBuild.buildId });
-      setMobileBuild((current) => current ? { ...current, status: data.status, buildUrl: data.buildUrl || current.buildUrl, artifactUrl: data.artifactUrl || current.artifactUrl } : current);
+      setMobileBuild((current) =>
+        current
+          ? {
+              ...current,
+              status: data.status,
+              buildUrl: data.buildUrl || current.buildUrl,
+              artifactUrl: data.artifactUrl || current.artifactUrl,
+            }
+          : current,
+      );
       setMobileStatus({ type: "success", message: `Build status: ${data.status}.`, url: data.artifactUrl || data.buildUrl });
     } catch (error) {
       setMobileStatus({ type: "error", message: error instanceof Error ? error.message : "Status check failed" });
@@ -537,20 +679,34 @@ function DeployPublishModal({
 
   const submitMobile = async () => {
     if (!mobileBuild) return;
-    setMobileStatus({ type: "loading", message: `Submitting ${mobileBuild.platform === "ios" ? "to App Store Connect" : "to Google Play"}...` });
+    setMobileStatus({ type: "loading", message: `Submitting ${mobileBuild.platform === "ios" ? "to App Store Connect" : "to Google Play"}…` });
     try {
       await mobileRequest("submit", {
         buildId: mobileBuild.buildId,
         platform: mobileBuild.platform,
         ...(mobileBuild.platform === "ios"
-          ? { iosSubmit: { keyContent: iosKeyContent, keyId: iosKeyId, issuerId: iosIssuerId, appleTeamId: iosTeamId, ascAppId: iosAscAppId } }
-          : { androidSubmit: { serviceAccountJson: androidServiceAccountJson, track: androidTrack } }),
+          ? {
+              iosSubmit: {
+                keyContent: iosKeyContent,
+                keyId: iosKeyId,
+                issuerId: iosIssuerId,
+                appleTeamId: iosTeamId,
+                ascAppId: iosAscAppId,
+              },
+            }
+          : {
+              androidSubmit: {
+                serviceAccountJson: androidServiceAccountJson,
+                track: androidTrack,
+              },
+            }),
       });
       setMobileStatus({
         type: "success",
-        message: mobileBuild.platform === "ios"
-          ? "EAS submission started. The build will appear in App Store Connect/TestFlight when processing finishes."
-          : "EAS submission started. The build will appear in Google Play Console when processing finishes.",
+        message:
+          mobileBuild.platform === "ios"
+            ? "EAS submission started. The build will appear in App Store Connect/TestFlight when processing finishes."
+            : "EAS submission started. The build will appear in Google Play Console when processing finishes.",
         url: mobileBuild.buildUrl,
       });
     } catch (error) {
@@ -558,75 +714,54 @@ function DeployPublishModal({
     }
   };
 
-  const isLoading = status.type === "loading";
   const mobileLoading = mobileStatus.type === "loading";
-  const mobileSubmitReady = mobileBuild?.platform === "ios"
-    ? Boolean(iosKeyContent.trim() && iosKeyId.trim() && iosIssuerId.trim() && iosAscAppId.trim())
-    : mobileBuild?.platform === "android"
-      ? Boolean(androidServiceAccountJson.trim())
-      : false;
+  const mobileSubmitReady =
+    mobileBuild?.platform === "ios"
+      ? Boolean(iosKeyContent.trim() && iosKeyId.trim() && iosIssuerId.trim() && iosAscAppId.trim())
+      : mobileBuild?.platform === "android"
+        ? Boolean(androidServiceAccountJson.trim())
+        : false;
 
   return (
     <Modal title="Publish Your App" onClose={onClose}>
-      <div className="space-y-5">
+      <div className="space-y-5 text-white">
         <div className="flex border-b border-zinc-800">
-          <ModeTab active={publishMode === "web"} label="Web" icon={<Globe2 size={15} />} onClick={() => { setPublishMode("web"); setStatus({ type: "idle" }); }} />
-          <ModeTab active={publishMode === "mobile"} label="Mobile app" icon={<Smartphone size={15} />} onClick={() => { setPublishMode("mobile"); setMobileStatus({ type: "idle" }); }} />
+          <ModeTab active={publishMode === "web"} label="Web" icon={<Globe2 size={15} />} onClick={() => setPublishMode("web")} />
+          <ModeTab active={publishMode === "mobile"} label="Mobile app" icon={<Smartphone size={15} />} onClick={() => setPublishMode("mobile")} />
         </div>
 
         {publishMode === "web" ? (
           <>
             <div className="grid grid-cols-3 gap-2">
-              <ProviderButton active={activeProvider === "cryzo"} label="Cryzo Hosting" icon={<Cloud size={15} />} onClick={() => { setActiveProvider("cryzo"); setStatus({ type: "idle" }); }} />
-              <ProviderButton active={activeProvider === "vercel"} label="Your Vercel" icon={<Triangle size={15} />} onClick={() => { setActiveProvider("vercel"); setStatus({ type: "idle" }); }} />
-              <ProviderButton active={activeProvider === "netlify"} label="Netlify" icon={<Rocket size={15} />} onClick={() => { setActiveProvider("netlify"); setStatus({ type: "idle" }); }} />
+              <ProviderButton active={activeProvider === "cryzo"} label="Cryzo Hosting" icon={<Cloud size={15} />} onClick={() => setActiveProvider("cryzo")} />
+              <ProviderButton active={activeProvider === "vercel"} label="Your Vercel" icon={<Triangle size={15} />} onClick={() => setActiveProvider("vercel")} />
+              <ProviderButton active={activeProvider === "netlify"} label="Netlify" icon={<Rocket size={15} />} onClick={() => setActiveProvider("netlify")} />
             </div>
-
             <TextField label="Project name" value={projectName} onChange={setProjectName} />
 
             {activeProvider === "cryzo" && (
               <div className="space-y-4">
                 <div className="grid gap-2 sm:grid-cols-2">
-                  <InfoCard title="Managed hosting" value={brandingRequired ? "Built with Cryzo badge" : "Branding removed"} text={brandingRequired ? "Free managed deployments include a subtle badge. Exported and DIY deployments stay clean." : `${plan} includes unbranded managed hosting.`} />
-                  <InfoCard title="Cryzo Cloud" value={cloudBackend ? "Database + auth active" : "Included on every plan"} text="Database, app users and authentication are built in. Managed runtime operations use integration credits." link={`/chat/cloud?conversationId=${encodeURIComponent(conversationId)}`} />
+                  <InfoCard
+                    title="Managed hosting"
+                    value={brandingRequired ? "Built with Cryzo badge" : "Branding removed"}
+                    text={brandingRequired ? "Free managed deployments include a subtle badge." : `${plan} includes unbranded managed hosting.`}
+                  />
+                  <InfoCard
+                    title="Cryzo Cloud"
+                    value={cloudBackend ? "Database + auth active" : "Included on every plan"}
+                    text="Database, app users and authentication stay managed by Cryzo."
+                  />
                 </div>
-
-                <div>
-                  <label className="mb-1.5 block text-xs font-medium text-zinc-400">Cryzo URL</label>
-                  <div className="flex h-10 items-center overflow-hidden rounded-lg border border-zinc-800 bg-zinc-900">
-                    <span className="shrink-0 border-r border-zinc-800 px-3 text-xs text-zinc-500">https://</span>
-                    <input value={cryzoSlug} onChange={(event) => setCryzoSlug(sanitizeName(event.target.value, "app").slice(0, 48))} className="min-w-0 flex-1 bg-transparent px-2 text-base text-white outline-none sm:text-sm" aria-label="Cryzo URL slug" />
-                    <span className="shrink-0 px-3 text-xs text-zinc-500">.{hostingDomain}</span>
-                  </div>
-                  <p className="mt-1.5 text-xs text-zinc-500">Built-in Cryzo URLs and renaming are included on every plan.</p>
-                </div>
-
-                <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-3">
-                  <div className="text-xs font-medium text-zinc-300">Custom domain</div>
-                  {canUseExternalDomain ? (
-                    <>
-                      <input value={customDomain} onChange={(event) => setCustomDomain(event.target.value.toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, ""))} placeholder="example.com" className="mt-2 h-10 w-full rounded-lg border border-zinc-800 bg-black px-3 text-base text-white outline-none placeholder:text-zinc-600 sm:text-sm" />
-                      <p className="mt-1.5 text-xs leading-5 text-zinc-500">Builder+ can attach a domain you already own. Cryzo will show the DNS record if your registrar still needs configuration.</p>
-                    </>
-                  ) : (
-                    <p className="mt-1.5 text-xs leading-5 text-zinc-500">Connect a real domain such as example.com on Builder+. Your free Cryzo URL remains fully publishable.</p>
-                  )}
-                </div>
-
-                {existingTarget?.url && (
-                  <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-3">
-                    <div className="text-xs text-zinc-500">Currently published</div>
-                    <a href={existingTarget.url} target="_blank" rel="noreferrer" className="mt-1 inline-flex items-center gap-1 text-sm text-blue-300">{existingTarget.url}<ExternalLink size={13} /></a>
-                    {existingTarget.url !== desiredCryzoUrl && <div className="mt-2 text-xs text-zinc-500">Built-in Cryzo URL: {desiredCryzoUrl}</div>}
-                  </div>
+                <TextField label="Cryzo URL" value={cryzoSlug} onChange={(value) => setCryzoSlug(sanitizeName(value, "app").slice(0, 48))} helper={<span className="text-xs text-zinc-500">https://{cryzoSlug}.{hostingDomain}</span>} />
+                {canUseExternalDomain && (
+                  <TextField label="Custom domain" value={customDomain} onChange={(value) => setCustomDomain(value.toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, ""))} placeholder="example.com" />
                 )}
-
                 {hostingConfigured === false && (
-                  <p className="rounded-lg border border-amber-900/70 bg-amber-950/30 px-3 py-2 text-xs leading-5 text-amber-300">Managed hosting needs the Cryzo Vercel platform token. Your Vercel tab remains available.</p>
+                  <p className="rounded-lg border border-amber-900/70 bg-amber-950/30 px-3 py-2 text-xs text-amber-300">Managed hosting needs the Cryzo Vercel platform token. Your Vercel tab remains available.</p>
                 )}
-
-                <button type="button" onClick={() => void deployCryzo()} disabled={!projectName.trim() || !cryzoSlug.trim() || isLoading || !authToken} className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-500 disabled:opacity-40">
-                  {isLoading ? <Loader2 size={15} className="animate-spin" /> : <Cloud size={15} />}
+                <button type="button" onClick={() => void deployCryzo()} disabled={!projectName.trim() || !cryzoSlug.trim() || status.type === "loading" || !authToken} className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 text-sm font-medium text-white disabled:opacity-40">
+                  {status.type === "loading" ? <Loader2 size={15} className="animate-spin" /> : <Cloud size={15} />}
                   {existingTarget ? "Publish new version" : "Publish with Cryzo"}
                 </button>
               </div>
@@ -634,9 +769,9 @@ function DeployPublishModal({
 
             {activeProvider === "vercel" && (
               <div className="space-y-4">
-                <TextField label="Vercel access token" value={vercelToken} onChange={setVercelToken} type="password" placeholder="Vercel access token" helper={<TokenHelp href="https://vercel.com/account/settings/tokens" note="You can also save this under Developer Apps." />} />
-                <button type="button" onClick={() => void deployVercel()} disabled={!vercelToken.trim() || !projectName.trim() || isLoading} className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-white px-4 text-sm font-medium text-black disabled:opacity-40">
-                  {isLoading ? <Loader2 size={15} className="animate-spin" /> : <Triangle size={15} />} Deploy to my Vercel
+                <TextField label="Vercel access token" value={vercelToken} onChange={setVercelToken} type="password" placeholder="Vercel access token" helper={<TokenHelp href="https://vercel.com/account/settings/tokens" />} />
+                <button type="button" onClick={() => void deployVercel()} disabled={!vercelToken.trim() || !projectName.trim() || status.type === "loading"} className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-white text-sm font-medium text-black disabled:opacity-40">
+                  {status.type === "loading" ? <Loader2 size={15} className="animate-spin" /> : <Triangle size={15} />} Deploy to my Vercel
                 </button>
               </div>
             )}
@@ -644,8 +779,8 @@ function DeployPublishModal({
             {activeProvider === "netlify" && (
               <div className="space-y-4">
                 <TextField label="Netlify access token" value={netlifyToken} onChange={setNetlifyToken} type="password" placeholder="Netlify access token" helper={<TokenHelp href="https://app.netlify.com/user/applications#personal-access-tokens" />} />
-                <button type="button" onClick={() => void deployNetlify()} disabled={!netlifyToken.trim() || !projectName.trim() || isLoading} className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-white px-4 text-sm font-medium text-black disabled:opacity-40">
-                  {isLoading ? <Loader2 size={15} className="animate-spin" /> : <Rocket size={15} />} Build and deploy to Netlify
+                <button type="button" onClick={() => void deployNetlify()} disabled={!netlifyToken.trim() || !projectName.trim() || status.type === "loading"} className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-white text-sm font-medium text-black disabled:opacity-40">
+                  {status.type === "loading" ? <Loader2 size={15} className="animate-spin" /> : <Rocket size={15} />} Build and deploy to Netlify
                 </button>
               </div>
             )}
@@ -656,31 +791,73 @@ function DeployPublishModal({
         ) : (
           <div className="space-y-5">
             <div>
-              <h3 className="text-base font-semibold text-white">Prepare for App Store and Google Play</h3>
-              <p className="mt-1 text-xs leading-5 text-zinc-500">Store-readiness scanning, EAS builds, and EAS submission are available on every Cryzo plan. You provide your Expo and store credentials and pay Apple/Google developer fees directly.</p>
+              <h3 className="text-base font-semibold">Prepare for App Store and Google Play</h3>
+              <p className="mt-1 text-xs leading-5 text-zinc-500">
+                Cryzo mobile projects use one shared Expo + React Native source for iOS and Android. Store scanning and phone preview use your current project files; managed EAS builds and submission require Builder+.
+              </p>
             </div>
 
             <div className="grid grid-cols-2 gap-2">
-              <ProviderButton active={mobilePlatform === "ios"} label="iOS" icon={<Store size={15} />} onClick={() => { setMobilePlatform("ios"); setMobileCheckPassed(false); setMobileReport(null); setMobileIdentifier(`com.cryzo.${sanitizeName(defaultName, "app").replace(/-/g, "")}`); }} />
-              <ProviderButton active={mobilePlatform === "android"} label="Android" icon={<Smartphone size={15} />} onClick={() => { setMobilePlatform("android"); setMobileCheckPassed(false); setMobileReport(null); setMobileIdentifier(`com.cryzo.${sanitizeName(defaultName, "app").replace(/-/g, "")}`); }} />
+              <ProviderButton active={mobilePlatform === "ios"} label="iOS" icon={<Store size={15} />} onClick={() => { setMobilePlatform("ios"); setMobileCheckPassed(false); setMobileReport(null); }} />
+              <ProviderButton active={mobilePlatform === "android"} label="Android" icon={<Smartphone size={15} />} onClick={() => { setMobilePlatform("android"); setMobileCheckPassed(false); setMobileReport(null); }} />
             </div>
 
-            <TextField label="Published web URL" value={mobileWebUrl} onChange={setMobileWebUrl} placeholder="https://your-app.cryzo.me" />
-            <TextField label="App name" value={mobileAppName} onChange={setMobileAppName} />
-            <TextField label={mobilePlatform === "ios" ? "Bundle identifier" : "Android package"} value={mobileIdentifier} onChange={setMobileIdentifier} placeholder="com.yourcompany.app" />
-            <TextField label="Expo account / organization" value={expoAccount} onChange={setExpoAccount} placeholder="your-expo-account" />
-            <TextField label="Expo access token" value={expoToken} onChange={setExpoToken} type="password" placeholder="Expo access token" helper={<TokenHelp href="https://expo.dev/accounts/[account]/settings/access-tokens" note="Used only to run EAS on your Expo account. Saved on this device when used." />} />
+            <div className="grid gap-3 sm:grid-cols-2">
+              <TextField label="App name" value={mobileAppName} onChange={setMobileAppName} />
+              <TextField label={mobilePlatform === "ios" ? "Bundle identifier" : "Android package"} value={mobileIdentifier} onChange={setMobileIdentifier} placeholder="com.yourcompany.app" />
+            </div>
 
-            <MobileStep number={1} title="Scan Store Readiness" complete={mobileCheckPassed}>
+            <section className="rounded-2xl border border-zinc-800 bg-zinc-900/35 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <div className="flex items-center gap-2 text-sm font-semibold"><QrCode size={16} /> Preview on your phone</div>
+                  <p className="mt-1 text-xs text-zinc-500">Starts the current Expo project and gives you an Expo Go QR code.</p>
+                </div>
+                <button type="button" onClick={() => void previewPhone()} disabled={expoPreviewLoading} className="inline-flex h-9 items-center gap-2 rounded-lg bg-white px-3 text-sm font-medium text-black disabled:opacity-40">
+                  {expoPreviewLoading ? <Loader2 size={14} className="animate-spin" /> : <Smartphone size={14} />}
+                  {expoPreviewLoading ? "Starting…" : "Preview on device"}
+                </button>
+              </div>
+
+              {expoPreviewUrl && (
+                <div className="mt-4 grid gap-4 rounded-xl border border-zinc-800 bg-black/50 p-4 sm:grid-cols-[180px_minmax(0,1fr)] sm:items-center">
+                  <div className="mx-auto overflow-hidden rounded-xl bg-white p-2">
+                    <img
+                      src={`https://api.qrserver.com/v1/create-qr-code/?size=260x260&data=${encodeURIComponent(expoPreviewUrl)}`}
+                      alt="Expo Go preview QR code"
+                      className="h-40 w-40"
+                    />
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold">Expo</p>
+                    <ol className="mt-2 space-y-1 text-xs leading-5 text-zinc-400">
+                      <li>1. Install Expo Go on your iPhone or Android device.</li>
+                      <li>2. Scan this QR code with the camera or Expo Go.</li>
+                      <li>3. Keep this Cryzo project open while testing.</li>
+                    </ol>
+                    <p className="mt-3 break-all rounded-lg bg-zinc-950 px-2.5 py-2 font-mono text-[10px] text-zinc-500">{expoPreviewUrl}</p>
+                  </div>
+                </div>
+              )}
+            </section>
+
+            <MobileStep number={1} title="Check Your App" complete={mobileCheckPassed}>
+              <p className="mb-3 text-xs text-zinc-500">Scan the current React Native source against native and store-readiness checks, then add a Nemotron review for semantic mobile UX issues.</p>
               <button type="button" onClick={() => void checkMobile()} disabled={mobileLoading} className="inline-flex h-9 items-center gap-2 rounded-lg bg-white px-3 text-sm font-medium text-black disabled:opacity-40">
-                {mobileLoading ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />} Run scan
+                {mobileLoading ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />} Run App Scan
               </button>
             </MobileStep>
 
-            {mobileReport && <StoreReadinessReport report={mobileReport} />}
+            {mobileReport && (
+              <StoreReadinessReport report={mobileReport} onAddToChat={onClose} />
+            )}
 
             <MobileStep number={2} title="Build Store Files" complete={Boolean(mobileBuild)}>
-              <button type="button" onClick={() => void buildMobile()} disabled={!mobileCheckPassed || mobileLoading} className="inline-flex h-9 items-center gap-2 rounded-lg bg-blue-600 px-3 text-sm font-medium text-white disabled:opacity-40">
+              <div className="mb-3 grid gap-3 sm:grid-cols-2">
+                <TextField label="Expo account / organization" value={expoAccount} onChange={setExpoAccount} placeholder="your-expo-account" />
+                <TextField label="Expo access token" value={expoToken} onChange={setExpoToken} type="password" placeholder="Expo access token" helper={<TokenHelp href="https://expo.dev/accounts/[account]/settings/access-tokens" />} />
+              </div>
+              <button type="button" onClick={() => void buildMobile()} disabled={!mobileCheckPassed || mobileLoading || !expoToken.trim() || !expoAccount.trim()} className="inline-flex h-9 items-center gap-2 rounded-lg bg-blue-600 px-3 text-sm font-medium text-white disabled:opacity-40">
                 {mobileLoading ? <Loader2 size={14} className="animate-spin" /> : <Smartphone size={14} />} Build with EAS
               </button>
               {mobileBuild && (
@@ -691,42 +868,35 @@ function DeployPublishModal({
             </MobileStep>
 
             <MobileStep number={3} title="Submit Your App" complete={false}>
-              <div className="space-y-3">
-                <p className="rounded-lg border border-zinc-800 bg-zinc-900/60 px-3 py-2 text-xs leading-5 text-zinc-400">Store credentials are sent only when you press Submit. Cryzo writes them into the temporary EAS workspace, starts submission, and deletes those credential files immediately afterward.</p>
-
-                {mobileBuild?.platform === "ios" ? (
-                  <div className="space-y-3">
-                    <SecretTextarea label="App Store Connect .p8 API key" value={iosKeyContent} onChange={setIosKeyContent} placeholder="-----BEGIN PRIVATE KEY-----" accept=".p8,text/plain" uploadLabel="Load .p8 file" />
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      <TextField label="Key ID" value={iosKeyId} onChange={setIosKeyId} placeholder="ABC123DEFG" />
-                      <TextField label="Issuer ID" value={iosIssuerId} onChange={setIosIssuerId} placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" />
-                      <TextField label="App Store Connect App ID" value={iosAscAppId} onChange={setIosAscAppId} placeholder="1234567890" />
-                      <TextField label="Apple Team ID (optional)" value={iosTeamId} onChange={setIosTeamId} placeholder="A1B2C3D4E5" />
-                    </div>
-                    <TokenHelp href="https://appstoreconnect.apple.com/access/integrations/api" note="Create an App Store Connect API key with permission to submit builds." />
+              {mobileBuild?.platform === "ios" ? (
+                <div className="space-y-3">
+                  <SecretTextarea label="App Store Connect .p8 API key" value={iosKeyContent} onChange={setIosKeyContent} placeholder="-----BEGIN PRIVATE KEY-----" accept=".p8,text/plain" uploadLabel="Load .p8 file" />
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <TextField label="Key ID" value={iosKeyId} onChange={setIosKeyId} />
+                    <TextField label="Issuer ID" value={iosIssuerId} onChange={setIosIssuerId} />
+                    <TextField label="App Store Connect App ID" value={iosAscAppId} onChange={setIosAscAppId} />
+                    <TextField label="Apple Team ID (optional)" value={iosTeamId} onChange={setIosTeamId} />
                   </div>
-                ) : mobileBuild?.platform === "android" ? (
-                  <div className="space-y-3">
-                    <SecretTextarea label="Google Play service-account JSON" value={androidServiceAccountJson} onChange={setAndroidServiceAccountJson} placeholder={'{"type":"service_account", ...}'} accept="application/json,.json" uploadLabel="Load JSON key" />
-                    <label className="block">
-                      <span className="mb-1.5 block text-xs font-medium text-zinc-400">Google Play track</span>
-                      <select value={androidTrack} onChange={(event) => setAndroidTrack(event.target.value as typeof androidTrack)} className="h-10 w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 text-base text-white outline-none focus:border-zinc-600 sm:text-sm">
-                        <option value="internal">Internal testing</option>
-                        <option value="alpha">Closed / alpha</option>
-                        <option value="beta">Open / beta</option>
-                        <option value="production">Production</option>
-                      </select>
-                    </label>
-                    <TokenHelp href="https://play.google.com/console/developers/api-access" note="Use a Google service account that has access to this app in Play Console." />
-                  </div>
-                ) : (
-                  <p className="text-xs text-zinc-500">Build an iOS or Android store file first.</p>
-                )}
-
-                <button type="button" onClick={() => void submitMobile()} disabled={!mobileBuild || !mobileSubmitReady || mobileLoading} className="inline-flex h-9 items-center gap-2 rounded-lg bg-white px-3 text-sm font-medium text-black disabled:opacity-40">
-                  {mobileLoading ? <Loader2 size={14} className="animate-spin" /> : <Store size={14} />} Submit with EAS
-                </button>
-              </div>
+                </div>
+              ) : mobileBuild?.platform === "android" ? (
+                <div className="space-y-3">
+                  <SecretTextarea label="Google Play service-account JSON" value={androidServiceAccountJson} onChange={setAndroidServiceAccountJson} placeholder={'{"type":"service_account", ...}'} accept="application/json,.json" uploadLabel="Load JSON key" />
+                  <label className="block">
+                    <span className="mb-1.5 block text-xs font-medium text-zinc-400">Google Play track</span>
+                    <select value={androidTrack} onChange={(event) => setAndroidTrack(event.target.value as typeof androidTrack)} className="h-10 w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 text-sm text-white outline-none">
+                      <option value="internal">Internal testing</option>
+                      <option value="alpha">Closed / alpha</option>
+                      <option value="beta">Open / beta</option>
+                      <option value="production">Production</option>
+                    </select>
+                  </label>
+                </div>
+              ) : (
+                <p className="text-xs text-zinc-500">Build an iOS or Android store file first.</p>
+              )}
+              <button type="button" onClick={() => void submitMobile()} disabled={!mobileBuild || !mobileSubmitReady || mobileLoading} className="mt-3 inline-flex h-9 items-center gap-2 rounded-lg bg-white px-3 text-sm font-medium text-black disabled:opacity-40">
+                {mobileLoading ? <Loader2 size={14} className="animate-spin" /> : <Store size={14} />} Submit with EAS
+              </button>
             </MobileStep>
 
             {mobileBuild && (
@@ -739,20 +909,39 @@ function DeployPublishModal({
               </div>
             )}
             <StatusBlock status={mobileStatus} />
+            {mobileWebUrl && (
+              <p className="text-[11px] text-zinc-700">Compatibility web URL: {mobileWebUrl}</p>
+            )}
           </div>
         )}
       </div>
+
+      {scanStage && <MobileScanOverlay stage={scanStage} />}
     </Modal>
   );
 }
 
-function InfoCard({ title, value, text, link }: { title: string; value: string; text: string; link?: string }) {
+function MobileScanOverlay({ stage }: { stage: string }) {
+  return (
+    <div className="fixed inset-0 z-[210] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
+      <div className="w-full max-w-xl rounded-2xl border border-zinc-700 bg-white p-7 text-center text-zinc-900 shadow-2xl">
+        <h3 className="text-left text-lg font-semibold">App Store Scan In Progress</h3>
+        <div className="flex min-h-72 flex-col items-center justify-center">
+          <Loader2 size={42} className="animate-spin text-blue-600" />
+          <p className="mt-7 text-sm font-medium text-zinc-700">{stage}</p>
+          <p className="mt-1 text-xs text-zinc-400">Analyzing against App Store and Google Play guidelines</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function InfoCard({ title, value, text }: { title: string; value: string; text: string }) {
   return (
     <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-3">
       <div className="text-[11px] uppercase tracking-wide text-zinc-500">{title}</div>
       <div className="mt-1 text-sm text-white">{value}</div>
       <div className="mt-1 text-xs leading-5 text-zinc-500">{text}</div>
-      {link && <a href={link} className="mt-2 inline-flex items-center gap-1 text-xs text-blue-300 hover:text-blue-200">Open Cloud <ExternalLink size={11} /></a>}
     </div>
   );
 }
@@ -770,7 +959,7 @@ function MobileStep({ number, title, complete, children }: { number: number; tit
         <div className={cn("flex h-7 w-7 items-center justify-center rounded-full border text-xs", complete ? "border-green-700 bg-green-950 text-green-300" : "border-zinc-700 text-zinc-400")}>{complete ? "✓" : number}</div>
         <div className="text-sm font-medium text-white">{title}</div>
       </div>
-      <div className="pl-0 sm:pl-10">{children}</div>
+      <div className="sm:pl-10">{children}</div>
     </div>
   );
 }
@@ -781,18 +970,48 @@ function ProviderButton({ active, label, icon, onClick }: { active: boolean; lab
   );
 }
 
-function TextField({ label, value, onChange, type = "text", placeholder, helper }: { label: string; value: string; onChange: (value: string) => void; type?: string; placeholder?: string; helper?: ReactNode }) {
+function TextField({
+  label,
+  value,
+  onChange,
+  type = "text",
+  placeholder,
+  helper,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  type?: string;
+  placeholder?: string;
+  helper?: ReactNode;
+}) {
   return (
     <label className="block">
       <span className="mb-1.5 block text-xs font-medium text-zinc-400">{label}</span>
-      <input type={type} value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} className="h-10 w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 text-base text-white outline-none transition-colors placeholder:text-zinc-600 focus:border-zinc-600 sm:text-sm" />
+      <input type={type} value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} className="h-10 w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 text-base text-white outline-none placeholder:text-zinc-600 focus:border-zinc-600 sm:text-sm" />
       {helper && <span className="mt-2 block">{helper}</span>}
     </label>
   );
 }
 
-function SecretTextarea({ label, value, onChange, placeholder, accept, uploadLabel }: { label: string; value: string; onChange: (value: string) => void; placeholder: string; accept: string; uploadLabel: string }) {
-  const loadFile = async (file?: File) => { if (file) onChange(await file.text()); };
+function SecretTextarea({
+  label,
+  value,
+  onChange,
+  placeholder,
+  accept,
+  uploadLabel,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder: string;
+  accept: string;
+  uploadLabel: string;
+}) {
+  const loadFile = async (file?: File) => {
+    if (file) onChange(await file.text());
+  };
   return (
     <label className="block">
       <span className="mb-1.5 block text-xs font-medium text-zinc-400">{label}</span>
