@@ -16,6 +16,25 @@ export const get = query({
   },
 });
 
+export const getForServer = query({
+  args: {
+    userId: v.id("users"),
+    providerId: v.string(),
+    internalSecret: v.string(),
+  },
+  handler: async (ctx, args) => {
+    if (!process.env.CRYZO_INTERNAL_API_SECRET || args.internalSecret !== process.env.CRYZO_INTERNAL_API_SECRET) {
+      throw new Error("Unauthorized");
+    }
+    return await ctx.db
+      .query("providerSecrets")
+      .withIndex("by_user_provider", (q) =>
+        q.eq("userId", args.userId).eq("providerId", args.providerId),
+      )
+      .unique();
+  },
+});
+
 export const list = query({
   args: {},
   handler: async (ctx) => {
