@@ -2,6 +2,13 @@ import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { getAuthUserId } from "@convex-dev/auth/server";
 
+function internalAuthorized(secret: string) {
+  return Boolean(
+    process.env.CRYZO_INTERNAL_API_SECRET &&
+      secret === process.env.CRYZO_INTERNAL_API_SECRET,
+  );
+}
+
 export const get = query({
   args: { providerId: v.string() },
   handler: async (ctx, args) => {
@@ -23,9 +30,7 @@ export const getForServer = query({
     internalSecret: v.string(),
   },
   handler: async (ctx, args) => {
-    if (!process.env.CRYZO_INTERNAL_API_SECRET || args.internalSecret !== process.env.CRYZO_INTERNAL_API_SECRET) {
-      throw new Error("Unauthorized");
-    }
+    if (!internalAuthorized(args.internalSecret)) throw new Error("Unauthorized");
     return await ctx.db
       .query("providerSecrets")
       .withIndex("by_user_provider", (q) =>
@@ -82,6 +87,48 @@ export const upsert = mutation({
     }
     return await ctx.db.insert("providerSecrets", {
       userId,
+      providerId: args.providerId,
+      ciphertext: args.ciphertext,
+      iv: args.iv,
+      tag: args.tag,
+      baseUrl: args.baseUrl,
+      createdAt: now,
+      updatedAt: now,
+    });
+  },
+});
+
+export const upsertForServer = mutation({
+  args: {
+    userId: v.id("users"),
+    providerId: v.string(),
+    ciphertext: v.string(),
+    iv: v.string(),
+    tag: v.string(),
+    baseUrl: v.optional(v.string()),
+    internalSecret: v.string(),
+  },
+  handler: async (ctx, args) => {
+    if (!internalAuthorized(args.internalSecret)) throw new Error("Unauthorized");
+    const existing = await ctx.db
+      .query("providerSecrets")
+      .withIndex("by_user_provider", (q) =>
+        q.eq("userId", args.userId).eq("providerId", args.providerId),
+      )
+      .unique();
+    const now = Date.now();
+    if (existing) {
+      await ctx.db.patch(existing._id, {
+        ciphertext: args.ciphertext,
+        iv: args.iv,
+        tag: args.tag,
+        baseUrl: args.baseUrl,
+        updatedAt: now,
+      });
+      return existing._id;
+    }
+    return await ctx.db.insert("providerSecrets", {
+      userId: args.userId,
       providerId: args.providerId,
       ciphertext: args.ciphertext,
       iv: args.iv,
