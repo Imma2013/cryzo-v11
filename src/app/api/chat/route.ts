@@ -14,6 +14,7 @@ import { api } from "../../../../convex/_generated/api";
 import { readFileSync } from "fs";
 import { join } from "path";
 import { resolveServerModel } from "@/lib/server/model-provider";
+import { buildProjectMcpTools } from "@/lib/server/mcp-client";
 import { classifyCreditCost, describeCreditCharge } from "@/lib/stripe";
 import { composioToolCreditCost } from "@/lib/billing/integration-costs";
 import {
@@ -390,6 +391,17 @@ export async function POST(req: Request) {
       }
     }
 
+    const mcpBundle = resolved.supportsTools
+      ? await buildProjectMcpTools({ authToken, userId }).catch((error) => {
+          console.warn("Unable to load MCP tools", error);
+          return { tools: {} as Record<string, any>, servers: [] as any[] };
+        })
+      : { tools: {} as Record<string, any>, servers: [] as any[] };
+    const hasMcpTools = Object.keys(mcpBundle.tools).length > 0;
+    const mcpPrompt = hasMcpTools
+      ? `\n\n## MCP CONNECTORS\nCryzo has enabled MCP tools for this user. Use an MCP tool when it directly helps answer or execute the user's request. Never expose connector credentials, internal tool names, or raw authentication material. Ask before destructive external actions unless the user explicitly requested that action.`
+      : "";
+
     const systemPrompt =
       buildCryzoSystemPrompt({
         useComposioTools,
@@ -398,29 +410,35 @@ export async function POST(req: Request) {
         cryzoCloudAppId,
       }) +
       backendRequirementPrompt(backendRequirements) +
-      currentProjectContext;
+      currentProjectContext +
+      mcpPrompt;
 
     let responseSessionId = composioSessionId;
     let response: Response;
 
-    if (useComposioTools) {
-      const client = getComposio();
-      const session = await client.create(userId || "anonymous");
-      const tools = await session.tools();
-      responseSessionId = session.sessionId;
+    if (useComposioTools || hasMcpTools) {
+      let tools: Record<string, any> = { ...mcpBundle.tools };
+      if (useComposioTools) {
+        const client = getComposio();
+        const session = await client.create(userId || "anonymous");
+        tools = { ...(await session.tools()), ...tools };
+        responseSessionId = session.sessionId;
+      }
+
       const result = streamText({
         model: resolved.model,
         system: systemPrompt,
         messages: modelMessages,
         tools,
-        stopWhen: stepCountIs(10),
+        stopWhen: stepCountIs(12),
         maxRetries: 2,
         onStepFinish: async (step) => {
-          if (!userId) return;
+          if (!userId || !useComposioTools) return;
           const calls = Array.isArray((step as any).toolCalls)
             ? ((step as any).toolCalls as Array<{ toolName?: string }>)
             : [];
           for (const call of calls) {
+            if (call.toolName?.startsWith("mcp_")) continue;
             const amount = composioToolCreditCost(call.toolName);
             await convex.mutation(api.billing.deductIntegrationCredits, {
               userId: userId as any,
@@ -540,8 +558,9 @@ export async function POST(req: Request) {
     headers.set("x-cryzo-message-credits", String(messageCharge));
     headers.set(
       "x-cryzo-integration-credits",
-      useComposioTools ? "metered" : "0",
+      useComposioTools ? "metered" : hasMcpTools ? "mcp" : "0",
     );
+    headers.set("x-cryzo-mcp-tools", String(Object.keys(mcpBundle.tools).length));
     if (cryzoCloudAppId) {
       headers.set("x-cryzo-cloud-app-id", cryzoCloudAppId);
     }
