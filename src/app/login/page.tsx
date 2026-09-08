@@ -1,11 +1,9 @@
 "use client";
 
-import { Suspense, useEffect, useState, type FormEvent } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ThemeToggle } from "@/providers/ThemeProvider";
 import { useAuth } from "@/providers/AuthProvider";
-
-type AuthMode = "signIn" | "signUp";
 
 function errorMessage(error: unknown, fallback: string) {
   return error instanceof Error && error.message ? error.message : fallback;
@@ -40,13 +38,7 @@ function LoginContent() {
   const searchParams = useSearchParams();
   const rawNextRoute = searchParams.get("next");
   const nextRoute = rawNextRoute?.startsWith("/") ? rawNextRoute : "/chat";
-  const [mode, setMode] = useState<AuthMode>("signIn");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [verificationEmail, setVerificationEmail] = useState<string | null>(null);
-  const [verificationCode, setVerificationCode] = useState("");
   const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
@@ -55,95 +47,21 @@ function LoginContent() {
     }
   }, [isAuthenticated, isLoading, nextRoute, router]);
 
-  const handleEmailAuth = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    setError("");
-    setNotice("");
-    setSubmitting(true);
-
-    try {
-      const normalizedEmail = email.trim().toLowerCase();
-      const result = await signIn("password", {
-        email: normalizedEmail,
-        password,
-        flow: mode,
-      });
-
-      if (!result?.signingIn) {
-        setVerificationEmail(normalizedEmail);
-        setNotice("We sent a 6-digit verification code to your email.");
-      }
-    } catch (authError) {
-      setError(errorMessage(authError, "Authentication failed."));
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const handleVerification = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!verificationEmail) return;
-
-    setError("");
-    setNotice("");
-    setSubmitting(true);
-
-    try {
-      await signIn("password", {
-        email: verificationEmail,
-        code: verificationCode.trim(),
-        flow: "email-verification",
-      });
-    } catch (authError) {
-      setError(errorMessage(authError, "That verification code did not work."));
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const handleResend = async () => {
-    if (!verificationEmail) return;
-
-    setError("");
-    setNotice("");
-    setSubmitting(true);
-
-    try {
-      await signIn("password", {
-        email: verificationEmail,
-        password,
-        flow: "signIn",
-      });
-      setNotice("A new verification code is on its way.");
-    } catch (authError) {
-      setError(errorMessage(authError, "We could not resend the code."));
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
   const handleGoogle = async () => {
     setError("");
-    setNotice("");
     setSubmitting(true);
 
     try {
       const result = await signIn("google", { redirectTo: nextRoute });
       if (result.redirect) {
         window.location.href = result.redirect.toString();
+        return;
       }
+      setSubmitting(false);
     } catch (authError) {
       setError(errorMessage(authError, "Google sign-in failed."));
       setSubmitting(false);
     }
-  };
-
-  const changeMode = (nextMode: AuthMode) => {
-    setMode(nextMode);
-    setVerificationEmail(null);
-    setVerificationCode("");
-    setError("");
-    setNotice("");
   };
 
   if (isLoading || isAuthenticated) {
@@ -162,142 +80,22 @@ function LoginContent() {
         <div className="text-center">
           <h1 className="text-3xl font-bold text-white">Cryzo</h1>
           <p className="mt-2 text-sm text-zinc-500">
-            {verificationEmail
-              ? "Verify your email to activate your account"
-              : mode === "signUp"
-                ? "Create your account"
-                : "Welcome back"}
+            Sign in or create your account with Google
           </p>
         </div>
 
-        {verificationEmail ? (
-          <form onSubmit={handleVerification} className="space-y-4">
-            <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-4 text-sm text-zinc-400">
-              Enter the code sent to{" "}
-              <span className="font-medium text-white">{verificationEmail}</span>.
-            </div>
-            <input
-              type="text"
-              inputMode="numeric"
-              autoComplete="one-time-code"
-              value={verificationCode}
-              onChange={(event) =>
-                setVerificationCode(event.target.value.replace(/\D/g, "").slice(0, 6))
-              }
-              placeholder="6-digit code"
-              required
-              minLength={6}
-              maxLength={6}
-              className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-4 py-3 text-center text-lg tracking-[0.35em] text-white placeholder-zinc-500 focus:border-zinc-500 focus:outline-none"
-            />
-            <button
-              type="submit"
-              disabled={submitting || verificationCode.length !== 6}
-              className="w-full rounded-lg bg-white py-3 text-sm font-medium text-black transition-colors hover:bg-zinc-200 disabled:opacity-50"
-            >
-              {submitting ? "Verifying..." : "Verify email"}
-            </button>
-            <div className="flex items-center justify-center gap-3 text-sm">
-              <button
-                type="button"
-                onClick={handleResend}
-                disabled={submitting}
-                className="text-zinc-400 underline-offset-4 hover:text-white hover:underline disabled:opacity-50"
-              >
-                Resend code
-              </button>
-              <span className="text-zinc-700">·</span>
-              <button
-                type="button"
-                onClick={() => {
-                  setVerificationEmail(null);
-                  setVerificationCode("");
-                  setError("");
-                  setNotice("");
-                }}
-                disabled={submitting}
-                className="text-zinc-400 underline-offset-4 hover:text-white hover:underline disabled:opacity-50"
-              >
-                Change email
-              </button>
-            </div>
-          </form>
-        ) : (
-          <>
-            <button
-              type="button"
-              onClick={handleGoogle}
-              disabled={submitting || isLoading}
-              className="flex w-full items-center justify-center gap-3 rounded-lg border border-zinc-700 bg-zinc-900 px-4 py-3 text-sm text-white transition-colors hover:bg-zinc-800 disabled:opacity-50"
-            >
-              <GoogleMark />
-              Continue with Google
-            </button>
-
-            <div className="flex items-center gap-3">
-              <div className="h-px flex-1 bg-zinc-800" />
-              <span className="text-xs text-zinc-500">or</span>
-              <div className="h-px flex-1 bg-zinc-800" />
-            </div>
-
-            <form onSubmit={handleEmailAuth} className="space-y-3">
-              <input
-                type="email"
-                value={email}
-                onChange={(event) => setEmail(event.target.value)}
-                placeholder="Email"
-                autoComplete="email"
-                required
-                className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-4 py-3 text-sm text-white placeholder-zinc-500 focus:border-zinc-500 focus:outline-none"
-              />
-              <input
-                type="password"
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                placeholder="Password"
-                autoComplete={mode === "signUp" ? "new-password" : "current-password"}
-                required
-                minLength={8}
-                className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-4 py-3 text-sm text-white placeholder-zinc-500 focus:border-zinc-500 focus:outline-none"
-              />
-              {mode === "signUp" && (
-                <p className="text-xs leading-5 text-zinc-500">
-                  We’ll email you a verification code before activating the account.
-                </p>
-              )}
-              <button
-                type="submit"
-                disabled={submitting}
-                className="w-full rounded-lg bg-white py-3 text-sm font-medium text-black transition-colors hover:bg-zinc-200 disabled:opacity-50"
-              >
-                {submitting
-                  ? mode === "signUp"
-                    ? "Creating account..."
-                    : "Signing in..."
-                  : mode === "signUp"
-                    ? "Create account"
-                    : "Sign in"}
-              </button>
-            </form>
-
-            <p className="text-center text-sm text-zinc-500">
-              {mode === "signUp" ? "Already have an account?" : "New to Cryzo?"}{" "}
-              <button
-                type="button"
-                onClick={() =>
-                  changeMode(mode === "signUp" ? "signIn" : "signUp")
-                }
-                className="font-medium text-white underline-offset-4 hover:underline"
-              >
-                {mode === "signUp" ? "Sign in" : "Create an account"}
-              </button>
-            </p>
-          </>
-        )}
+        <button
+          type="button"
+          onClick={handleGoogle}
+          disabled={submitting || isLoading}
+          className="flex w-full items-center justify-center gap-3 rounded-lg border border-zinc-700 bg-zinc-900 px-4 py-3 text-sm font-medium text-white transition-colors hover:bg-zinc-800 disabled:opacity-50"
+        >
+          <GoogleMark />
+          {submitting ? "Connecting to Google..." : "Continue with Google"}
+        </button>
 
         <div aria-live="polite" className="min-h-5 text-center text-sm">
           {error && <p className="text-red-400">{error}</p>}
-          {!error && notice && <p className="text-emerald-400">{notice}</p>}
         </div>
       </div>
     </div>
