@@ -47,6 +47,23 @@ export const list = query({
   },
 });
 
+export const listForServer = query({
+  args: {
+    userId: v.id("users"),
+    internalSecret: v.string(),
+  },
+  handler: async (ctx, args) => {
+    if (!process.env.CRYZO_INTERNAL_API_SECRET || args.internalSecret !== process.env.CRYZO_INTERNAL_API_SECRET) {
+      throw new Error("Unauthorized");
+    }
+    return await ctx.db
+      .query("mcpServers")
+      .withIndex("by_user", (q) => q.eq("userId", args.userId))
+      .order("desc")
+      .collect();
+  },
+});
+
 export const get = query({
   args: { serverId: v.id("mcpServers") },
   handler: async (ctx, args) => {
