@@ -11,7 +11,7 @@ function advisory(command, args) {
 run("npm", ["test"]);
 if (process.env.VERCEL_ENV === "preview" || process.env.VERCEL_ENV === "production") run(process.execPath, ["scripts/smoke-apps.mjs"]);
 if (process.env.VERCEL_ENV === "preview") {
-  advisory(process.execPath, ["scripts/smoke-managed-models.mjs", ...(process.env.CRYZO_SMOKE_MODE === "critical" ? ["--critical-only"] : [])]);
+  advisory(process.execPath, ["scripts/smoke-managed-models.mjs", "--critical-only"]);
   run("npm", ["run", "build"]);
 } else if (process.env.VERCEL_ENV === "production") {
   if (!process.env.CONVEX_DEPLOY_KEY || !process.env.CRYZO_INTERNAL_API_SECRET) throw new Error("Production deployment credentials are missing.");
