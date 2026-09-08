@@ -107,7 +107,7 @@ async function resolveCredential(identity: McpIdentity, server: McpServerRecord)
   return row ? parseCredential(decryptProviderSecret(row as any)) : null;
 }
 
-function authHeaders(credential: McpCredential | null) {
+function authHeaders(credential: McpCredential | null): Record<string, string> {
   const token = credential?.access_token?.trim();
   if (!token) return {};
   return { Authorization: `${credential?.token_type || "Bearer"} ${token}` };
