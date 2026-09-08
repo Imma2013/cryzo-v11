@@ -38,9 +38,7 @@ type ImageAttachment = {
 type SpeechRecognitionResultListLike = {
   length: number;
   [index: number]: {
-    [index: number]: {
-      transcript: string;
-    };
+    [index: number]: { transcript: string };
   };
 };
 
@@ -48,16 +46,12 @@ type SpeechRecognitionEventLike = {
   results: SpeechRecognitionResultListLike;
 };
 
-type SpeechRecognitionErrorLike = {
-  error?: string;
-};
-
 type BrowserSpeechRecognition = {
   continuous: boolean;
   interimResults: boolean;
   lang: string;
   onend: (() => void) | null;
-  onerror: ((event: SpeechRecognitionErrorLike) => void) | null;
+  onerror: (() => void) | null;
   onresult: ((event: SpeechRecognitionEventLike) => void) | null;
   start: () => void;
   stop: () => void;
@@ -82,14 +76,27 @@ declare global {
 const MAX_ATTACHMENTS = 4;
 const MAX_ATTACHMENT_SIZE = 8 * 1024 * 1024;
 
-function createAttachment(file: File): ImageAttachment {
-  const id =
-    typeof crypto !== "undefined" && "randomUUID" in crypto
-      ? crypto.randomUUID()
-      : `${file.name}-${file.lastModified}-${Math.random()}`;
+const MODES = [
+  {
+    id: "build" as const,
+    label: "Build",
+    description: "Make changes directly",
+    icon: Hammer,
+  },
+  {
+    id: "plan" as const,
+    label: "Discuss",
+    description: "Talk through ideas without editing code",
+    icon: MessageCircle,
+  },
+];
 
+function createAttachment(file: File): ImageAttachment {
   return {
-    id,
+    id:
+      typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? crypto.randomUUID()
+        : `${file.name}-${file.lastModified}-${Math.random()}`,
     file,
     previewUrl: URL.createObjectURL(file),
   };
@@ -100,26 +107,6 @@ function validImageFiles(files: File[]) {
     (file) => file.type.startsWith("image/") && file.size <= MAX_ATTACHMENT_SIZE,
   );
 }
-
-const MODES: Array<{
-  id: ChatMode;
-  label: string;
-  description: string;
-  icon: typeof Hammer;
-}> = [
-  {
-    id: "build",
-    label: "Build",
-    description: "Make changes directly",
-    icon: Hammer,
-  },
-  {
-    id: "plan",
-    label: "Discuss",
-    description: "Talk through ideas without changing code",
-    icon: MessageCircle,
-  },
-];
 
 export function ChatInput({
   value,
@@ -163,16 +150,15 @@ export function ChatInput({
   const [isListening, setIsListening] = useState(false);
   const [modeOpen, setModeOpen] = useState(false);
   const [prefillNotice, setPrefillNotice] = useState<string | null>(null);
+  const isHero = variant === "hero";
   const speechSupported =
     typeof window !== "undefined" &&
-    !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+    Boolean(window.SpeechRecognition || window.webkitSpeechRecognition);
 
   useEffect(() => {
-    if (textareaRef.current) {
-      textareaRef.current.style.height = "auto";
-      textareaRef.current.style.height =
-        Math.min(textareaRef.current.scrollHeight, 180) + "px";
-    }
+    if (!textareaRef.current) return;
+    textareaRef.current.style.height = "auto";
+    textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 176)}px`;
   }, [value]);
 
   useEffect(() => {
@@ -184,45 +170,32 @@ export function ChatInput({
   }, [value]);
 
   useEffect(() => {
+    const closeModeMenu = (event: PointerEvent) => {
+      if (!modeMenuRef.current?.contains(event.target as Node)) setModeOpen(false);
+    };
+    document.addEventListener("pointerdown", closeModeMenu);
+    return () => document.removeEventListener("pointerdown", closeModeMenu);
+  }, []);
+
+  useEffect(() => {
     const handlePrefill = (event: Event) => {
       const detail = (event as CustomEvent<ChatPrefillDetail>).detail;
       const prompt = detail?.prompt?.trim();
       if (!prompt) return;
-
       onChange(prompt);
-      if (detail.forceBuildMode && chatMode !== "build") {
-        onChatModeChange("build");
-      }
+      if (detail.forceBuildMode && chatMode !== "build") onChatModeChange("build");
       setPrefillNotice(detail.notice || "Prompt added to chat");
-
       if (prefillTimerRef.current) window.clearTimeout(prefillTimerRef.current);
-      prefillTimerRef.current = window.setTimeout(
-        () => setPrefillNotice(null),
-        4500,
-      );
+      prefillTimerRef.current = window.setTimeout(() => setPrefillNotice(null), 4500);
       window.setTimeout(() => {
         textareaRef.current?.focus();
         textareaRef.current?.setSelectionRange(prompt.length, prompt.length);
       }, 0);
     };
-
     window.addEventListener("cryzo:prefill-chat", handlePrefill as EventListener);
     return () =>
-      window.removeEventListener(
-        "cryzo:prefill-chat",
-        handlePrefill as EventListener,
-      );
+      window.removeEventListener("cryzo:prefill-chat", handlePrefill as EventListener);
   }, [chatMode, onChange, onChatModeChange]);
-
-  useEffect(() => {
-    const closeModeMenu = (event: PointerEvent) => {
-      if (!modeMenuRef.current?.contains(event.target as Node)) {
-        setModeOpen(false);
-      }
-    };
-    document.addEventListener("pointerdown", closeModeMenu);
-    return () => document.removeEventListener("pointerdown", closeModeMenu);
-  }, []);
 
   useEffect(() => {
     return () => {
@@ -236,24 +209,16 @@ export function ChatInput({
 
   const addFiles = (files: File[]) => {
     const images = validImageFiles(files);
-    if (images.length !== files.length) {
-      setAttachmentError("Only images up to 8MB can be attached.");
-    } else {
-      setAttachmentError(null);
-    }
-
-    if (images.length === 0) return;
-
-    const remaining = MAX_ATTACHMENTS - attachments.length;
-    const nextImages = images.slice(0, Math.max(remaining, 0));
-    if (nextImages.length < images.length) {
+    setAttachmentError(
+      images.length !== files.length ? "Only images up to 8MB can be attached." : null,
+    );
+    if (!images.length) return;
+    const remaining = Math.max(0, MAX_ATTACHMENTS - attachments.length);
+    const next = images.slice(0, remaining);
+    if (next.length < images.length) {
       setAttachmentError(`You can attach up to ${MAX_ATTACHMENTS} images.`);
     }
-
-    setAttachments((current) => [
-      ...current,
-      ...nextImages.map(createAttachment),
-    ]);
+    setAttachments((current) => [...current, ...next.map(createAttachment)]);
   };
 
   const removeAttachment = (id: string) => {
@@ -266,9 +231,7 @@ export function ChatInput({
 
   const clearAttachments = () => {
     setAttachments((current) => {
-      current.forEach((attachment) =>
-        URL.revokeObjectURL(attachment.previewUrl),
-      );
+      current.forEach((attachment) => URL.revokeObjectURL(attachment.previewUrl));
       return [];
     });
   };
@@ -278,76 +241,35 @@ export function ChatInput({
       onStop();
       return;
     }
-
     if (disabled || (!value.trim() && attachments.length === 0)) return;
-
-    const files = attachments.map((attachment) => attachment.file);
-    await onSubmit(files);
+    await onSubmit(attachments.map((attachment) => attachment.file));
     clearAttachments();
     setAttachmentError(null);
     setPrefillNotice(null);
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      void handleSubmit();
-    }
-  };
-
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files) {
-      addFiles(Array.from(e.target.files));
-      e.target.value = "";
-    }
-  };
-
-  const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
-    const files = Array.from(e.clipboardData.files).filter((file) =>
-      file.type.startsWith("image/"),
-    );
-    if (files.length > 0) {
-      e.preventDefault();
-      addFiles(files);
-    }
-  };
-
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragging(false);
-    addFiles(Array.from(e.dataTransfer.files));
-  };
-
-  const appendTranscript = (text: string) => {
-    const currentValue = valueRef.current.trim();
-    onChange(currentValue ? `${currentValue} ${text}` : text);
-  };
-
   const toggleListening = () => {
     if (!speechSupported || disabled || isLoading) return;
-
     if (isListening) {
       recognitionRef.current?.stop();
       return;
     }
-
     const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!Recognition) return;
-
     const recognition = new Recognition();
     recognition.continuous = false;
     recognition.interimResults = false;
     recognition.lang = "en-US";
     recognition.onresult = (event) => {
-      const results = Array.from(
+      const transcript = Array.from(
         { length: event.results.length },
-        (_, index) => event.results[index],
-      );
-      const transcript = results
-        .map((result) => result[0]?.transcript ?? "")
+        (_, index) => event.results[index]?.[0]?.transcript || "",
+      )
         .join(" ")
         .trim();
-      if (transcript) appendTranscript(transcript);
+      if (!transcript) return;
+      const current = valueRef.current.trim();
+      onChange(current ? `${current} ${transcript}` : transcript);
     };
     recognition.onerror = () => setIsListening(false);
     recognition.onend = () => setIsListening(false);
@@ -356,39 +278,42 @@ export function ChatInput({
     setIsListening(true);
   };
 
-  const canSend = value.trim().length > 0 || attachments.length > 0;
-  const isHero = variant === "hero";
   const activeMode = MODES.find((mode) => mode.id === chatMode) || MODES[0];
   const ActiveModeIcon = activeMode.icon;
+  const canSend = value.trim().length > 0 || attachments.length > 0;
 
   return (
     <div
       className={cn(
         isHero
-          ? "w-full px-0 py-0"
-          : "border-t border-zinc-800 bg-black px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-3 md:px-4 md:py-4",
+          ? "w-full"
+          : "border-t border-zinc-900 bg-black px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-3 md:px-4 md:py-4",
       )}
     >
       <div
         className={cn(
-          "mx-auto max-w-3xl rounded-2xl border bg-zinc-950 shadow-2xl shadow-black/30 transition-colors",
-          isHero ? "border-zinc-700/80" : "border-zinc-800",
+          "mx-auto w-full max-w-3xl overflow-visible rounded-2xl border bg-[#101010] shadow-[0_18px_50px_rgba(0,0,0,0.28)] transition",
+          isHero ? "border-zinc-700" : "border-zinc-800",
           "focus-within:border-zinc-600",
-          isDragging && "border-blue-500 ring-2 ring-blue-500/30",
+          isDragging && "border-zinc-400 ring-1 ring-zinc-500/50",
         )}
-        onDragOver={(e) => {
-          e.preventDefault();
+        onDragOver={(event) => {
+          event.preventDefault();
           setIsDragging(true);
         }}
         onDragLeave={() => setIsDragging(false)}
-        onDrop={handleDrop}
+        onDrop={(event) => {
+          event.preventDefault();
+          setIsDragging(false);
+          addFiles(Array.from(event.dataTransfer.files));
+        }}
       >
         {attachments.length > 0 && (
-          <div className="flex flex-wrap gap-2 border-b border-zinc-900 px-3 pt-3">
+          <div className="flex flex-wrap gap-2 px-3 pt-3">
             {attachments.map((attachment) => (
               <div
                 key={attachment.id}
-                className="group relative h-16 w-16 overflow-hidden rounded-lg border border-zinc-800 bg-zinc-900"
+                className="group relative h-16 w-16 overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900"
               >
                 <img
                   src={attachment.previewUrl}
@@ -398,7 +323,7 @@ export function ChatInput({
                 <button
                   type="button"
                   onClick={() => removeAttachment(attachment.id)}
-                  className="absolute right-1 top-1 rounded-full bg-black/80 p-1 text-zinc-300 opacity-0 transition-opacity hover:text-white group-hover:opacity-100"
+                  className="absolute right-1 top-1 rounded-full bg-black/80 p-1 text-white opacity-80 hover:opacity-100"
                   aria-label={`Remove ${attachment.file.name}`}
                 >
                   <X size={12} />
@@ -408,183 +333,173 @@ export function ChatInput({
           </div>
         )}
 
-        {attachmentError && (
-          <div className="border-b border-zinc-900 px-3 py-2 text-xs text-amber-300">
-            {attachmentError}
-          </div>
-        )}
-
-        {prefillNotice && (
-          <div className="border-b border-zinc-900 bg-emerald-950/20 px-3 py-2 text-xs text-emerald-300">
-            {prefillNotice}. Review and send when ready.
+        {(attachmentError || prefillNotice) && (
+          <div
+            className={cn(
+              "mx-3 mt-3 rounded-lg px-3 py-2 text-xs",
+              attachmentError
+                ? "bg-amber-500/10 text-amber-300"
+                : "bg-emerald-500/10 text-emerald-300",
+            )}
+          >
+            {attachmentError || `${prefillNotice}. Review and send when ready.`}
           </div>
         )}
 
         <textarea
           ref={textareaRef}
           value={value}
-          onChange={(e) => onChange(e.target.value)}
-          onKeyDown={handleKeyDown}
-          onPaste={handlePaste}
+          onChange={(event) => onChange(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && !event.shiftKey) {
+              event.preventDefault();
+              void handleSubmit();
+            }
+          }}
+          onPaste={(event) => {
+            const files = Array.from(event.clipboardData.files).filter((file) =>
+              file.type.startsWith("image/"),
+            );
+            if (files.length) {
+              event.preventDefault();
+              addFiles(files);
+            }
+          }}
           placeholder={
             chatMode === "plan"
-              ? "Ask, debug, or plan without building..."
+              ? "Ask a question or plan your next change..."
               : isHero
                 ? "Describe what you want to build..."
-                : "Ask Cryzo to build or edit..."
+                : "What would you like to build?"
           }
           disabled={disabled}
           rows={1}
-          className="block max-h-44 min-h-20 w-full resize-none bg-transparent px-4 py-4 text-[16px] leading-6 text-white outline-none placeholder:text-zinc-500 disabled:opacity-50 md:min-h-24 md:text-sm"
+          className={cn(
+            "block max-h-44 w-full resize-none bg-transparent px-4 pb-3 pt-4 text-[16px] leading-6 text-white outline-none placeholder:text-zinc-500 disabled:opacity-50 md:text-sm",
+            isHero ? "min-h-[112px]" : "min-h-[78px]",
+          )}
         />
 
-        <div className="flex items-end justify-between gap-2 px-3 pb-3">
-          <div className="flex min-w-0 flex-1 items-center gap-1">
-            <div ref={modeMenuRef} className="relative shrink-0">
-              <button
-                type="button"
-                onClick={() => setModeOpen((current) => !current)}
-                className="inline-flex h-9 items-center gap-1.5 rounded-lg px-2.5 text-xs font-medium text-zinc-200 transition-colors hover:bg-zinc-900"
-                aria-haspopup="menu"
-                aria-expanded={modeOpen}
-              >
-                <ActiveModeIcon size={14} />
-                {activeMode.label}
-                <ChevronDown
-                  size={13}
-                  className={cn(
-                    "transition-transform",
-                    modeOpen && "rotate-180",
-                  )}
-                />
-              </button>
+        <div className="flex items-center gap-1.5 px-3 pb-3">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            multiple
+            className="hidden"
+            onChange={(event) => {
+              if (event.target.files) addFiles(Array.from(event.target.files));
+              event.currentTarget.value = "";
+            }}
+          />
 
-              {modeOpen && (
-                <div
-                  className={cn(
-                    "absolute z-50 w-[min(310px,calc(100vw-2rem))] overflow-hidden rounded-xl border border-zinc-800 bg-zinc-950 p-1.5 shadow-2xl shadow-black/50",
-                    isHero
-                      ? "left-0 top-full mt-2"
-                      : "bottom-full left-0 mb-2",
-                  )}
-                  role="menu"
-                >
-                  {MODES.map((mode) => {
-                    const Icon = mode.icon;
-                    const selected = mode.id === chatMode;
-                    return (
-                      <button
-                        key={mode.id}
-                        type="button"
-                        onClick={() => {
-                          onChatModeChange(mode.id);
-                          setModeOpen(false);
-                        }}
-                        className="flex w-full items-start gap-3 rounded-lg px-3 py-3 text-left hover:bg-zinc-900"
-                        role="menuitem"
-                      >
-                        <Icon
-                          size={17}
-                          className="mt-0.5 shrink-0 text-zinc-300"
-                        />
-                        <span className="min-w-0 flex-1">
-                          <span className="block text-sm font-medium text-white">
-                            {mode.label}
-                          </span>
-                          <span className="mt-0.5 block text-xs text-zinc-500">
-                            {mode.description}
-                          </span>
-                        </span>
-                        {selected && (
-                          <Check size={16} className="mt-0.5 text-white" />
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={disabled || attachments.length >= MAX_ATTACHMENTS}
+            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-zinc-300 transition hover:bg-zinc-800 hover:text-white disabled:opacity-40"
+            title="Add image"
+          >
+            <Plus size={20} />
+          </button>
 
-            <div className="flex min-w-0 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-              <ModelPicker
-                selection={modelSelection}
-                onChange={onModelSelectionChange}
-                compact
-              />
-
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                multiple
-                className="hidden"
-                onChange={handleFileChange}
-              />
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={disabled || attachments.length >= MAX_ATTACHMENTS}
-                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-zinc-400 transition-colors hover:bg-zinc-900 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
-                title="Upload image"
-              >
-                <Plus size={20} />
-              </button>
-
-              <button
-                type="button"
-                onClick={toggleListening}
-                disabled={!speechSupported || disabled || isLoading}
+          <div ref={modeMenuRef} className="relative shrink-0">
+            <button
+              type="button"
+              onClick={() => setModeOpen((open) => !open)}
+              className="inline-flex h-9 items-center gap-1.5 rounded-lg px-2 text-xs font-medium text-zinc-200 transition hover:bg-zinc-800"
+              aria-haspopup="menu"
+              aria-expanded={modeOpen}
+            >
+              <ActiveModeIcon size={14} />
+              {activeMode.label}
+              <ChevronDown size={12} />
+            </button>
+            {modeOpen && (
+              <div
                 className={cn(
-                  "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-zinc-400 transition-colors hover:bg-zinc-900 hover:text-white disabled:cursor-not-allowed disabled:opacity-40",
-                  isListening &&
-                    "bg-red-500/10 text-red-400 hover:text-red-300",
+                  "absolute z-50 w-64 overflow-hidden rounded-xl border border-zinc-800 bg-zinc-950 p-1.5 shadow-2xl",
+                  isHero ? "left-0 top-full mt-2" : "bottom-full left-0 mb-2",
                 )}
-                title={
-                  speechSupported
-                    ? isListening
-                      ? "Stop voice input"
-                      : "Start voice input"
-                    : "Voice input is not supported in this browser"
-                }
               >
-                {isListening ? <MicOff size={18} /> : <Mic size={18} />}
-              </button>
-            </div>
+                {MODES.map((mode) => {
+                  const Icon = mode.icon;
+                  const selected = mode.id === chatMode;
+                  return (
+                    <button
+                      key={mode.id}
+                      type="button"
+                      onClick={() => {
+                        onChatModeChange(mode.id);
+                        setModeOpen(false);
+                      }}
+                      className="flex w-full items-start gap-3 rounded-lg px-3 py-2.5 text-left hover:bg-zinc-900"
+                    >
+                      <Icon size={16} className="mt-0.5 shrink-0 text-zinc-300" />
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-sm font-medium text-white">{mode.label}</span>
+                        <span className="block text-xs text-zinc-500">{mode.description}</span>
+                      </span>
+                      {selected && <Check size={15} className="mt-0.5 text-white" />}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
+
+          <div className="min-w-0 flex-1 overflow-hidden [&>button>span:nth-of-type(2)]:hidden">
+            <ModelPicker
+              selection={modelSelection}
+              onChange={onModelSelectionChange}
+              compact
+            />
+          </div>
+
+          <button
+            type="button"
+            onClick={toggleListening}
+            disabled={!speechSupported || disabled || isLoading}
+            className={cn(
+              "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-zinc-400 transition hover:bg-zinc-800 hover:text-white disabled:opacity-30",
+              isListening && "bg-red-500/10 text-red-400",
+            )}
+            title={
+              speechSupported
+                ? isListening
+                  ? "Stop voice input"
+                  : "Start voice input"
+                : "Voice input is not supported in this browser"
+            }
+          >
+            {isListening ? <MicOff size={18} /> : <Mic size={18} />}
+          </button>
 
           <button
             type="button"
             onClick={() => void handleSubmit()}
             disabled={!isLoading && (disabled || !canSend)}
             className={cn(
-              "inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-xs font-medium transition-colors md:h-9 md:w-auto md:gap-2 md:rounded-lg md:px-3",
+              "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg transition",
               isLoading
                 ? "bg-blue-600 text-white hover:bg-blue-500"
-                : "bg-white text-black hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-40",
+                : "bg-zinc-200 text-zinc-900 hover:bg-white disabled:cursor-not-allowed disabled:opacity-35",
             )}
             aria-label={isLoading ? "Stop generation" : "Send message"}
           >
-            {isLoading ? (
-              <Square size={15} fill="currentColor" />
-            ) : (
-              <Send size={15} />
-            )}
-            <span className="hidden md:inline">
-              {isLoading ? "Stop" : "Send"}
-            </span>
+            {isLoading ? <Square size={14} fill="currentColor" /> : <Send size={15} />}
           </button>
         </div>
 
         {isListening && (
-          <div className="flex items-center gap-2 border-t border-zinc-900 px-3 py-2 text-xs text-red-300">
-            <Loader2 size={12} className="animate-spin" />
-            Listening...
+          <div className="flex items-center gap-2 border-t border-zinc-900 px-4 py-2 text-xs text-red-300">
+            <Loader2 size={12} className="animate-spin" /> Listening…
           </div>
         )}
       </div>
 
       {isHero && projectPlatforms && onProjectPlatformsChange && (
-        <div className="mx-auto mt-4 grid max-w-xl grid-cols-3 gap-2 sm:gap-3">
+        <div className="mx-auto mt-3 flex max-w-3xl flex-wrap items-center justify-center gap-1.5">
           {([
             { id: "web" as const, label: "Web", icon: Globe2 },
             { id: "ios" as const, label: "iOS", icon: Smartphone },
@@ -602,16 +517,14 @@ export function ChatInput({
                   )
                 }
                 className={cn(
-                  "flex min-w-0 items-center justify-center gap-2 rounded-xl border px-3 py-3 text-sm font-medium transition-colors",
+                  "inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-xs transition",
                   selected
                     ? "border-zinc-500 bg-zinc-800 text-white"
-                    : "border-zinc-800 bg-zinc-950/80 text-zinc-500 hover:border-zinc-700 hover:text-zinc-300",
+                    : "border-zinc-800 bg-transparent text-zinc-500 hover:text-zinc-300",
                 )}
                 aria-pressed={selected}
               >
-                <Icon size={17} />
-                <span>{platform.label}</span>
-                {selected && <Check size={14} className="hidden sm:block" />}
+                <Icon size={13} /> {platform.label}
               </button>
             );
           })}
