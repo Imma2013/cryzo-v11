@@ -154,6 +154,15 @@ export default function Home() {
             </p>
           </div>
         </section>
+
+        <footer className="px-5 pb-5 sm:px-8">
+          <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-center gap-x-4 gap-y-2 text-[11px] text-zinc-600">
+            <span>© 2026 Cryzo</span>
+            <Link href="/terms" className="transition-colors hover:text-zinc-300">Terms</Link>
+            <Link href="/privacy" className="transition-colors hover:text-zinc-300">Privacy</Link>
+            <a href="mailto:lloyd.ebncheneg@gmail.com" className="transition-colors hover:text-zinc-300">Contact</a>
+          </div>
+        </footer>
       </div>
     </main>
   );
