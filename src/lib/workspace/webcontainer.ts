@@ -1,13 +1,51 @@
 import { WebContainer } from "@webcontainer/api";
 import type { ArtifactAction } from "./types";
 
+export const WEBCONTAINER_RELOAD_ERROR_CODE = "WEB_CONTAINER_RELOAD_REQUIRED";
+
 let instance: WebContainer | null = null;
 let bootPromise: Promise<WebContainer> | null = null;
+let bootFailure: Error | null = null;
+let bootAttempted = false;
+
+function reloadRequiredError(message: string) {
+  const error = new Error(message) as Error & { code?: string };
+  error.code = WEBCONTAINER_RELOAD_ERROR_CODE;
+  return error;
+}
+
+export function isWebContainerReloadRequiredError(error: unknown) {
+  if (!error) return false;
+  const code = typeof error === "object" && "code" in error ? (error as { code?: string }).code : undefined;
+  const message = error instanceof Error ? error.message : String(error);
+  return (
+    code === WEBCONTAINER_RELOAD_ERROR_CODE ||
+    /cross.?origin.?isolated|SharedArrayBuffer|Unable to create more instances|WebContainer.*reload/i.test(message)
+  );
+}
+
+function assertCrossOriginIsolation() {
+  if (typeof window !== "undefined" && !window.crossOriginIsolated) {
+    throw reloadRequiredError(
+      "Cryzo needs to reload the builder before starting WebContainer preview. Cross-origin isolation is not active in this document.",
+    );
+  }
+}
 
 export async function getWebContainer(): Promise<WebContainer> {
   if (instance) return instance;
+  if (bootFailure) throw bootFailure;
   if (bootPromise) return bootPromise;
 
+  assertCrossOriginIsolation();
+
+  if (bootAttempted) {
+    throw reloadRequiredError(
+      "WebContainer already attempted to boot in this browser document. Reload the builder to start a fresh runtime.",
+    );
+  }
+
+  bootAttempted = true;
   bootPromise = WebContainer.boot({
     coep: "require-corp",
     workdirName: "cryzo-project",
@@ -28,8 +66,15 @@ export async function getWebContainer(): Promise<WebContainer> {
 
       return webcontainer;
     })
-    .finally(() => {
-      bootPromise = null;
+    .catch((error) => {
+      bootFailure = isWebContainerReloadRequiredError(error)
+        ? (error as Error)
+        : reloadRequiredError(
+            `WebContainer could not start in this browser document. Reload the builder and try again. ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+      throw bootFailure;
     });
 
   return bootPromise;
@@ -39,20 +84,31 @@ export function prebootWebContainer() {
   return getWebContainer();
 }
 
-export async function teardownWebContainer() {
-  if (bootPromise) {
+export async function resetWebContainerProject(wc: WebContainer) {
+  const entries = await wc.fs.readdir(".", { withFileTypes: true });
+  for (const entry of entries) {
     try {
-      await bootPromise;
-    } catch {
-      // A failed boot has nothing to tear down.
+      await (wc.fs as any).rm(entry.name, { recursive: true, force: true });
+    } catch (error) {
+      throw new Error(
+        `Unable to reset the WebContainer project workspace at ${entry.name}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
     }
   }
+}
 
-  if (instance) {
-    instance.teardown();
-    instance = null;
-  }
-  bootPromise = null;
+// Kept for the existing runtime API, but intentionally does not call
+// WebContainer.teardown(). WebContainer.boot() is a one-per-document resource;
+// switching Cryzo projects clears the reusable workdir instead of creating a
+// second WebContainer instance.
+export async function teardownWebContainer() {
+  if (bootFailure) throw bootFailure;
+
+  const wc = instance ?? (bootPromise ? await bootPromise : null);
+  if (!wc) return;
+  await resetWebContainerProject(wc);
 }
 
 export async function writeFiles(wc: WebContainer, actions: ArtifactAction[]) {
