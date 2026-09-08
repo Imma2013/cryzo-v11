@@ -51,7 +51,7 @@ export const create = mutation({
           : ["web"],
       composioSessionId: null,
       modelProvider: args.modelProvider || "cryzo",
-      modelId: args.modelId || "cryzo/minimax-m3",
+      modelId: args.modelId || "cryzo/nemotron-3.5-lightning-free",
       modelCredentialMode: args.modelCredentialMode || "cryzo",
       modelBaseUrl: args.modelBaseUrl?.trim() || undefined,
       createdAt: now,
