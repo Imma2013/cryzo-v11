@@ -1,15 +1,20 @@
 "use client";
 
-import { Suspense, useEffect } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { Menu } from "lucide-react";
+import { Menu, RefreshCw } from "lucide-react";
 import { Sidebar } from "@/components/Sidebar";
 import { useAuth } from "@/providers/AuthProvider";
+
+const ISOLATION_RELOAD_KEY = "cryzo:webcontainer-isolation-reload";
+
+type IsolationState = "checking" | "ready" | "failed";
 
 export default function ChatLayout({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading } = useAuth();
   const pathname = usePathname();
   const router = useRouter();
+  const [isolationState, setIsolationState] = useState<IsolationState>("checking");
 
   useEffect(() => {
     if (isLoading || isAuthenticated) return;
@@ -18,10 +23,66 @@ export default function ChatLayout({ children }: { children: React.ReactNode }) 
     router.replace(`/login?next=${encodeURIComponent(next)}`);
   }, [isAuthenticated, isLoading, pathname, router]);
 
+  useEffect(() => {
+    if (isLoading || !isAuthenticated || typeof window === "undefined") return;
+
+    if (window.crossOriginIsolated) {
+      sessionStorage.removeItem(ISOLATION_RELOAD_KEY);
+      setIsolationState("ready");
+      return;
+    }
+
+    const currentUrl = `${window.location.pathname}${window.location.search}`;
+    const previousReload = sessionStorage.getItem(ISOLATION_RELOAD_KEY);
+
+    if (previousReload !== currentUrl) {
+      sessionStorage.setItem(ISOLATION_RELOAD_KEY, currentUrl);
+      window.location.reload();
+      return;
+    }
+
+    setIsolationState("failed");
+  }, [isAuthenticated, isLoading, pathname]);
+
   if (isLoading || !isAuthenticated) {
     return (
       <div className="flex h-screen items-center justify-center bg-black">
         <div className="text-sm text-zinc-400">Loading...</div>
+      </div>
+    );
+  }
+
+  if (isolationState === "checking") {
+    return (
+      <div className="flex h-screen items-center justify-center bg-[var(--cryzo-canvas)] text-[var(--cryzo-text)]">
+        <div className="flex items-center gap-3 text-sm text-[var(--cryzo-muted)]">
+          <RefreshCw size={17} className="animate-spin text-[var(--cryzo-accent)]" />
+          Preparing secure builder runtime...
+        </div>
+      </div>
+    );
+  }
+
+  if (isolationState === "failed") {
+    return (
+      <div className="flex h-screen items-center justify-center bg-[var(--cryzo-canvas)] px-6 text-[var(--cryzo-text)]">
+        <div className="max-w-md rounded-2xl border border-[var(--cryzo-border)] bg-[var(--cryzo-card)] p-6 text-center shadow-xl">
+          <h1 className="text-lg font-semibold">Builder reload required</h1>
+          <p className="mt-2 text-sm leading-6 text-[var(--cryzo-muted)]">
+            Cryzo could not enable the browser isolation required by WebContainers in this document.
+            Reload the builder to start a fresh preview runtime.
+          </p>
+          <button
+            type="button"
+            onClick={() => {
+              sessionStorage.removeItem(ISOLATION_RELOAD_KEY);
+              window.location.reload();
+            }}
+            className="mt-5 inline-flex h-10 items-center gap-2 rounded-full bg-[var(--cryzo-text)] px-4 text-sm font-medium text-[var(--cryzo-panel)]"
+          >
+            <RefreshCw size={15} /> Reload builder
+          </button>
+        </div>
       </div>
     );
   }
