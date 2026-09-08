@@ -5,6 +5,7 @@ import "./globals.css";
 import { ConvexClientProvider } from "@/providers/ConvexProvider";
 import { AuthProvider } from "@/providers/AuthProvider";
 import { ThemeProvider } from "@/providers/ThemeProvider";
+import { ManagedModelBillingGate } from "@/components/ManagedModelBillingGate";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -51,7 +52,10 @@ export default function RootLayout({
       <body className="flex min-h-full flex-col bg-background text-foreground">
         <ThemeProvider>
           <ConvexClientProvider>
-            <AuthProvider>{children}</AuthProvider>
+            <AuthProvider>
+              <ManagedModelBillingGate />
+              {children}
+            </AuthProvider>
           </ConvexClientProvider>
         </ThemeProvider>
       </body>
