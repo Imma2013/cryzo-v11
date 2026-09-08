@@ -3,7 +3,10 @@ import { isIP } from "node:net";
 import { fetchQuery } from "convex/nextjs";
 import { jsonSchema, tool } from "ai";
 import { api } from "../../../convex/_generated/api";
-import { resolveAccountProviderSecret } from "@/lib/server/provider-secrets";
+import {
+  decryptProviderSecret,
+  resolveAccountProviderSecret,
+} from "@/lib/server/provider-secrets";
 
 type McpTransport = "http" | "sse";
 type McpAuthType = "none" | "api_key" | "oauth";
@@ -29,6 +32,11 @@ type McpCredential = {
   access_token?: string;
   token_type?: string;
   expires_at?: number;
+};
+
+type McpIdentity = {
+  authToken?: string;
+  userId?: string;
 };
 
 function isPrivateAddress(address: string) {
@@ -77,10 +85,26 @@ function parseCredential(raw?: string | null) {
   }
 }
 
-async function resolveCredential(authToken: string, server: McpServerRecord) {
-  const stored = await resolveAccountProviderSecret(authToken, `mcp:${server._id}`);
-  if (!stored?.apiKey) return null;
-  return parseCredential(stored.apiKey);
+async function resolveCredential(identity: McpIdentity, server: McpServerRecord) {
+  if (identity.authToken) {
+    const stored = await resolveAccountProviderSecret(
+      identity.authToken,
+      `mcp:${server._id}`,
+    );
+    return parseCredential(stored?.apiKey);
+  }
+
+  const internalSecret = process.env.CRYZO_INTERNAL_API_SECRET?.trim();
+  if (!identity.userId || !internalSecret) return null;
+  const row = await fetchQuery(
+    (api as any).providerSecrets.getForServer,
+    {
+      userId: identity.userId as any,
+      providerId: `mcp:${server._id}`,
+      internalSecret,
+    },
+  );
+  return row ? parseCredential(decryptProviderSecret(row as any)) : null;
 }
 
 function authHeaders(credential: McpCredential | null) {
@@ -140,7 +164,9 @@ async function rpc(
     }
     const contentType = response.headers.get("content-type") || "";
     const body = await response.text();
-    const data = contentType.includes("text/event-stream") ? parseSseBody(body) : JSON.parse(body || "null");
+    const data = contentType.includes("text/event-stream")
+      ? parseSseBody(body)
+      : JSON.parse(body || "null");
     if (data?.error) {
       throw new Error(data.error.message || `${server.name} returned an MCP error.`);
     }
@@ -170,8 +196,12 @@ async function initialize(server: McpServerRecord, credential: McpCredential | n
   return init.sessionId;
 }
 
-export async function listRemoteMcpTools(server: McpServerRecord, authToken: string) {
-  const credential = await resolveCredential(authToken, server);
+export async function listRemoteMcpTools(
+  server: McpServerRecord,
+  authToken?: string,
+  userId?: string,
+) {
+  const credential = await resolveCredential({ authToken, userId }, server);
   const sessionId = await initialize(server, credential);
   const response = await rpc(
     server,
@@ -179,24 +209,30 @@ export async function listRemoteMcpTools(server: McpServerRecord, authToken: str
     { jsonrpc: "2.0", id: `tools-${Date.now()}`, method: "tools/list", params: {} },
     sessionId,
   );
-  const tools = Array.isArray(response.data?.result?.tools) ? response.data.result.tools : [];
+  const tools = Array.isArray(response.data?.result?.tools)
+    ? response.data.result.tools
+    : [];
   return tools
     .filter((item: any) => typeof item?.name === "string" && item.name.trim())
     .map((item: any) => ({
       name: item.name.trim(),
-      description: typeof item.description === "string" ? item.description : undefined,
-      inputSchema: item.inputSchema && typeof item.inputSchema === "object" ? item.inputSchema : { type: "object", properties: {} },
+      description:
+        typeof item.description === "string" ? item.description : undefined,
+      inputSchema:
+        item.inputSchema && typeof item.inputSchema === "object"
+          ? item.inputSchema
+          : { type: "object", properties: {} },
       enabled: true,
     })) as McpToolMeta[];
 }
 
 export async function callRemoteMcpTool(
   server: McpServerRecord,
-  authToken: string,
+  identity: McpIdentity,
   toolName: string,
   args: unknown,
 ) {
-  const credential = await resolveCredential(authToken, server);
+  const credential = await resolveCredential(identity, server);
   const sessionId = await initialize(server, credential);
   const response = await rpc(
     server,
@@ -213,24 +249,44 @@ export async function callRemoteMcpTool(
 }
 
 function safeToolName(serverName: string, toolName: string) {
-  const clean = (value: string) => value.toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "");
-  return `mcp_${clean(serverName).slice(0, 24)}_${clean(toolName).slice(0, 36)}`.slice(0, 64);
+  const clean = (value: string) =>
+    value
+      .toLowerCase()
+      .replace(/[^a-z0-9_]+/g, "_")
+      .replace(/^_+|_+$/g, "");
+  return `mcp_${clean(serverName).slice(0, 24)}_${clean(toolName).slice(0, 36)}`.slice(
+    0,
+    64,
+  );
 }
 
-export async function buildProjectMcpTools(authToken: string | undefined) {
-  if (!authToken) return { tools: {} as Record<string, any>, servers: [] as McpServerRecord[] };
-  const servers = (await fetchQuery(
-    (api as any).mcpServers.list,
-    {},
-    { token: authToken },
-  )) as McpServerRecord[];
+export async function buildProjectMcpTools(identity: McpIdentity) {
+  const internalSecret = process.env.CRYZO_INTERNAL_API_SECRET?.trim();
+  let servers: McpServerRecord[] = [];
+
+  if (identity.authToken) {
+    servers = (await fetchQuery(
+      (api as any).mcpServers.list,
+      {},
+      { token: identity.authToken },
+    )) as McpServerRecord[];
+  } else if (identity.userId && internalSecret) {
+    servers = (await fetchQuery((api as any).mcpServers.listForServer, {
+      userId: identity.userId as any,
+      internalSecret,
+    })) as McpServerRecord[];
+  }
 
   const tools: Record<string, any> = {};
   for (const server of servers.filter((item) => item.enabled)) {
     let remoteTools = (server.tools || []).filter((item) => item.enabled !== false);
     if (!remoteTools.length) {
       try {
-        remoteTools = await listRemoteMcpTools(server, authToken);
+        remoteTools = await listRemoteMcpTools(
+          server,
+          identity.authToken,
+          identity.userId,
+        );
       } catch (error) {
         console.warn(`[mcp:${server.name}] tool discovery failed`, error);
         continue;
@@ -240,8 +296,14 @@ export async function buildProjectMcpTools(authToken: string | undefined) {
       const exposedName = safeToolName(server.name, remoteTool.name);
       tools[exposedName] = tool({
         description: `${server.name}: ${remoteTool.description || remoteTool.name}`,
-        inputSchema: jsonSchema((remoteTool.inputSchema || { type: "object", properties: {} }) as any),
-        execute: async (input) => callRemoteMcpTool(server, authToken, remoteTool.name, input),
+        inputSchema: jsonSchema(
+          (remoteTool.inputSchema || {
+            type: "object",
+            properties: {},
+          }) as any,
+        ),
+        execute: async (input) =>
+          callRemoteMcpTool(server, identity, remoteTool.name, input),
       });
     }
   }
