@@ -1,6 +1,7 @@
 "use client";
 
 import { Suspense, useEffect, useState } from "react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ThemeToggle } from "@/providers/ThemeProvider";
 import { useAuth } from "@/providers/AuthProvider";
@@ -93,6 +94,17 @@ function LoginContent() {
           <GoogleMark />
           {submitting ? "Connecting to Google..." : "Continue with Google"}
         </button>
+
+        <p className="text-center text-[11px] leading-5 text-zinc-600">
+          By continuing, you agree to Cryzo&apos;s{" "}
+          <Link href="/terms" className="text-zinc-400 underline underline-offset-2 hover:text-white">
+            Terms of Service
+          </Link>{" "}
+          and acknowledge the{" "}
+          <Link href="/privacy" className="text-zinc-400 underline underline-offset-2 hover:text-white">
+            Privacy Policy
+          </Link>.
+        </p>
 
         <div aria-live="polite" className="min-h-5 text-center text-sm">
           {error && <p className="text-red-400">{error}</p>}
