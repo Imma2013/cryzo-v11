@@ -99,25 +99,16 @@ export async function resetWebContainerProject(wc: WebContainer) {
   }
 }
 
+// Kept for the existing runtime API, but intentionally does not call
+// WebContainer.teardown(). WebContainer.boot() is a one-per-document resource;
+// switching Cryzo projects clears the reusable workdir instead of creating a
+// second WebContainer instance.
 export async function teardownWebContainer() {
-  if (bootPromise) {
-    try {
-      await bootPromise;
-    } catch {
-      // A failed boot has nothing to tear down.
-    }
-  }
+  if (bootFailure) throw bootFailure;
 
-  if (instance) {
-    instance.teardown();
-    instance = null;
-  }
-
-  bootPromise = null;
-  bootFailure = reloadRequiredError(
-    "WebContainer was torn down in this browser document. Reload the builder before starting it again.",
-  );
-  bootAttempted = true;
+  const wc = instance ?? (bootPromise ? await bootPromise : null);
+  if (!wc) return;
+  await resetWebContainerProject(wc);
 }
 
 export async function writeFiles(wc: WebContainer, actions: ArtifactAction[]) {
