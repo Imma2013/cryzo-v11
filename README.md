@@ -1,54 +1,58 @@
 # Cryzo
 
-Cryzo is an open-source AI app builder that combines conversational web/mobile generation, a managed backend, connected apps, publishing, and social marketing in one workspace.
+Cryzo is an open-source AI app builder for creating, editing, previewing, and shipping web and native applications from the browser.
 
 The hosted product lives at **cryzo.me**. This repository is the community/self-hostable edition and is licensed under Apache-2.0.
 
 ## What Cryzo includes
 
-- **AI builder** — build and edit apps by chatting with managed models, BYOK providers, or supported local OpenAI-compatible models.
-- **Web apps** — React + Vite projects run in disposable remote Linux sandboxes during hosted development. Cryzo prefers Modal Sandboxes when configured and can fall back to non-persistent Vercel Sandbox compute.
-- **Native mobile apps** — one Expo + React Native codebase can target iOS and Android. New mobile projects are native source, not a WebView wrapper.
-- **Cryzo Cloud** — Convex-powered database, app authentication/users, ownership rules, and the managed application API.
-- **Connections** — optional Composio-powered external tools and OAuth connections.
-- **Marketing** — connected-account drafting, media upload, publishing/scheduling, and calendar delivery for Facebook, Instagram, LinkedIn, and YouTube.
+- **AI builder** — build and edit projects by chatting with Cryzo-managed models, BYOK providers, or supported local OpenAI-compatible endpoints.
+- **Browser-native web development** — React + TypeScript + Vite projects run inside WebContainers, so hosted development does not require installing Node.js locally or waiting for a remote preview VM.
+- **Native mobile apps** — one Expo + React Native codebase targets iOS and Android. Native source remains the source of truth.
+- **Cryzo Cloud** — Convex-powered database, generated-app auth/users, ownership rules, and the managed application API.
+- **Developer connections** — GitHub, Vercel, Supabase, Stripe, Composio-powered apps, and remote MCP servers.
+- **MCP connectors** — connect compatible HTTPS Model Context Protocol servers and expose their tools to supported Cryzo models without placing connector credentials in generated code.
 - **Publishing** — Cryzo hosting, your own Vercel, GitHub sync, Expo/EAS builds, App Store/Google Play readiness checks, and store submission workflows.
 
 ## Architecture
 
 ```text
 Browser / Cryzo UI
-  ├─ AI builder ───────────────┐
-  ├─ Marketing agent          │
-  └─ Dashboard                │
-                              ▼
-Next.js application on Vercel
-  ├─ AI SDK + provider adapters
-  ├─ Composio (optional external actions)
-  ├─ Remote Sandbox adapter
-  │    ├─ Modal Sandbox (preferred)
-  │    └─ ephemeral Vercel Sandbox (fallback)
-  ├─ Expo / EAS (native mobile delivery)
-  └─ Cryzo Cloud API
+  ├─ AI builder
+  ├─ WebContainer project runtime + live preview
+  ├─ Code/files/editor
+  └─ Project dashboard
           │
           ▼
-       Convex
-  ├─ Cryzo user auth
+Next.js application on Vercel
+  ├─ AI SDK + model provider adapters
+  ├─ MCP client + encrypted connector credentials
+  ├─ Composio (optional external actions)
+  ├─ Cryzo Cloud API
+  └─ Mobile delivery services
+          │
+          ├──────────────► Expo / EAS
+          │
+          └──────────────► Vercel Sandbox for managed mobile build workflows
+          │
+          ▼
+        Convex
+  ├─ Cryzo Google auth
   ├─ conversations + artifacts
-  ├─ cloud app namespaces
+  ├─ generated-app cloud namespaces
   ├─ logical entity schemas + records
   ├─ app users + sessions
-  ├─ billing/usage
-  └─ social scheduling state
+  ├─ MCP configuration metadata
+  └─ billing/usage
 ```
 
-Generated source and artifacts live in Cryzo/Convex and are independent from preview compute. A sandbox can be discarded and recreated without losing the project.
+Generated source and artifacts are durable in Convex. The browser WebContainer is disposable runtime state: a project can be reconstructed from its saved artifacts when a conversation is reopened.
 
 ### Cryzo Cloud
 
-Generated apps do **not** need a fictional `@cryzo/cloud` npm package. Cryzo Cloud is platform-owned infrastructure. Generated apps use a small local typed client that calls the managed `/api/cloud/v1` API with the public app ID.
+Generated apps do **not** need a fictional `@cryzo/cloud` package. Cryzo Cloud is platform-owned infrastructure. Generated apps use a small local client that calls the managed `/api/cloud/v1` API with the public app ID.
 
-In the hosted product, Cryzo Cloud is multi-tenant on Convex: each generated app receives its own app namespace, auth users/sessions, logical entity schemas, and records while authorization remains enforced server-side.
+In the hosted product, each generated application receives its own logical namespace, app users/sessions, entity schemas, and records while authorization remains enforced server-side.
 
 Self-hosters can keep this architecture or replace the cloud adapter with their own backend.
 
@@ -68,7 +72,7 @@ cd cryzo-v11
 npm install
 ```
 
-Create your local environment from the values required by your deployment. At minimum, configure the Convex URLs/auth values used by the project. Optional features need their own provider credentials.
+Configure the Convex URLs/auth values required by your deployment. Optional providers and hosted integrations need their own environment variables.
 
 Run Convex in one terminal and Next.js in another:
 
@@ -82,86 +86,74 @@ npm run dev
 
 Then open `http://localhost:3000`.
 
-## Remote preview compute
+## WebContainer previews
 
-Cryzo's hosted preview layer is provider-independent. Generated source remains in Cryzo and is restored into disposable remote compute when a preview is needed.
+Cryzo's hosted web builder runs generated projects inside a browser WebContainer. Project files are written into the container, dependencies are installed there, and the project's dev server is embedded into the Cryzo preview workspace.
 
-### Modal (preferred)
+Cryzo uses cross-origin isolation headers on the builder routes required by WebContainers. Preview health reporting distinguishes a server that merely opened a port from an application that actually rendered successfully.
 
-Set:
+The browser runtime is never the durable source of truth. Saved project artifacts remain in Convex.
 
-```bash
-MODAL_TOKEN_ID=...
-MODAL_TOKEN_SECRET=...
-CRYZO_SANDBOX_PROVIDER=modal
-```
+## AI models and BYOK
 
-Optional tuning:
+Cryzo can provide managed models through OpenRouter and can also use user-supplied provider credentials. BYOK credentials are kept outside generated project source.
 
-```bash
-CRYZO_MODAL_APP_NAME=cryzo-sandboxes
-CRYZO_MODAL_IMAGE=node:22-bookworm-slim
-CRYZO_MODAL_REGION=us-east-1
-```
+The hosted managed default is **Nemotron 3.5 Lightning Free**. Supported BYOK providers include OpenRouter, Google Gemini, OpenAI, Anthropic, xAI, Groq, DeepSeek, Mistral, Together, Cerebras, NVIDIA, and compatible custom endpoints.
 
-When Modal credentials are present, Cryzo creates/reuses a named Modal Sandbox, exposes the Vite preview port through an encrypted Modal tunnel, and runs the same generated-project lifecycle there.
+## MCP connectors
 
-### Vercel fallback
+Cryzo can connect compatible remote MCP servers over HTTPS.
 
-Without Modal credentials, Cryzo can use Vercel Sandbox as a fallback. These preview sandboxes are deliberately **non-persistent** because project source is already durable in Convex; this avoids accumulating Vercel filesystem snapshots just to keep temporary preview machines alive.
+Current connector flow:
 
-Use `CRYZO_SANDBOX_PROVIDER=vercel` to force the fallback. Set `CRYZO_SANDBOX_STRICT_MODAL=1` if a hosted deployment should fail rather than fall back when Modal is unavailable.
+1. Add a server name and HTTPS endpoint under **Apps → Connectors (MCP)**.
+2. Use no authentication or save an API/bearer credential encrypted with `CRYZO_SECRETS_KEY`.
+3. Test the server; Cryzo performs an MCP initialize handshake and discovers tools.
+4. Enable or disable configured servers from the connector page or directly from the chat composer `+` menu.
+5. Supported tool-calling models can invoke those MCP tools during a build or external action.
+
+MCP credentials are server-side secrets and are not written to project files or exposed to the WebContainer.
 
 ## Optional services
 
-Cryzo is designed so self-hosting does not require buying Cryzo-hosted AI credits.
+Cryzo is designed so self-hosting does not require purchasing Cryzo-hosted AI credits.
 
-- **AI providers:** connect supported provider keys or local compatible endpoints.
-- **Remote sandbox provider:** Modal is preferred for hosted previews; ephemeral Vercel Sandbox remains a fallback.
-- **Composio:** optional for connected apps and social actions.
-- **Stripe:** optional for running your own hosted billing implementation.
-- **Expo/EAS:** optional for managed iOS/Android cloud builds and store submission.
-- **Supabase / BYO Convex:** generated projects may use these only when explicitly requested instead of Cryzo Cloud.
+- **AI providers:** managed OpenRouter models, BYOK providers, or supported local compatible endpoints.
+- **Composio:** optional connected applications and OAuth actions.
+- **MCP:** optional remote tool servers.
+- **Stripe:** optional hosted billing.
+- **Expo/EAS:** optional iOS/Android development builds, store builds, and submission.
+- **Supabase:** an optional project database/backend connection when explicitly chosen instead of Cryzo Cloud.
+- **GitHub / Vercel:** source-control and deployment connections.
 
-Never commit production API keys, OAuth secrets, store credentials, Modal tokens, or Stripe secrets to a fork.
+Never commit production API keys, OAuth secrets, store credentials, MCP credentials, Expo tokens, or Stripe secrets to a fork.
 
 ## Web and mobile targets
 
 ### Web
 
-Cryzo's default web target is React + TypeScript + Vite. Hosted previews execute in disposable remote Linux sandboxes; the preview machine is not the source of truth for project files.
+Cryzo's default web target is React + TypeScript + Vite. Development previews execute in a WebContainer directly in the browser.
 
 ### iOS + Android
 
-Cryzo generates one shared Expo + React Native project for both platforms. `app.json` contains iOS and Android configuration, while EAS builds the selected target. A lightweight React Native Web bridge is used only for browser preview; the native source remains the source of truth.
+Cryzo generates one shared Expo + React Native project for both platforms. `app.json` contains iOS and Android configuration, while EAS builds the selected target. A lightweight React Native Web bridge may be used for browser preview; the native source remains the source of truth.
 
-## Marketing
-
-The hosted Marketing workspace currently exposes:
-
-- Facebook
-- Instagram
-- LinkedIn
-- YouTube
-
-X/Twitter, Reddit, and TikTok plumbing remains in the codebase but is intentionally hidden from the active Marketing product for now.
-
-Marketing chat can draft content or execute an explicitly requested action through a connected account. Images and videos can be attached directly to the Marketing chat or manual post composer.
+For compatible Expo projects, Cryzo also provides a QR-based physical-device preview flow.
 
 ## App Store / Google Play workflow
 
 Cryzo's mobile publishing flow is:
 
-1. **Scan Store Readiness** — source checks for native APIs, safe areas, navigation, privacy, account deletion, permissions, assets, secrets, billing conflicts, and related store concerns.
-2. **Fix with AI** — send the actionable findings back to the builder.
-3. **Build Store Files** — hosted Cryzo can run EAS on supported paid plans; self-hosters can run EAS directly.
+1. **Scan Store Readiness** — analyze the current source for native APIs, safe areas, navigation, privacy, account deletion, permissions, assets, secrets, billing conflicts, accessibility, and native UX concerns.
+2. **Fix with AI** — place the actionable findings back into the builder chat.
+3. **Build Store Files** — hosted Cryzo can run supported Expo/EAS workflows; self-hosters can run EAS directly.
 4. **Submit Your App** — submit through App Store Connect or Google Play with your own store credentials.
 
 Native source and readiness scanning remain available without using Cryzo-managed build compute.
 
 ## Pricing and the hosted service
 
-The source code is open. The hosted Cryzo business can charge for managed convenience and infrastructure: managed AI usage, Cryzo Cloud capacity, integrations, custom domains, managed EAS compute, one-click store submission, social delivery volume, and team/enterprise capabilities.
+The source code is open. The hosted Cryzo service can charge for managed AI usage and infrastructure, Cryzo Cloud capacity, integrations, custom domains, and managed mobile build/submission workflows.
 
 BYOK, source export, and self-hosting are not intended to be artificially locked behind the hosted service.
 

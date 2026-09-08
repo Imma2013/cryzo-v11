@@ -17,8 +17,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Cryzo - AI Chat",
-  description: "Build apps, automate work, and schedule social content with AI.",
+  title: "Cryzo - Build Apps with AI",
+  description: "Build and ship web and native apps in your browser with AI.",
   icons: {
     icon: "/icon.svg",
     shortcut: "/icon.svg",

@@ -8,6 +8,7 @@
   let active = false;
   let hoveredElement = null;
   let overlay = null;
+  let crashed = false;
 
   function post(type, payload) {
     window.parent.postMessage({ type: type, ...payload }, '*');
@@ -28,6 +29,52 @@
     ].join(';');
     document.body.appendChild(overlay);
   }
+
+  function meaningfulBodyContent() {
+    if (!document.body) return false;
+    var nodes = Array.from(document.body.children).filter(function (node) {
+      return node.id !== '__cryzo-inspector-overlay' && node.tagName !== 'SCRIPT';
+    });
+    if (nodes.length === 0) return false;
+
+    return nodes.some(function (node) {
+      var text = (node.textContent || '').trim();
+      var rect = typeof node.getBoundingClientRect === 'function'
+        ? node.getBoundingClientRect()
+        : { width: 0, height: 0 };
+      return text.length > 0 || rect.width > 1 || rect.height > 1 || node.children.length > 0;
+    });
+  }
+
+  function reportHealth() {
+    if (crashed) return;
+    var root = document.getElementById('root') || document.getElementById('app');
+    var healthy = meaningfulBodyContent();
+    var rootChildren = root ? root.childElementCount : 0;
+    var bodyTextLength = document.body ? (document.body.innerText || '').trim().length : 0;
+    post('CRYZO_PREVIEW_HEALTH', {
+      healthy: healthy,
+      bodyTextLength: bodyTextLength,
+      rootChildren: rootChildren,
+      reason: healthy ? '' : 'The preview loaded but rendered no visible application content.',
+    });
+  }
+
+  function reportCrash(message) {
+    crashed = true;
+    post('CRYZO_PREVIEW_CRASH', {
+      message: String(message || 'The application crashed while rendering.'),
+    });
+  }
+
+  window.addEventListener('error', function (event) {
+    reportCrash(event && event.message ? event.message : 'Uncaught preview error');
+  });
+
+  window.addEventListener('unhandledrejection', function (event) {
+    var reason = event && event.reason;
+    reportCrash(reason && reason.message ? reason.message : reason || 'Unhandled promise rejection');
+  });
 
   function cssEscape(value) {
     if (window.CSS && typeof window.CSS.escape === 'function') {
@@ -154,13 +201,17 @@
   document.addEventListener('click', onClick, true);
   document.addEventListener('mouseleave', clearHover, true);
 
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', function () {
-      createOverlay();
-      post('INSPECTOR_READY', {});
-    }, { once: true });
-  } else {
+  function ready() {
     createOverlay();
     post('INSPECTOR_READY', {});
+    window.setTimeout(reportHealth, 150);
+    window.setTimeout(reportHealth, 700);
+    window.setTimeout(reportHealth, 1600);
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', ready, { once: true });
+  } else {
+    ready();
   }
 })();

@@ -6,6 +6,7 @@ import {
   ChevronDown,
   Globe2,
   Hammer,
+  ImagePlus,
   Loader2,
   MessageCircle,
   Mic,
@@ -18,6 +19,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ModelPicker } from "@/components/ModelPicker";
+import { McpQuickMenu } from "@/components/McpQuickMenu";
 import {
   DEFAULT_MODEL_SELECTION,
   type ModelSelection,
@@ -143,12 +145,14 @@ export function ChatInput({
   const attachmentsRef = useRef<ImageAttachment[]>([]);
   const valueRef = useRef(value);
   const modeMenuRef = useRef<HTMLDivElement>(null);
+  const plusMenuRef = useRef<HTMLDivElement>(null);
   const prefillTimerRef = useRef<number | null>(null);
   const [attachments, setAttachments] = useState<ImageAttachment[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [isListening, setIsListening] = useState(false);
   const [modeOpen, setModeOpen] = useState(false);
+  const [plusOpen, setPlusOpen] = useState(false);
   const [prefillNotice, setPrefillNotice] = useState<string | null>(null);
   const isHero = variant === "hero";
   const speechSupported =
@@ -170,11 +174,13 @@ export function ChatInput({
   }, [value]);
 
   useEffect(() => {
-    const closeModeMenu = (event: PointerEvent) => {
-      if (!modeMenuRef.current?.contains(event.target as Node)) setModeOpen(false);
+    const closeMenus = (event: PointerEvent) => {
+      const node = event.target as Node;
+      if (!modeMenuRef.current?.contains(node)) setModeOpen(false);
+      if (!plusMenuRef.current?.contains(node)) setPlusOpen(false);
     };
-    document.addEventListener("pointerdown", closeModeMenu);
-    return () => document.removeEventListener("pointerdown", closeModeMenu);
+    document.addEventListener("pointerdown", closeMenus);
+    return () => document.removeEventListener("pointerdown", closeMenus);
   }, []);
 
   useEffect(() => {
@@ -393,15 +399,41 @@ export function ChatInput({
             }}
           />
 
-          <button
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={disabled || attachments.length >= MAX_ATTACHMENTS}
-            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-zinc-300 transition hover:bg-zinc-800 hover:text-white disabled:opacity-40"
-            title="Add image"
-          >
-            <Plus size={20} />
-          </button>
+          <div ref={plusMenuRef} className="relative shrink-0">
+            <button
+              type="button"
+              onClick={() => setPlusOpen((open) => !open)}
+              disabled={disabled}
+              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-zinc-300 transition hover:bg-zinc-800 hover:text-white disabled:opacity-40"
+              title="Add or connect"
+              aria-haspopup="menu"
+              aria-expanded={plusOpen}
+            >
+              <Plus size={20} />
+            </button>
+            {plusOpen && (
+              <div
+                className={cn(
+                  "absolute z-[70] w-72 overflow-hidden rounded-xl border border-zinc-800 bg-zinc-950 p-1.5 shadow-2xl",
+                  isHero ? "left-0 top-full mt-2" : "bottom-full left-0 mb-2",
+                )}
+              >
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPlusOpen(false);
+                    fileInputRef.current?.click();
+                  }}
+                  disabled={attachments.length >= MAX_ATTACHMENTS}
+                  className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm text-zinc-200 hover:bg-zinc-900 disabled:opacity-40"
+                >
+                  <ImagePlus size={16} className="text-zinc-400" />
+                  Add image
+                </button>
+                <McpQuickMenu />
+              </div>
+            )}
+          </div>
 
           <div ref={modeMenuRef} className="relative shrink-0">
             <button
