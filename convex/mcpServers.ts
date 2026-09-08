@@ -47,6 +47,32 @@ export const list = query({
   },
 });
 
+export const get = query({
+  args: { serverId: v.id("mcpServers") },
+  handler: async (ctx, args) => {
+    const userId = await getAuthUserId(ctx);
+    if (!userId) return null;
+    const server = await ctx.db.get(args.serverId);
+    if (!server || server.userId !== userId) return null;
+    return server;
+  },
+});
+
+// For the launch release, `enabled` is the default-project switch: enabled
+// servers are available to every project. The chat composer exposes the same
+// switch so users can quickly turn a connector on/off without leaving a build.
+export const setEnabled = mutation({
+  args: { serverId: v.id("mcpServers"), enabled: v.boolean() },
+  handler: async (ctx, args) => {
+    const userId = await getAuthUserId(ctx);
+    if (!userId) throw new Error("Unauthorized");
+    const server = await ctx.db.get(args.serverId);
+    if (!server || server.userId !== userId) throw new Error("MCP server not found.");
+    await ctx.db.patch(server._id, { enabled: args.enabled, updatedAt: Date.now() });
+    return args.enabled;
+  },
+});
+
 export const add = mutation({
   args: {
     name: v.string(),
@@ -88,6 +114,15 @@ export const remove = mutation({
     if (!userId) throw new Error("Unauthorized");
     const server = await ctx.db.get(args.serverId);
     if (!server || server.userId !== userId) throw new Error("MCP server not found.");
+
+    const secret = await ctx.db
+      .query("providerSecrets")
+      .withIndex("by_user_provider", (q) =>
+        q.eq("userId", userId).eq("providerId", `mcp:${server._id}`),
+      )
+      .unique();
+    if (secret) await ctx.db.delete(secret._id);
+
     await ctx.db.delete(server._id);
     return null;
   },
