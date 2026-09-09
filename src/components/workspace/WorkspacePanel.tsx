@@ -183,10 +183,11 @@ export function WorkspacePanel({
       <div className="h-10 w-10 animate-spin rounded-full border-2 border-zinc-700 border-t-blue-400" />
       <div>
         <p className="text-sm font-medium text-zinc-300">
+          {progress === "restoring" && "Restoring project..."}
           {progress === "writing" && "Writing files..."}
           {progress === "installing" && "Installing dependencies..."}
           {progress === "starting" && "Starting preview..."}
-          {!progress && "Preparing preview..."}
+          {(progress === "idle" || !progress) && "Preparing preview..."}
         </p>
         {mobile && (
           <p className="mt-1 text-xs text-zinc-600">
@@ -478,6 +479,7 @@ export function WorkspacePanel({
             ) : isBooting ? (
               <span className="flex items-center gap-1 text-zinc-400">
                 <Loader2 size={12} className="animate-spin" />
+                {progress === "restoring" && "Restoring project..."}
                 {progress === "writing" && "Writing files..."}
                 {progress === "installing" && "Installing..."}
                 {progress === "starting" && "Starting server..."}
