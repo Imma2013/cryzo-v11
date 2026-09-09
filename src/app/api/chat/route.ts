@@ -77,7 +77,7 @@ const RECIPE_KEYWORDS: Record<string, string[]> = {
 };
 
 const RECIPE_STYLE_SIGNAL =
-  /\b(style|styled|aesthetic|visual|look|feel|theme|inspired|like|editorial|fashion|poster|experimental|brutalist|futuristic|immersive|luxury|premium|playful|bold|minimalist|cinematic|art-directed|art directed)\b/i;
+  /\b(style|styled|aesthetic|visual|theme|editorial|fashion|poster|experimental|brutalist|futuristic|immersive|minimalist|cinematic|art-directed|art directed)\b|\b(inspired by|similar to|make it like|looks? like)\b/i;
 
 function pickDesignRecipe(userMessage: string): string | null {
   const msg = userMessage.toLowerCase();
