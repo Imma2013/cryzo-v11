@@ -76,8 +76,18 @@ const RECIPE_KEYWORDS: Record<string, string[]> = {
   spacex: ["rocket", "space", "mission", "aerospace"],
 };
 
+const RECIPE_STYLE_SIGNAL =
+  /\b(style|styled|aesthetic|visual|theme|editorial|fashion|poster|experimental|brutalist|futuristic|immersive|minimalist|cinematic|art-directed|art directed)\b|\b(inspired by|similar to|make it like|looks? like)\b/i;
+
 function pickDesignRecipe(userMessage: string): string | null {
   const msg = userMessage.toLowerCase();
+
+  // Subject matter alone is not a design decision. A request such as
+  // "create a website for dogs" should get Cryzo's polished baseline instead
+  // of silently forcing the avant-garde pet recipe. Recipes become binding
+  // only when the user also expresses a visual/style intent.
+  if (!RECIPE_STYLE_SIGNAL.test(msg)) return null;
+
   for (const [slug, keywords] of Object.entries(RECIPE_KEYWORDS)) {
     if (keywords.some((keyword) => msg.includes(keyword))) return slug;
   }

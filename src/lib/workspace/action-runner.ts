@@ -2,7 +2,14 @@ import type { WebContainer } from "@webcontainer/api";
 import type { ArtifactAction } from "./types";
 import { writeFiles, runCommand } from "./webcontainer";
 
-export type ProgressStage = "writing" | "installing" | "starting" | "ready" | "error";
+export type ProgressStage =
+  | "idle"
+  | "restoring"
+  | "writing"
+  | "installing"
+  | "starting"
+  | "ready"
+  | "error";
 
 async function nodeModulesExist(wc: WebContainer): Promise<boolean> {
   try {
