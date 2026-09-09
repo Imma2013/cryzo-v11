@@ -60,7 +60,7 @@ function createState(): RuntimeState {
     files: {},
     previewUrl: null,
     terminalOutput: "",
-    progress: "writing",
+    progress: "idle",
     error: null,
     listeners: new Set(),
     processedActionsByMessage: new Map(),
@@ -223,6 +223,7 @@ async function ensureContainer(conversationId: string, state: RuntimeState) {
     previous.active = false;
     previous.previewUrl = null;
     previous.initialized = false;
+    previous.progress = "idle";
     emit(previous);
     await teardownWebContainer();
     activeConversationId = null;
@@ -566,15 +567,18 @@ export function processStreamingArtifactText(
   if (!text.includes("<cryzoArtifact")) return false;
 
   const state = getState(conversationId);
-  if (!state.active) {
-    state.active = true;
-    state.progress = "writing";
-    state.error = null;
-    emit(state);
-  }
+  if (!state.active) state.active = true;
+  state.error = null;
 
-  // Streaming is presentation-only. Do not execute a partial artifact.
-  if (hasUnclosedArtifact(text)) return true;
+  // While the model is still producing the artifact, "writing" means this is
+  // new AI output — never project restoration from persisted files.
+  if (hasUnclosedArtifact(text)) {
+    if (state.progress !== "writing") {
+      state.progress = "writing";
+      emit(state);
+    }
+    return true;
+  }
 
   const actions = parseCompletedActions(text);
   const processed = state.processedActionsByMessage.get(messageId) ?? 0;
@@ -582,6 +586,8 @@ export function processStreamingArtifactText(
 
   const newActions = actions.slice(processed);
   state.processedActionsByMessage.set(messageId, actions.length);
+  state.progress = "writing";
+  emit(state);
 
   for (const action of newActions) {
     state.queue = state.queue
@@ -596,9 +602,11 @@ export async function prebootStreamingRuntime(conversationId: string) {
   const state = getState(conversationId);
   if (state.initialized) return;
   state.initialized = true;
-  state.active = true;
   state.error = null;
-  state.progress = "writing";
+
+  // Prebooting only warms the singleton WebContainer. It is not a file write
+  // and should never put a reloaded chat into a "Writing files" state.
+  if (!state.active) state.progress = "idle";
   emit(state);
 
   try {
@@ -622,7 +630,7 @@ export async function restoreStreamingRuntime(
   if ((state.files && Object.keys(state.files).length > 0) || actions.length === 0) return;
 
   state.active = true;
-  state.progress = "writing";
+  state.progress = "restoring";
   state.error = null;
   appendOutput(state, "Restoring project in WebContainer...\n");
   emit(state);
@@ -666,7 +674,7 @@ export async function restoreStreamingRuntime(
     if (startCommand) {
       await startDevServer(conversationId, state, startCommand);
     } else {
-      state.progress = "writing";
+      state.progress = "idle";
       appendOutput(state, "No dev/start script found; project files are available in the editor.\n");
       emit(state);
     }
