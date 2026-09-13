@@ -1,5 +1,5 @@
-import { redirect } from "next/navigation";
+import ProjectMarketingV3 from "@/components/workspace/ProjectMarketingV3";
 
 export default function MarketingPage() {
-  redirect("/chat");
+  return <ProjectMarketingV3 />;
 }
