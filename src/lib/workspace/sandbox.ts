@@ -142,8 +142,21 @@ async function bootSandbox(): Promise<Sandbox> {
   const { Vivari: VivariRuntime } = (await import(
     /* webpackIgnore: true */ /* turbopackIgnore: true */ VIVARI_ENTRY
   )) as VivariModule;
+  // Mode B can isolate arbitrary preview code from Cryzo's authenticated UI.
+  // Enable only after a dedicated static bridge origin is fully provisioned.
+  const configuredPreviewOrigin = process.env.NEXT_PUBLIC_VIVARI_PREVIEW_ORIGIN?.trim();
+  let previewOrigin: string | undefined;
+  if (configuredPreviewOrigin) {
+    const parsed = new URL(configuredPreviewOrigin);
+    if (parsed.protocol !== "https:" || parsed.origin !== configuredPreviewOrigin ||
+        (typeof window !== "undefined" && parsed.origin === window.location.origin)) {
+      throw new Error("NEXT_PUBLIC_VIVARI_PREVIEW_ORIGIN must be a separate HTTPS origin without a path.");
+    }
+    previewOrigin = parsed.origin;
+  }
   const vivari = await VivariRuntime.boot({
     serviceWorkerUrl: VIVARI_SERVICE_WORKER,
+    ...(previewOrigin ? { previewOrigin, previewPopout: "isolated" as const } : {}),
     workerName: "Cryzo Runtime",
     // Vivari's "devtools" slot injects /vv-devtools/chobitsu.js into every preview
     // page. Cryzo serves its own element picker + error reporter at that path

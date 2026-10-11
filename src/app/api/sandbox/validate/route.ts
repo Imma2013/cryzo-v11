@@ -3,7 +3,8 @@ import ts from "typescript";
 import { fetchQuery } from "convex/nextjs";
 import { api } from "../../../../../convex/_generated/api";
 import type { Id } from "../../../../../convex/_generated/dataModel";
-import type { ArtifactAction } from "@/lib/workspace/types";
+import type { ArtifactAction, FileMap } from "@/lib/workspace/types";
+import { projectReadinessIssues } from "@/lib/workspace/project-scaffold";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -179,6 +180,8 @@ export async function POST(req: Request) {
       conversationId?: string;
       action?: ArtifactAction;
       actions?: ArtifactAction[];
+      projectFiles?: Array<{ path: string; content: string }>;
+      command?: string;
     };
 
     if (!body.conversationId || body.conversationId.length > 96) {
@@ -201,15 +204,24 @@ export async function POST(req: Request) {
     }
 
     if (body.operation === "project") {
-      // Every generated/saved file is validated before it enters the runtime.
-      // Project validation must never require allocating remote compute; this
-      // keeps source/code available even when preview infrastructure is down.
-      return Response.json({
-        repairedFiles: [],
-        output: "",
-        repaired: false,
-        maxFiles: MAX_PROJECT_FILES,
-      });
+      // Validate a complete client-side filesystem snapshot without allocating
+      // remote compute. A missing manifest must never be reported as success.
+      if (!Array.isArray(body.projectFiles) || body.projectFiles.length > MAX_PROJECT_FILES) {
+        throw new Error("A project snapshot of at most 150 files is required for validation.");
+      }
+      const files: FileMap = {};
+      for (const file of body.projectFiles) {
+        if (typeof file?.path !== "string" || typeof file?.content !== "string") {
+          throw new Error("Invalid project file entry.");
+        }
+        const filePath = safeRelativePath(file.path);
+        const diagnostic = validateCandidate(filePath, file.content);
+        if (diagnostic) throw new Error(`${filePath}: ${diagnostic}`);
+        files[filePath] = { type: "file", content: file.content };
+      }
+      const issues = projectReadinessIssues(files, body.command);
+      if (issues.length) throw new Error(issues.join(" "));
+      return Response.json({ repairedFiles: [], output: "Project files validated.\n", repaired: false });
     }
 
     return Response.json({ error: "Unknown validation operation" }, { status: 400 });

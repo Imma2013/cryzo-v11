@@ -68,3 +68,30 @@ runtime.
   the shell.
 - **A preview URL only works in the tab that runs it.** It cannot be opened on
   another device.
+
+## Browser preview isolation (Vivari mode B)
+
+Vivari's default preview shares the builder's origin and is NOT isolated from
+Cryzo's authenticated session. The runtime now supports the build-time variable
+`NEXT_PUBLIC_VIVARI_PREVIEW_ORIGIN`, but do **not** enable it until a dedicated
+static preview domain is provisioned. The preview domain must serve Vivari's
+`sw.js`, `__vv-bridge.html`, `__vv-preview-boot.html`, and optional DevTools assets
+with the documented COEP/CORP headers and root-scope Service Worker. It must
+not serve Cryzo's authenticated application or forward authenticated cookies.
+Using a second hostname for the same full Cryzo Vercel app is **not** sufficient.
+
+After provisioning the dedicated bridge-only host, set the variable to its
+exact HTTPS origin (no trailing slash) for the Vercel production build, deploy,
+and verify iframe previews plus network/storage isolation. Without that variable,
+Cryzo intentionally retains Vivari mode A and its documented security risk;
+this is a deployment prerequisite, not a security fix that can be claimed by
+shipping a configuration option alone.
+
+## Generated-project recovery
+
+For incomplete React/Vite artifacts, `project-scaffold.ts` restores only missing
+starter files and preserves all Gemini-authored content. Restoration shares the
+same execution queue as streamed actions. The `project` validator receives the
+actual in-memory files, checks syntax and manifest readiness, and runtime checks
+that `package.json` exists in Vivari before invoking npm.
+Python and Expo projects are never silently converted to React/Vite.

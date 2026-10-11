@@ -211,7 +211,7 @@ ${requiredFormat}
 
 ### Universal build rules
 1. ALWAYS wrap runnable code in <cryzoArtifact>.
-2. For a new project, package.json MUST be the first file.
+2. For a new Node/React project, package.json MUST be the first file, with a working dev script and every dependency used by the emitted components. Do not emit npm install or a start action unless that complete manifest has been written first. Cryzo validates the file tree before running it.
 3. For a new TypeScript project, include tsconfig.json at the root.
 4. Follow the Project Target section above. Never substitute a web stack for a mobile target or a mobile stack for a web target.
 5. New projects include npm install and finish with the target-appropriate start action shown above.

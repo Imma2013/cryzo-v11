@@ -1,4 +1,5 @@
 import type { ArtifactAction, FileMap } from "./types";
+import { missingReactViteScaffold, projectReadinessIssues } from "./project-scaffold";
 import type { ProgressStage } from "./action-runner";
 import {
   collectDirectoryFiles,
@@ -32,6 +33,7 @@ type RuntimeState = StreamingRuntimeSnapshot & {
   processedActionsByMessage: Map<string, number>;
   queue: Promise<void>;
   initialized: boolean;
+  restoreQueued: boolean;
   devProcess: KillableProcess | null;
   startCommand: string | null;
   installedPackageJson: string | null;
@@ -67,6 +69,7 @@ function createState(): RuntimeState {
     processedActionsByMessage: new Map(),
     queue: Promise.resolve(),
     initialized: false,
+    restoreQueued: false,
     devProcess: null,
     startCommand: null,
     installedPackageJson: null,
@@ -221,10 +224,17 @@ function stopDevProcess(state: RuntimeState) {
 async function ensureContainer(conversationId: string, state: RuntimeState) {
   if (activeConversationId && activeConversationId !== conversationId) {
     const previous = getState(activeConversationId);
+    await previous.queue.catch(() => undefined); // Finish queued writes before clearing the singleton filesystem.
     stopDevProcess(previous);
     previous.active = false;
     previous.previewUrl = null;
     previous.initialized = false;
+    previous.restoreQueued = false;
+    previous.files = {}; // Vivari has one project directory: it will be cleared on switch.
+    previous.installedPackageJson = null;
+    previous.installedRequirements = null;
+    previous.startCommand = null;
+    previous.processedActionsByMessage.clear();
     previous.progress = "idle";
     emit(previous);
     await teardownSandbox();
@@ -292,6 +302,40 @@ function packageJsonContent(state: RuntimeState) {
     : "";
 }
 
+/** Repair a missing manifest with an explicit, non-destructive web scaffold. */
+async function ensureProjectScaffold(conversationId: string, state: RuntimeState) {
+  const missing = missingReactViteScaffold(state.files);
+  if (!missing.length) return;
+  const wc = await ensureContainer(conversationId, state);
+  const actions: ArtifactAction[] = missing.map(({ path, content }) => ({
+    type: "file", filePath: path, content,
+  }));
+  await writeFiles(wc, actions);
+  for (const action of actions) updateFileMap(state, action);
+  state.installedPackageJson = null;
+  appendOutput(state, `\nRestored ${missing.length} missing React/Vite starter files (including package.json).\n`);
+  emit(state);
+}
+
+async function assertRunnableProject(conversationId: string, state: RuntimeState, command?: string) {
+  const issues = projectReadinessIssues(state.files, command);
+  if (issues.length) throw new Error(issues.join(" "));
+  if (packageJsonContent(state)) {
+    const wc = await ensureContainer(conversationId, state);
+    if (!(await wc.fs.exists("package.json"))) {
+      throw new Error("The Vivari project directory is missing package.json. Restore project files before running npm.");
+    }
+  }
+}
+
+async function validateCurrentProject(conversationId: string, state: RuntimeState, command?: string) {
+  await assertRunnableProject(conversationId, state, command);
+  const projectFiles = Object.entries(state.files)
+    .filter(([, value]) => value.type === "file")
+    .map(([path, value]) => ({ path, content: value.content || "" }));
+  return callGuard({ operation: "project", conversationId, projectFiles, command });
+}
+
 function detectStartCommand(state: RuntimeState) {
   const packageJson = packageJsonContent(state);
   if (!packageJson) return null;
@@ -336,10 +380,12 @@ async function ensurePythonDependencies(conversationId: string, state: RuntimeSt
 }
 
 async function ensureDependencies(conversationId: string, state: RuntimeState) {
+  await ensureProjectScaffold(conversationId, state);
   await ensurePythonDependencies(conversationId, state);
 
   const packageJson = packageJsonContent(state);
   if (!packageJson) return;
+  await assertRunnableProject(conversationId, state);
 
   const wc = await ensureContainer(conversationId, state);
   const nodeModules = await directoryExists(wc, "node_modules");
@@ -371,6 +417,7 @@ async function startDevServer(
   state: RuntimeState,
   command: string,
 ) {
+  await assertRunnableProject(conversationId, state, command);
   const wc = await ensureContainer(conversationId, state);
   stopDevProcess(state);
   state.startCommand = command.trim();
@@ -514,6 +561,8 @@ async function executeSandboxAction(
   }
 
   if (action.type === "shell") {
+    if (isInstallAction(action)) await ensureProjectScaffold(conversationId, state);
+    await assertRunnableProject(conversationId, state, action.content);
     state.progress = isInstallAction(action) ? "installing" : state.previewUrl ? "ready" : "writing";
     state.error = null;
     appendOutput(state, `\n$ ${action.content}\n`);
@@ -530,7 +579,7 @@ async function executeSandboxAction(
       if (/\bpip3?\b/.test(action.content)) {
         state.installedRequirements = fileContent(state, "requirements.txt") || state.installedRequirements;
       }
-      const validation = await callGuard({ operation: "project", conversationId });
+      const validation = await validateCurrentProject(conversationId, state);
       if (validation.output) appendOutput(state, validation.output);
       await applyRepairedFiles(conversationId, state, validation.repairedFiles);
     }
@@ -666,8 +715,11 @@ export async function restoreStreamingRuntime(
   actions: ArtifactAction[],
 ) {
   const state = getState(conversationId);
-  if ((state.files && Object.keys(state.files).length > 0) || actions.length === 0) return;
-
+  if (state.restoreQueued || Object.keys(state.files).length > 0 || actions.length === 0) return;
+  state.restoreQueued = true;
+  // Restoration and live AI file/shell actions share one queue. Nothing starts
+  // before persisted project files have been written to Vivari.
+  const restoreTask = state.queue.then(async () => {
   state.active = true;
   state.progress = "restoring";
   state.error = null;
@@ -694,6 +746,7 @@ export async function restoreStreamingRuntime(
     const fileActions = safeNonSupabase.filter((action) => action.type === "file");
     await writeFiles(wc, fileActions);
     appendOutput(state, `Restored ${fileActions.length} project files.\n`);
+    await ensureProjectScaffold(conversationId, state);
 
     await syncSupabaseRuntime(conversationId).catch(() => false);
 
@@ -705,7 +758,7 @@ export async function restoreStreamingRuntime(
       await ensureDependencies(conversationId, state);
     }
 
-    const validation = await callGuard({ operation: "project", conversationId });
+    const validation = await validateCurrentProject(conversationId, state);
     if (validation.output) appendOutput(state, validation.output);
     await applyRepairedFiles(conversationId, state, validation.repairedFiles);
 
@@ -723,12 +776,17 @@ export async function restoreStreamingRuntime(
     }
   } catch (error) {
     state.active = false;
+    state.restoreQueued = false;
     setError(state, error);
   }
+  });
+  state.queue = restoreTask;
+  await restoreTask;
 }
 
 export async function restartStreamingRuntime(conversationId: string) {
   const state = getState(conversationId);
+  await state.queue;
   state.active = true;
   state.progress = "starting";
   state.error = null;
@@ -738,7 +796,8 @@ export async function restartStreamingRuntime(conversationId: string) {
   try {
     await ensureContainer(conversationId, state);
     await syncSupabaseRuntime(conversationId).catch(() => false);
-    const validation = await callGuard({ operation: "project", conversationId });
+    await ensureProjectScaffold(conversationId, state);
+    const validation = await validateCurrentProject(conversationId, state);
     if (validation.output) appendOutput(state, validation.output);
     await applyRepairedFiles(conversationId, state, validation.repairedFiles);
     await ensureDependencies(conversationId, state);
@@ -768,9 +827,11 @@ export async function refreshStreamingRuntimeLogs(conversationId: string) {
 
 export async function buildStreamingRuntime(conversationId: string) {
   const state = getState(conversationId);
+  await state.queue;
   const wc = await ensureContainer(conversationId, state);
   await syncSupabaseRuntime(conversationId).catch(() => false);
-  const validation = await callGuard({ operation: "project", conversationId });
+  await ensureProjectScaffold(conversationId, state);
+  const validation = await validateCurrentProject(conversationId, state);
   if (validation.output) appendOutput(state, validation.output);
   await applyRepairedFiles(conversationId, state, validation.repairedFiles);
   await ensureDependencies(conversationId, state);
