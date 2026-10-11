@@ -137,6 +137,21 @@
     if (!active) clearHover();
   }
 
+  // Vite compilation errors render an overlay rather than throwing window.error.
+  // Detect it inside the generated page and forward the actual diagnostic.
+  let lastViteDiagnostic = '';
+  function checkViteOverlay() {
+    const viteOverlay = document.querySelector('vite-error-overlay');
+    if (!viteOverlay) { lastViteDiagnostic = ''; return; }
+    const message = (viteOverlay.shadowRoot && viteOverlay.shadowRoot.textContent || viteOverlay.textContent || 'Vite failed to compile the page').trim().slice(0, 4000);
+    if (message === lastViteDiagnostic) return;
+    lastViteDiagnostic = message;
+    post('PREVIEW_UNCAUGHT_EXCEPTION', { message: 'Vite compile error: ' + message });
+  }
+  const viteObserver = new MutationObserver(checkViteOverlay);
+  viteObserver.observe(document.documentElement, { subtree: true, childList: true });
+  checkViteOverlay();
+
   // Surface uncaught preview errors in the builder's runtime log.
   window.addEventListener('error', function (event) {
     post('PREVIEW_UNCAUGHT_EXCEPTION', {

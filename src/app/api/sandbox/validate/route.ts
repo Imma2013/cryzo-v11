@@ -5,6 +5,7 @@ import { api } from "../../../../../convex/_generated/api";
 import type { Id } from "../../../../../convex/_generated/dataModel";
 import type { ArtifactAction, FileMap } from "@/lib/workspace/types";
 import { projectReadinessIssues } from "@/lib/workspace/project-scaffold";
+import { analyzeProject } from "@/lib/workspace/project-integrity";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -220,8 +221,11 @@ export async function POST(req: Request) {
         files[filePath] = { type: "file", content: file.content };
       }
       const issues = projectReadinessIssues(files, body.command);
-      if (issues.length) throw new Error(issues.join(" "));
-      return Response.json({ repairedFiles: [], output: "Project files validated.\n", repaired: false });
+      const diagnostics = analyzeProject(files).diagnostics;
+      if (issues.length || diagnostics.length) {
+        throw new Error([...issues, ...diagnostics.map((d) => d.message)].slice(0, 15).join("\n"));
+      }
+      return Response.json({ repairedFiles: [], output: "Project syntax, imports and manifest validated.\n", repaired: false });
     }
 
     return Response.json({ error: "Unknown validation operation" }, { status: 400 });

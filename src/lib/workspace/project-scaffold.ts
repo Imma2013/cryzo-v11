@@ -17,7 +17,7 @@ export function isReactViteProject(files: FileMap) {
   );
 }
 
-/** Starter files are only a safety net; model-authored files always win. */
+/** A verified Vite baseline: add missing entry/config files without overwriting model files. */
 const REACT_VITE_TEMPLATE: Record<string, string> = {
   "package.json": JSON.stringify({
     name: "cryzo-generated-app", version: "1.0.0", private: true, type: "module",
@@ -34,7 +34,7 @@ const REACT_VITE_TEMPLATE: Record<string, string> = {
 };
 
 export function missingReactViteScaffold(files: FileMap): ScaffoldFile[] {
-  if (hasFile(files, "package.json") || !isReactViteProject(files)) return [];
+  if (!isReactViteProject(files)) return [];
   return Object.entries(REACT_VITE_TEMPLATE)
     .filter(([path]) => !hasFile(files, path))
     .map(([path, content]) => ({ path, content }));

@@ -212,6 +212,7 @@ ${requiredFormat}
 ### Universal build rules
 1. ALWAYS wrap runnable code in <cryzoArtifact>.
 2. For a new Node/React project, package.json MUST be the first file, with a working dev script and every dependency used by the emitted components. Do not emit npm install or a start action unless that complete manifest has been written first. Cryzo validates the file tree before running it.
+2a. NEVER import an npm package without declaring it in the manifest. NEVER reference a local component or asset without creating the file. Keep Tailwind v3 PostCSS (tailwindcss plugin) and Tailwind v4 PostCSS (@tailwindcss/postcss plugin) configurations version-matched. Do not hide a Vite error overlay; fix its actual cause.
 3. For a new TypeScript project, include tsconfig.json at the root.
 4. Follow the Project Target section above. Never substitute a web stack for a mobile target or a mobile stack for a web target.
 5. New projects include npm install and finish with the target-appropriate start action shown above.

@@ -1,5 +1,6 @@
 import type { ArtifactAction, FileMap } from "./types";
 import { missingReactViteScaffold, projectReadinessIssues } from "./project-scaffold";
+import { analyzeProject } from "./project-integrity";
 import type { ProgressStage } from "./action-runner";
 import {
   collectDirectoryFiles,
@@ -34,6 +35,8 @@ type RuntimeState = StreamingRuntimeSnapshot & {
   queue: Promise<void>;
   initialized: boolean;
   restoreQueued: boolean;
+  blockedMessageId: string | null;
+  verifiedBuild: string | null;
   devProcess: KillableProcess | null;
   startCommand: string | null;
   installedPackageJson: string | null;
@@ -70,6 +73,8 @@ function createState(): RuntimeState {
     queue: Promise.resolve(),
     initialized: false,
     restoreQueued: false,
+    blockedMessageId: null,
+    verifiedBuild: null,
     devProcess: null,
     startCommand: null,
     installedPackageJson: null,
@@ -126,6 +131,7 @@ function updateFileMap(state: RuntimeState, action: ArtifactAction) {
   if (action.type !== "file" || !action.filePath) return;
   const filePath = action.filePath.replace(/^\.\//, "").replace(/^\/+/, "");
   state.files[filePath] = { type: "file", content: action.content };
+  state.verifiedBuild = null;
   const parts = filePath.split("/");
   for (let i = 1; i < parts.length; i++) {
     const dir = parts.slice(0, i).join("/");
@@ -230,6 +236,8 @@ async function ensureContainer(conversationId: string, state: RuntimeState) {
     previous.previewUrl = null;
     previous.initialized = false;
     previous.restoreQueued = false;
+    previous.blockedMessageId = null;
+    previous.verifiedBuild = null;
     previous.files = {}; // Vivari has one project directory: it will be cleared on switch.
     previous.installedPackageJson = null;
     previous.installedRequirements = null;
@@ -248,6 +256,7 @@ async function ensureContainer(conversationId: string, state: RuntimeState) {
     wc.on("server-ready", (_port, url) => {
       if (activeConversationId !== conversationId) return;
       clearServerReadyTimer(state);
+      if (state.progress === "error") return;
       state.previewUrl = url;
       state.progress = "ready";
       state.error = null;
@@ -267,10 +276,10 @@ async function ensureContainer(conversationId: string, state: RuntimeState) {
         message.type === "PREVIEW_UNHANDLED_REJECTION"
           ? "Unhandled promise rejection"
           : "Uncaught preview exception";
-      appendOutput(
-        state,
-        `\n${title}: ${message.message || "Unknown error"}${message.stack ? `\n${message.stack}` : ""}\n`,
-      );
+      const detail = `${title}: ${message.message || "Unknown error"}${message.stack ? `\n${message.stack}` : ""}`;
+      appendOutput(state, `\n${detail}\n`);
+      state.error = detail;
+      state.progress = "error";
       emit(state);
     });
   }
@@ -313,7 +322,7 @@ async function ensureProjectScaffold(conversationId: string, state: RuntimeState
   await writeFiles(wc, actions);
   for (const action of actions) updateFileMap(state, action);
   state.installedPackageJson = null;
-  appendOutput(state, `\nRestored ${missing.length} missing React/Vite starter files (including package.json).\n`);
+  appendOutput(state, `\nRestored ${missing.length} missing React/Vite starter files without overwriting generated code.\n`);
   emit(state);
 }
 
@@ -379,8 +388,52 @@ async function ensurePythonDependencies(conversationId: string, state: RuntimeSt
   state.installedRequirements = requirements;
 }
 
+/** Reconcile known packages before npm runs; surface every remaining unresolved import. */
+async function ensureProjectIntegrity(conversationId: string, state: RuntimeState) {
+  const analysis = analyzeProject(state.files, true);
+  if (analysis.repairedFiles.length) {
+    const wc = await ensureContainer(conversationId, state);
+    const actions: ArtifactAction[] = analysis.repairedFiles.map(({ path, content }) => ({
+      type: "file", filePath: path, content,
+    }));
+    await writeFiles(wc, actions);
+    for (const action of actions) updateFileMap(state, action);
+    state.installedPackageJson = null;
+    appendOutput(state, `\nReconciled ${actions.length} dependency/config file(s).\n`);
+    emit(state);
+  }
+  const remaining = analyzeProject(state.files).diagnostics;
+  if (remaining.length) throw new Error(`Project preflight failed:\n${remaining.slice(0, 12).map((d) => `- ${d.message}`).join("\n")}`);
+}
+
+/** Compile a Vite web app before claiming its dev-server preview is healthy. */
+async function verifyWebBuild(conversationId: string, state: RuntimeState) {
+  const json = packageJsonContent(state);
+  if (!json) return;
+  const pkg = JSON.parse(json) as { scripts?: Record<string, string> };
+  const build = pkg.scripts?.build?.trim();
+  if (!build || !/^(?:vite build|tsc(?:\s+[^&]+)?\s*&&\s*vite build)(?:\s|$)/.test(build)) return;
+  const fingerprint = JSON.stringify(Object.entries(state.files).filter(([, f]) => f.type === "file"));
+  if (state.verifiedBuild === fingerprint) return;
+  const wc = await ensureContainer(conversationId, state);
+  state.progress = "starting";
+  appendOutput(state, "\nChecking Vite production compilation before preview...\n");
+  emit(state);
+  let output = "";
+  const code = await runCommand(wc, "npm run build", (data) => {
+    output = (output + data).slice(-8000);
+    appendOutput(state, data);
+    emit(state);
+  });
+  if (code !== 0) {
+    throw new Error(`Generated project failed its Vite build (${code}).\n${output.slice(-4500)}`);
+  }
+  state.verifiedBuild = fingerprint;
+}
+
 async function ensureDependencies(conversationId: string, state: RuntimeState) {
   await ensureProjectScaffold(conversationId, state);
+  await ensureProjectIntegrity(conversationId, state);
   await ensurePythonDependencies(conversationId, state);
 
   const packageJson = packageJsonContent(state);
@@ -561,7 +614,10 @@ async function executeSandboxAction(
   }
 
   if (action.type === "shell") {
-    if (isInstallAction(action)) await ensureProjectScaffold(conversationId, state);
+    if (isInstallAction(action)) {
+      await ensureProjectScaffold(conversationId, state);
+      await ensureProjectIntegrity(conversationId, state);
+    }
     await assertRunnableProject(conversationId, state, action.content);
     state.progress = isInstallAction(action) ? "installing" : state.previewUrl ? "ready" : "writing";
     state.error = null;
@@ -589,6 +645,8 @@ async function executeSandboxAction(
   }
 
   await ensureDependencies(conversationId, state);
+  await validateCurrentProject(conversationId, state, action.content);
+  await verifyWebBuild(conversationId, state);
   await startDevServer(conversationId, state, action.content);
 }
 
@@ -638,7 +696,11 @@ export async function saveStreamingRuntimeFile(
 
   if (needsRestart) {
     const startCommand = state.startCommand || detectStartCommand(state);
-    if (startCommand) await startDevServer(conversationId, state, startCommand);
+    if (startCommand) {
+      await ensureDependencies(conversationId, state);
+      await verifyWebBuild(conversationId, state);
+      await startDevServer(conversationId, state, startCommand);
+    }
   }
 
   return {
@@ -655,6 +717,7 @@ export function processStreamingArtifactText(
   if (!text.includes("<cryzoArtifact")) return false;
 
   const state = getState(conversationId);
+  if (state.blockedMessageId === messageId) return true;
   if (!state.active) state.active = true;
   state.error = null;
 
@@ -679,8 +742,20 @@ export function processStreamingArtifactText(
 
   for (const action of newActions) {
     state.queue = state.queue
-      .then(() => executeSandboxAction(conversationId, state, action))
-      .catch((error) => setError(state, error));
+      .then(() => {
+        if (state.blockedMessageId === messageId) return; // Fail closed for dependent steps.
+        return executeSandboxAction(conversationId, state, action);
+      })
+      .catch((error) => {
+        if (state.blockedMessageId === messageId) return;
+        state.blockedMessageId = messageId;
+        setError(state, error);
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent("cryzo:project-repair-needed", {
+            detail: { conversationId, message: error instanceof Error ? error.message.slice(0, 3500) : String(error).slice(0, 3500) },
+          }));
+        }
+      });
   }
 
   return true;
@@ -768,6 +843,7 @@ export async function restoreStreamingRuntime(
       : null;
     const startCommand = explicitStart || detectStartCommand(state);
     if (startCommand) {
+      await verifyWebBuild(conversationId, state);
       await startDevServer(conversationId, state, startCommand);
     } else {
       state.progress = "idle";
@@ -796,11 +872,11 @@ export async function restartStreamingRuntime(conversationId: string) {
   try {
     await ensureContainer(conversationId, state);
     await syncSupabaseRuntime(conversationId).catch(() => false);
-    await ensureProjectScaffold(conversationId, state);
+    await ensureDependencies(conversationId, state);
     const validation = await validateCurrentProject(conversationId, state);
     if (validation.output) appendOutput(state, validation.output);
     await applyRepairedFiles(conversationId, state, validation.repairedFiles);
-    await ensureDependencies(conversationId, state);
+    await verifyWebBuild(conversationId, state);
 
     const startCommand = state.startCommand || detectStartCommand(state);
     if (!startCommand) throw new Error("No dev/start script found in package.json");
@@ -830,11 +906,10 @@ export async function buildStreamingRuntime(conversationId: string) {
   await state.queue;
   const wc = await ensureContainer(conversationId, state);
   await syncSupabaseRuntime(conversationId).catch(() => false);
-  await ensureProjectScaffold(conversationId, state);
+  await ensureDependencies(conversationId, state);
   const validation = await validateCurrentProject(conversationId, state);
   if (validation.output) appendOutput(state, validation.output);
   await applyRepairedFiles(conversationId, state, validation.repairedFiles);
-  await ensureDependencies(conversationId, state);
 
   const packageJson = packageJsonContent(state);
   if (!packageJson) throw new Error("Project has no package.json to build");

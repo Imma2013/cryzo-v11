@@ -123,6 +123,8 @@ export function ChatArea({
   const savedArtifactsRef = useRef<Set<string>>(new Set());
   const liveMessageIdsRef = useRef<Set<string>>(new Set());
   const openedStreamingMessagesRef = useRef<Set<string>>(new Set());
+  const repairAttemptsRef = useRef({ conversationId, count: 0 });
+  const [pendingProjectRepair, setPendingProjectRepair] = useState<string | null>(null);
 
   const { messages, setMessages, sendMessage, stop, status, error } = useChat({
     id: conversationId,
@@ -571,7 +573,38 @@ export function ChatArea({
     [authToken, chatMode, modelSelection, runLocalModel, sendMessage],
   );
 
+  // Errors from generated code are not requests to continue blindly. Give the
+  // currently selected model up to two bounded, explicit repair opportunities.
+  useEffect(() => {
+    repairAttemptsRef.current = { conversationId, count: 0 };
+    setPendingProjectRepair(null);
+    const onRepair = (event: Event) => {
+      const detail = (event as CustomEvent<{ conversationId: string; message: string }>).detail;
+      if (!detail || detail.conversationId !== String(conversationId)) return;
+      if (repairAttemptsRef.current.count >= 2) return;
+      setPendingProjectRepair(detail.message.slice(0, 3500));
+    };
+    window.addEventListener("cryzo:project-repair-needed", onRepair);
+    return () => window.removeEventListener("cryzo:project-repair-needed", onRepair);
+  }, [conversationId]);
+
+  useEffect(() => {
+    if (!pendingProjectRepair || status === "streaming" || status === "submitted" || localLoading) return;
+    if (repairAttemptsRef.current.count >= 2) { setPendingProjectRepair(null); return; }
+    repairAttemptsRef.current.count += 1;
+    const attempt = repairAttemptsRef.current.count;
+    const diagnostic = pendingProjectRepair;
+    setPendingProjectRepair(null);
+    void sendPreparedMessage(
+      `Automatic project repair (attempt ${attempt} of 2). The generated application failed validation:\n\n${diagnostic}\n\nFix the underlying cause by inspecting the affected files, dependencies, and imports. Preserve existing application behavior. Emit only complete changed file actions; update package.json when needed. Do not invent package names. Finish with npm install only when dependencies change, and a correct start action.`,
+      [],
+      "build",
+    ).catch((reason) => setLocalError(reason instanceof Error ? reason.message : String(reason)));
+  }, [pendingProjectRepair, status, localLoading, sendPreparedMessage]);
+
   const handleSend = async (files: File[] = []) => {
+    repairAttemptsRef.current.count = 0;
+    setPendingProjectRepair(null);
     if (!input.trim() && files.length === 0) return;
     let text = input.trim();
 

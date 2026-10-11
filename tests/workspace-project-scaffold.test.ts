@@ -21,7 +21,9 @@ describe("React/Vite restoration", () => {
 
   it("never replaces a model-authored manifest", () => {
     const files = { ...reactFiles(), "package.json": { type: "file" as const, content: '{"scripts":{"dev":"next dev"}}' } };
-    expect(missingReactViteScaffold(files)).toEqual([]);
+    const missing = missingReactViteScaffold(files);
+    expect(missing.some((file) => file.path === "package.json")).toBe(false);
+    expect(missing.some((file) => file.path === "src/App.tsx")).toBe(false);
     expect(projectReadinessIssues(files, "npm run dev")).toEqual([]);
   });
 
