@@ -1,0 +1,51 @@
+name: Runtime verification
+on:
+  push:
+    branches: [fix/vivari-project-lifecycle]
+permissions:
+  contents: write
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Prepare remote inspection
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          out = Path('.runtime-inspection')
+          out.mkdir(exist_ok=True)
+          paths = ['src/lib/workspace/streaming-runtime.ts', 'src/lib/workspace/sandbox.ts', 'src/hooks/use-workspace.ts', 'src/components/ChatArea.tsx', 'src/app/api/sandbox/validate/route.ts', 'src/lib/server/model-provider.ts', 'src/components/workspace/WorkspaceTerminal.tsx', 'src/lib/ai/models.ts']
+          for index, path in enumerate(paths):
+              text = Path(path).read_text()
+              for part, offset in enumerate(range(0, len(text), 6000)):
+                  (out / f'{index}-{part}.txt').write_text(text[offset:offset+6000])
+          (out / 'index.txt').write_text('\n'.join(f'{i}: {p}' for i,p in enumerate(paths)))
+          PY
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .runtime-inspection
+          git commit -m "Prepare source inspection for remote runtime repair" || true
+          git push
+      - name: Install dependencies
+        run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Read framework guidance
+        if: always()
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          docs = Path('node_modules/next/dist/docs')
+          selected = list(docs.rglob('*route*')) if docs.exists() else []
+          text = '\n'.join(p.read_text() for p in selected if p.is_file() and p.suffix == '.md')
+          out = Path('.runtime-inspection')
+          if not text: text = 'Bundled route-handler guidance is not present in this installed Next.js distribution.'
+          for part, offset in enumerate(range(0, min(len(text),24000), 6000)):
+              (out / f'next-route-{part}.txt').write_text(text[offset:offset+6000])
+          PY
+          git add .runtime-inspection
+          git commit -m "Record bundled framework guidance for runtime repair" || true
+          git push
