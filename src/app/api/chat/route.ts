@@ -13,6 +13,8 @@ import { ConvexHttpClient } from "convex/browser";
 import { after } from "next/server";
 import { checkpointGenerationStream } from "@/lib/server/background-generation";
 import { planWebsiteDesign, auditWebsiteDraft } from "@/lib/server/design-quality";
+import { planDatabaseBeforeFrontend, verifiedBackendContext } from "@/lib/server/database-first";
+import type { CryzoCloudResources } from "@/lib/ai/cryzo-cloud-resources";
 import { CANONICAL_DESIGN_LIBRARY_PATH, getDesignReferenceLibrary, routeDesignReferences } from "@/lib/server/design-reference-library";
 import { buildCanonicalDesignPreamble, buildCompiledReferenceBlock } from "@/lib/server/design-guidance";
 import { api } from "../../../../convex/_generated/api";
@@ -267,6 +269,75 @@ export async function POST(req: Request) {
       }
     }
 
+    // Database first: establish and verify Convex tables and sample records
+    // before generating any frontend files. Subsequent edits reuse the data.
+    let verifiedBackendBlock = "";
+    let hasVerifiedBackendEntities = false;
+    let confirmedBackendResources: CryzoCloudResources = { entities: [], authProviders: [], functions: [] };
+    if (mode === "build" && conversationId && authenticatedConvex && cryzoCloudAppId) {
+      try {
+        let overview = await authenticatedConvex.query(api.cloudAdmin.getOverview, { conversationId: conversationId as any });
+        const modifyingBackend = (backendRequirements.database && /\b(add|create|modify|change|update|new|extend|migrate|seed)\b/i.test(lastUserText)) ||
+          /\b(add|create|build|implement)\b[\s\S]{0,70}\b(form|applications?|comments?|reviews?|orders?|favorites?|profiles?|accounts?|bookings?)\b/i.test(lastUserText);
+        if ((!overview.entities.length && !currentProjectContext.trim()) || modifyingBackend) {
+          const existing = overview.entities.map((entity) => ({ name: entity.name, fields: entity.fields, access: entity.access }));
+          const planned = await planDatabaseBeforeFrontend({
+            model: resolved.model,
+            prompt: existing.length ? `${lastUserText}\nExisting entities (preserve existing unrelated data): ${JSON.stringify(existing)}` : lastUserText,
+          });
+          if (backendRequirements.database && !planned.entities.length && !overview.entities.length) {
+            throw new Error("The selected model did not define a valid database schema");
+          }
+          if (planned.entities.length) {
+            const previousCounts = new Map(overview.entities.map((entity) => [entity.name, entity.recordCount]));
+            await authenticatedConvex.mutation(api.cloudAdmin.configureFromPublish, {
+              conversationId: conversationId as any,
+              name: planned.name,
+              authProviders: planned.authProviders,
+              entities: planned.entities.map((e) => {
+                const existingEntity = overview.entities.find((item) => item.name === e.name);
+                return {
+                  name: e.name,
+                  // A follow-up feature may add fields but cannot erase old
+                  // schema fields or change access for existing users.
+                  fields: { ...((existingEntity?.fields || {}) as Record<string, string>), ...e.fields },
+                  access: existingEntity?.access || e.access,
+                  seed: existingEntity ? [] : e.seed,
+                };
+              }),
+            });
+            overview = await authenticatedConvex.query(api.cloudAdmin.getOverview, { conversationId: conversationId as any });
+            for (const entity of planned.entities) {
+              const confirmed = overview.entities.find((e) => e.name === entity.name);
+              const priorCount = previousCounts.get(entity.name) || 0;
+              const requiredCount = previousCounts.has(entity.name) ? priorCount : entity.seed.length;
+              if (!confirmed || confirmed.recordCount < requiredCount) {
+                throw new Error(`Schema/seed verification failed for ${entity.name}`);
+              }
+            }
+          }
+        }
+        if (overview.entities.length) {
+          hasVerifiedBackendEntities = true;
+          confirmedBackendResources = {
+            entities: overview.entities.map((e) => ({ name: e.name, fields: e.fields, access: e.access })),
+            authProviders: overview.app?.authProviders || ["password"], functions: [],
+          };
+          verifiedBackendBlock = verifiedBackendContext({
+            name: overview.app?.name || "Cryzo app",
+            authProviders: confirmedBackendResources.authProviders.filter((p): p is "password" | "google" => p === "password" || p === "google"),
+            entities: overview.entities.map((e) => ({ name: e.name, fields: (e.fields || {}) as Record<string, string>, access: e.access, seed: [] })),
+          }, cryzoCloudAppId);
+          verifiedBackendBlock += `\nVerified live record counts: ${JSON.stringify(overview.entities.map((e) => ({ name: e.name, count: e.recordCount })))}\n`;
+        }
+      } catch (error) {
+        console.error("[Cryzo Cloud] database-first provisioning failed", error);
+        return Response.json({ error: "backend_setup_failed", message: error instanceof Error ? error.message : "Database setup failed" }, { status: 422 });
+      }
+    } else if (mode === "build" && backendRequirements.database && !authenticatedConvex) {
+      return Response.json({ error: "authentication_required", message: "Sign in to create the app database" }, { status: 401 });
+    }
+
     const syncGeneratedCloudResources = async (text: string) => {
       const resources = parseCryzoCloudResources(text);
       if (!conversationId || !authenticatedConvex) return resources;
@@ -281,7 +352,7 @@ export async function POST(req: Request) {
         await authenticatedConvex.mutation(api.cloudAdmin.configureFromPublish, {
           conversationId: conversationId as any,
           name: resources.name?.trim() || `Cryzo app ${conversationId.slice(-6)}`,
-          entities: resources.entities.map((entity) => ({
+          entities: (hasVerifiedBackendEntities ? [] : resources.entities).map((entity) => ({
             name: entity.name,
             fields: entity.fields,
             access: entity.access,
@@ -415,6 +486,7 @@ export async function POST(req: Request) {
         cryzoCloudAppId,
       }) +
       backendRequirementPrompt(backendRequirements) +
+      verifiedBackendBlock +
       currentProjectContext +
       layoutPlan +
       mcpPrompt;
@@ -473,6 +545,9 @@ export async function POST(req: Request) {
         },
         execute: async ({ writer }) => {
           writer.write({ type: "text-start", id: textId });
+          if (hasVerifiedBackendEntities) {
+            writer.write({ type: "text-delta", id: textId, delta: `✓ Cryzo Cloud database ready: ${confirmedBackendResources.entities.map((entity) => entity.name).join(", ")}. Building the application against the verified schema.\n\n` });
+          }
 
           let continuationMessages: any[] = [...modelMessages];
           let fullText = "";
@@ -510,7 +585,7 @@ export async function POST(req: Request) {
           }
 
           let resources = parseCryzoCloudResources(fullText);
-          const missing = missingBackendRequirements(backendRequirements, resources);
+          const missing = missingBackendRequirements(backendRequirements, { ...resources, entities: [...confirmedBackendResources.entities, ...resources.entities], authProviders: [...new Set([...confirmedBackendResources.authProviders, ...resources.authProviders])] });
           if (missing.length && cryzoCloudAppId) {
             const repair = streamText({
               model: resolved.model,
@@ -568,7 +643,7 @@ export async function POST(req: Request) {
             }
           }
           await syncGeneratedCloudResources(fullText);
-          const stillMissing = missingBackendRequirements(backendRequirements, resources);
+          const stillMissing = missingBackendRequirements(backendRequirements, { ...resources, entities: [...confirmedBackendResources.entities, ...resources.entities], authProviders: [...new Set([...confirmedBackendResources.authProviders, ...resources.authProviders])] });
           if (stillMissing.length && cryzoCloudAppId) {
             throw new Error(
               `Cryzo Cloud backend setup is incomplete: ${stillMissing.join(", ")}. Retry this build so Cryzo can finish the backend resources.`,

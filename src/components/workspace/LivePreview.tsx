@@ -96,7 +96,7 @@ export function LivePreview({
   useEffect(() => {
     const failed = (event: ErrorEvent | PromiseRejectionEvent) => {
       const detail = "message" in event ? event.message : String(event.reason || "");
-      if (/FetchEvent\.respondWith|Load failed|ServiceWorker.*failed/i.test(detail)) {
+      if (/FetchEvent\.respondWith|ServiceWorker.*failed/i.test(detail)) {
         window.dispatchEvent(new Event("cryzo:preview-transport-failed"));
       }
     };

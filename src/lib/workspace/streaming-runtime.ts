@@ -1,5 +1,6 @@
 import type { ArtifactAction, FileMap } from "./types";
 import { missingReactViteScaffold, projectReadinessIssues } from "./project-scaffold";
+import { canReuseLivePreview } from "./preview-lifecycle";
 import { analyzeProject } from "./project-integrity";
 import type { ProgressStage } from "./action-runner";
 import {
@@ -873,7 +874,7 @@ export async function restoreStreamingRuntime(
 const recoveringConversations = new Set<string>();
 
 /** Return from Safari background: revive the dev process, or restore persisted files. */
-export async function recoverStreamingRuntime(conversationId: string, savedActions: ArtifactAction[]) {
+export async function recoverStreamingRuntime(conversationId: string, savedActions: ArtifactAction[], forceTransportRecovery = false) {
   if (recoveringConversations.has(conversationId)) return;
   const state = getState(conversationId);
   if (state.progress === "writing" || state.progress === "installing") return;
@@ -896,6 +897,17 @@ export async function recoverStreamingRuntime(conversationId: string, savedActio
         new Promise<never>((_, reject) => setTimeout(() => reject(new Error("Vivari filesystem did not respond")), 7000)),
       ]);
       if (!hasManifest && state.files["package.json"]?.type === "file") throw new Error("Vivari project storage was lost");
+      // Bolt-style stable preview: a responsive filesystem and an existing
+      // running dev-server process are NOT grounds for a restart. Keep the
+      // iframe URL, JavaScript state, scroll position, and HMR connection.
+      if (forceTransportRecovery) throw new Error("Preview Service Worker transport failed");
+      if (canReuseLivePreview({
+        previewUrl: state.previewUrl,
+        hasProcess: !!state.devProcess,
+        filesystemHealthy: !!hasManifest || state.files["package.json"]?.type !== "file",
+      })) return;
+      // Only a missing server (or a genuinely lost preview URL) needs a new
+      // process. The process was not restarted merely because Safari focused.
       await restartStreamingRuntime(conversationId);
     } catch (error) {
       appendOutput(state, `\nPreview transport failed; restoring saved project: ${String(error)}\n`);

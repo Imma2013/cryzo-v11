@@ -51,13 +51,13 @@ export function useWorkspace(conversationId: Id<"conversations">) {
   }, [artifacts, authLoading, authToken, isAuthenticated, runtimeId]);
 
   useEffect(() => {
-    const resume = () => {
+    const resume = (forceTransportRecovery = false) => {
       if (document.visibilityState !== "visible" || recoveryPending.current || !artifacts?.length) return;
       // Distinguish brief transitions from a long, potentially killed browser kernel.
       if (hiddenAt.current === null || Date.now() - hiddenAt.current < 1200) return;
       hiddenAt.current = null;
       recoveryPending.current = true;
-      void recoverStreamingRuntime(runtimeId, artifacts.flatMap((a) => a.actions))
+      void recoverStreamingRuntime(runtimeId, artifacts.flatMap((a) => a.actions), forceTransportRecovery)
         .catch((error) => console.warn("Cryzo preview recovery failed", error))
         .finally(() => { recoveryPending.current = false; });
     };
@@ -71,7 +71,7 @@ export function useWorkspace(conversationId: Id<"conversations">) {
     };
     document.addEventListener("visibilitychange", onVisibility);
     window.addEventListener("pageshow", onPageShow);
-    const onTransportFailure = () => { hiddenAt.current = Date.now() - 1500; resume(); };
+    const onTransportFailure = () => { hiddenAt.current = Date.now() - 1500; resume(true); };
     window.addEventListener("cryzo:preview-transport-failed", onTransportFailure);
     return () => {
       document.removeEventListener("visibilitychange", onVisibility);

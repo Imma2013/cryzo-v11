@@ -28,6 +28,8 @@ export const configureFromPublish = mutation({
         name: v.string(),
         fields: v.optional(v.any()),
         access: v.optional(accessValidator),
+        // The database-first planner supplies fictional demo records only.
+        seed: v.optional(v.array(v.any())),
       }),
     ),
   },
@@ -64,6 +66,7 @@ export const configureFromPublish = mutation({
       });
     }
 
+    let seededRecords = 0;
     for (const entity of args.entities) {
       const name = entity.name.trim();
       if (!name) continue;
@@ -80,6 +83,29 @@ export const configureFromPublish = mutation({
       };
       if (existing) await ctx.db.patch(existing._id, value);
       else await ctx.db.insert("cloudEntitySchemas", { ...value, createdAt: now });
+      // Seed exactly once, in the same Convex transaction that applies the
+      // schema. Subsequent edits/retries must NEVER duplicate or erase records.
+      if (entity.seed?.length) {
+        if (entity.seed.length > 6) throw new Error(`Too many sample records for ${name}`);
+        if (entity.access === "private") throw new Error(`Cannot seed private ${name} records without an owner`);
+        const prior = await ctx.db.query("cloudRecords")
+          .withIndex("by_app_entity", (q) => q.eq("appId", appId).eq("entityName", name))
+          .take(1);
+        if (prior.length === 0) {
+          const fieldNames = new Set(Object.keys(entity.fields && typeof entity.fields === "object" ? entity.fields : {}));
+          for (const record of entity.seed) {
+            if (!record || typeof record !== "object" || Array.isArray(record) ||
+                Object.keys(record).some((field) => !fieldNames.has(field)) ||
+                JSON.stringify(record).length > 5000) {
+              throw new Error(`Invalid seed record for ${name}`);
+            }
+            await ctx.db.insert("cloudRecords", {
+              appId, entityName: name, data: record, createdAt: now, updatedAt: now,
+            });
+            seededRecords++;
+          }
+        }
+      }
     }
 
     return {
@@ -87,6 +113,7 @@ export const configureFromPublish = mutation({
       name: args.name,
       authProviders: requestedProviders || app?.authProviders || ["password"],
       entitiesConfigured: args.entities.length,
+      seededRecords,
     };
   },
 });
