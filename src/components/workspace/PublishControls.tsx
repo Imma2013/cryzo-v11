@@ -19,7 +19,6 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { FileMap } from "@/lib/workspace/types";
-import { mobileSourceFiles } from "@/lib/workspace/mobile-source-files";
 import {
   readDeveloperToken,
   readSupabaseProject,
@@ -575,7 +574,7 @@ function DeployPublishModal({
       body: JSON.stringify({
         operation,
         conversationId,
-        sourceFiles: includeSource ? mobileSourceFiles(files) : undefined,
+        sourceFiles: includeSource ? files : undefined,
         expoToken,
         expoAccount,
         appName: mobileAppName,
