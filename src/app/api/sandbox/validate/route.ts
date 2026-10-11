@@ -224,8 +224,9 @@ export async function POST(req: Request) {
       const repairedFiles: Array<{ path: string; content: string }> = [];
       for (const file of body.projectFiles) {
         const filePath = safeRelativePath(file.path);
-        const cleaned = removeUnusedGeneratedImports(filePath, files[filePath].content);
-        if (cleaned !== files[filePath].content) {
+        const originalContent = files[filePath]?.content || "";
+        const cleaned = removeUnusedGeneratedImports(filePath, originalContent);
+        if (cleaned !== originalContent) {
           files[filePath] = { type: "file", content: cleaned };
           repairedFiles.push({ path: filePath, content: cleaned });
         }
