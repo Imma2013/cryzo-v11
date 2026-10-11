@@ -35,10 +35,12 @@ function WorkspaceDashboardContent({
   conversationId,
   children,
   onOpenCode,
+  onRequestBackend,
 }: {
   conversationId: Id<"conversations">;
   children?: ReactNode;
   onOpenCode?: () => void;
+  onRequestBackend?: () => void;
 }) {
   const { authToken, isAuthenticated, isLoading: authLoading } = useAuth();
   const ready = !authLoading && isAuthenticated && Boolean(authToken);
@@ -249,8 +251,10 @@ function WorkspaceDashboardContent({
         {entities.length === 0 ? (
           <div className="mt-6 rounded-2xl border border-dashed border-zinc-800 py-16 text-center">
             <Database className="mx-auto text-zinc-700" size={30} />
-            <p className="mt-3 text-sm font-medium text-zinc-300">No data tables yet</p>
-            <p className="mt-1 text-xs text-zinc-600">Ask Cryzo to add a database or persistent data. Tables appear here as part of the build.</p>
+            <p className="mt-3 text-sm font-medium text-zinc-300">Database not configured</p>
+            <p className="mx-auto mt-2 max-w-sm text-xs leading-5 text-zinc-500">No app data tables exist yet. Cryzo can create and seed the tables needed by this project without replacing your current files.</p>
+            <button type="button" onClick={() => onRequestBackend?.()} disabled={!onRequestBackend}
+              className="mt-5 rounded-xl bg-white px-4 py-2 text-sm font-semibold text-black disabled:opacity-50">Create database tables</button>
           </div>
         ) : (
           <div className="mt-6 grid min-h-0 gap-4 lg:grid-cols-[240px_minmax(0,1fr)]">
@@ -374,6 +378,7 @@ export function WorkspaceDashboard(props: {
   conversationId: Id<"conversations">;
   children?: ReactNode;
   onOpenCode?: () => void;
+  onRequestBackend?: () => void;
 }) {
   return (
     <DashboardBoundary>

@@ -6,6 +6,8 @@ import type { Id } from "../../../../../convex/_generated/dataModel";
 import type { ArtifactAction, FileMap } from "@/lib/workspace/types";
 import { projectReadinessIssues } from "@/lib/workspace/project-scaffold";
 import { analyzeProject } from "@/lib/workspace/project-integrity";
+import { localExportContractIssues } from "@/lib/server/cross-file-contracts";
+import { offDomainGeneratedPaths } from "@/lib/server/project-intent";
 import { removeUnusedGeneratedImports } from "@/lib/server/generated-import-hygiene";
 
 export const runtime = "nodejs";
@@ -183,6 +185,7 @@ export async function POST(req: Request) {
       action?: ArtifactAction;
       actions?: ArtifactAction[];
       projectFiles?: Array<{ path: string; content: string }>;
+      projectIntent?: string;
       command?: string;
     };
 
@@ -233,8 +236,13 @@ export async function POST(req: Request) {
       }
       const issues = projectReadinessIssues(files, body.command);
       const diagnostics = analyzeProject(files).diagnostics;
-      if (issues.length || diagnostics.length) {
-        throw new Error([...issues, ...diagnostics.map((d) => d.message)].slice(0, 15).join("\n"));
+      const missingExports = localExportContractIssues(files);
+      const unrelatedPaths = offDomainGeneratedPaths(body.projectIntent || "", Object.keys(files));
+      const domainErrors = unrelatedPaths.length ? [
+        `Project source is inconsistent with the user's bookstore request. Replace unrelated vehicle/automotive files: ${unrelatedPaths.join(", ")}. Do not add Vehicle types to make the wrong application compile.`,
+      ] : [];
+      if (issues.length || diagnostics.length || missingExports.length || domainErrors.length) {
+        throw new Error([...domainErrors, ...issues, ...diagnostics.map((d) => d.message), ...missingExports].slice(0, 20).join("\n"));
       }
       return Response.json({
         repairedFiles,

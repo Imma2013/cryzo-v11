@@ -14,6 +14,7 @@ import { after } from "next/server";
 import { checkpointGenerationStream } from "@/lib/server/background-generation";
 import { planWebsiteDesign, auditWebsiteDraft } from "@/lib/server/design-quality";
 import { planDatabaseBeforeFrontend, verifiedBackendContext } from "@/lib/server/database-first";
+import { isBookOrPublishingRequest, isAutomotiveRequest, mustProvisionCatalog, lockedUserDomainPrompt, offDomainGeneratedPaths } from "@/lib/server/project-intent";
 import type { CryzoCloudResources } from "@/lib/ai/cryzo-cloud-resources";
 import { CANONICAL_DESIGN_LIBRARY_PATH, getDesignReferenceLibrary, routeDesignReferences } from "@/lib/server/design-reference-library";
 import { buildCanonicalDesignPreamble, buildCompiledReferenceBlock } from "@/lib/server/design-guidance";
@@ -172,6 +173,17 @@ export async function POST(req: Request) {
       .filter((message) => message.role === "user")
       .pop();
     const lastUserText = messageText(lastUserMsg);
+    // Automatic compiler-repair prompts contain the *broken code* (e.g.
+    // Vehicle) rather than the actual user's app intent (e.g. bookstore).
+    // Recover the last human build request so repairs cannot import the wrong
+    // reference subject or skip provisioning the real project database.
+    const isAutomaticRepair = /automatic project repair|generated project failed|fix the underlying cause by inspecting/i.test(lastUserText);
+    const earlierUserRequests = messages.filter((message) => message.role === "user")
+      .map((message) => messageText(message))
+      .filter((text) => text.trim() && !/automatic project repair|generated project failed|fix the underlying cause by inspecting/i.test(text));
+    const projectIntent = isAutomaticRepair && earlierUserRequests.length
+      ? earlierUserRequests[earlierUserRequests.length - 1]
+      : lastUserText;
     const backendRequirements = backendRequirementsFromPrompt(lastUserText);
     const resolved = await resolveServerModel({
       providerId: modelProvider,
@@ -279,13 +291,21 @@ export async function POST(req: Request) {
         let overview = await authenticatedConvex.query(api.cloudAdmin.getOverview, { conversationId: conversationId as any });
         const modifyingBackend = (backendRequirements.database && /\b(add|create|modify|change|update|new|extend|migrate|seed)\b/i.test(lastUserText)) ||
           /\b(add|create|build|implement)\b[\s\S]{0,70}\b(form|applications?|comments?|reviews?|orders?|favorites?|profiles?|accounts?|bookings?)\b/i.test(lastUserText);
-        if ((!overview.entities.length && !currentProjectContext.trim()) || modifyingBackend) {
+        // An earlier frontend attempt must not prevent database recovery.
+        // Infer catalogs even when the request never literally says "database".
+        const missingRequiredCatalog = !overview.entities.length &&
+          (mustProvisionCatalog(projectIntent) ||
+            (isBookOrPublishingRequest(currentProjectContext) && !isAutomotiveRequest(projectIntent)) ||
+            /\b(create or repair|create database tables|create.*database first)\b/i.test(lastUserText));
+        if ((!overview.entities.length && !currentProjectContext.trim()) || missingRequiredCatalog || modifyingBackend) {
           const existing = overview.entities.map((entity) => ({ name: entity.name, fields: entity.fields, access: entity.access }));
           const planned = await planDatabaseBeforeFrontend({
             model: resolved.model,
-            prompt: existing.length ? `${lastUserText}\nExisting entities (preserve existing unrelated data): ${JSON.stringify(existing)}` : lastUserText,
+            prompt: existing.length
+              ? `${projectIntent}\nExisting entities (preserve existing unrelated data): ${JSON.stringify(existing)}`
+              : `${projectIntent}\n${isBookOrPublishingRequest(currentProjectContext) ? "Existing project is a BOOKSTORE. Create a Books catalog with realistic seed records, and any other needed publishing/shop tables. Do not create Vehicles, cars, or showroom collections." : ""}`,
           });
-          if (backendRequirements.database && !planned.entities.length && !overview.entities.length) {
+          if ((backendRequirements.database || missingRequiredCatalog) && !planned.entities.length && !overview.entities.length) {
             throw new Error("The selected model did not define a valid database schema");
           }
           if (planned.entities.length) {
@@ -334,8 +354,14 @@ export async function POST(req: Request) {
         console.error("[Cryzo Cloud] database-first provisioning failed", error);
         return Response.json({ error: "backend_setup_failed", message: error instanceof Error ? error.message : "Database setup failed" }, { status: 422 });
       }
-    } else if (mode === "build" && backendRequirements.database && !authenticatedConvex) {
-      return Response.json({ error: "authentication_required", message: "Sign in to create the app database" }, { status: 401 });
+    } else if (mode === "build" && (backendRequirements.database || mustProvisionCatalog(projectIntent)) &&
+      (!authenticatedConvex || !cryzoCloudAppId)) {
+      return Response.json({
+        error: authenticatedConvex ? "backend_unavailable" : "authentication_required",
+        message: authenticatedConvex
+          ? "Cryzo Cloud could not initialize this app's database. Please retry."
+          : "Sign in to create the app database",
+      }, { status: authenticatedConvex ? 503 : 401 });
     }
 
     const syncGeneratedCloudResources = async (text: string) => {
@@ -368,8 +394,15 @@ export async function POST(req: Request) {
     // Cryzo V5 selects one canonical visual system for EVERY web build,
     // based on product/industry/design-family signals, not only style words.
     const designIsWeb = resolvedProjectPlatforms.includes("web") && (mode === "build" || mode === "plan");
-    const designRouting = designIsWeb ? routeDesignReferences(lastUserText, 1) : null;
-    const selectedPrimaryReference = designRouting?.primary;
+    const designRouting = designIsWeb ? routeDesignReferences(projectIntent, 8) : null;
+    // Some V5 recipes are automotive product templates; a book request must
+    // never inherit automotive concepts just to reproduce the reference.
+    const requestedBooks = isBookOrPublishingRequest(projectIntent) && !isAutomotiveRequest(projectIntent);
+    const selectedPrimaryReference = requestedBooks
+      ? ([designRouting?.primary, ...(designRouting?.supporting || [])].filter(Boolean).find((reference) =>
+          reference && !/\b(vehicle|car|automotive|motorsport|supercar|hypercar|engine)\b/i.test(reference.profile.visualIntent) &&
+          !["cryzo-2", "cryzo-4", "cryzo-5"].includes(reference.slug)) || designRouting?.primary)
+      : designRouting?.primary;
     const selectedDesignReference = selectedPrimaryReference
       ? {
           slug: selectedPrimaryReference.slug,
@@ -489,7 +522,8 @@ export async function POST(req: Request) {
       verifiedBackendBlock +
       currentProjectContext +
       layoutPlan +
-      mcpPrompt;
+      mcpPrompt +
+      lockedUserDomainPrompt(projectIntent);
 
     let responseSessionId = composioSessionId;
     let response: Response;
@@ -640,6 +674,13 @@ export async function POST(req: Request) {
               }
             } catch (error) {
               console.warn("[Cryzo design] V5 reference audit unavailable", error);
+            }
+          }
+          if (requestedBooks) {
+            const generatedPaths = Array.from(fullText.matchAll(/<cryzoAction\b[^>]*filePath=["']([^"']+)["']/gi), (match) => match[1]);
+            const wrongDomain = offDomainGeneratedPaths(projectIntent, generatedPaths);
+            if (wrongDomain.length) {
+              throw new Error(`Generated code violates bookstore product requirements: ${wrongDomain.slice(0, 8).join(", ")}. Replace the unrelated vehicle/car components with book catalog components.`);
             }
           }
           await syncGeneratedCloudResources(fullText);

@@ -104,6 +104,15 @@ export function ChatArea({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const localAbortRef = useRef<AbortController | null>(null);
   const [input, setInput] = useState("");
+  useEffect(() => {
+    const onPrefill = (event: Event) => {
+      const detail = (event as CustomEvent<{ conversationId?: string; text?: string }>).detail;
+      if (detail?.conversationId === String(conversationId) && detail.text) setInput(detail.text);
+    };
+    window.addEventListener("cryzo:prefill-project-prompt", onPrefill);
+    return () => window.removeEventListener("cryzo:prefill-project-prompt", onPrefill);
+  }, [conversationId]);
+
   const [localLoading, setLocalLoading] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
   const [optimisticMode, setOptimisticMode] = useState<{
@@ -270,6 +279,9 @@ export function ChatArea({
 
     if (!liveMessageIdsRef.current.has(latestAssistant.id)) return;
 
+    const currentUserIntent = [...messages].reverse().find((message) => message.role === "user")
+      ?.parts?.filter((part) => part.type === "text")
+      .map((part) => part.text).join("\n") || "";
     let hasStreamingArtifact = false;
     for (const part of latestAssistant.parts ?? []) {
       if (part.type !== "text") continue;
@@ -278,6 +290,7 @@ export function ChatArea({
           String(conversationId),
           latestAssistant.id,
           part.text,
+          currentUserIntent,
         )
       ) {
         hasStreamingArtifact = true;

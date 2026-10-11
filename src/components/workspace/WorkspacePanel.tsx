@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useQuery } from "convex/react";
+import { api } from "../../../convex/_generated/api";
 import { Panel, Group, Separator } from "react-resizable-panels";
 import {
   AlertCircle,
@@ -27,6 +29,7 @@ import { LivePreview, type ElementInfo } from "./LivePreview";
 import { WorkspaceTerminal } from "./WorkspaceTerminal";
 import { PublishControls } from "./PublishControls";
 import { WorkspaceDashboard } from "./WorkspaceDashboard";
+import { ExpoDevicePreview } from "./ExpoDevicePreview";
 import { Id } from "../../../convex/_generated/dataModel";
 
 type ViewMode = "preview" | "dashboard";
@@ -51,6 +54,8 @@ export function WorkspacePanel({
   onBackToChat?: () => void;
   mobile?: boolean;
 }) {
+  const conversation = useQuery(api.conversations.get, { id: conversationId });
+  const nativeProject = Boolean(conversation?.projectPlatforms?.some((platform) => platform === "ios" || platform === "android"));
   const [viewMode, setViewMode] = useState<ViewMode>("preview");
   const [mobilePanel, setMobilePanel] = useState<MobilePanel>("preview");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -97,6 +102,18 @@ export function WorkspacePanel({
     return () => window.removeEventListener("cryzo:workspace-panel", handlePanel);
   }, [mobile]);
 
+  const requestBackend = () => {
+    onBackToChat?.();
+    // On phones, ChatArea may mount only after the preview closes.
+    window.setTimeout(() => {
+      window.dispatchEvent(new CustomEvent("cryzo:prefill-project-prompt", {
+        detail: {
+          conversationId: String(conversationId),
+          text: "Create or repair this app's Cryzo Cloud database FIRST. Infer its real business domain from my project and conversation, create the necessary persistent tables with appropriate access policies and realistic example records, verify the rows are available in the Data dashboard, and connect the existing UI to that actual data. Preserve my existing website and do not introduce unrelated data models.",
+        },
+      }));
+    }, onBackToChat ? 150 : 0);
+  };
   const selectedContent = selectedFile ? files[selectedFile]?.content || "" : "";
   const dirty = Boolean(selectedFile && draftContent !== selectedContent);
   const errorSummary = error?.split("\n")[0] || "The preview server could not start.";
@@ -214,6 +231,7 @@ export function WorkspacePanel({
         <WorkspaceDashboard
           conversationId={conversationId}
           onOpenCode={() => setMobilePanel("files")}
+          onRequestBackend={requestBackend}
         />
       ) : mobilePanel === "files" ? (
         <div className="flex h-full min-h-0 flex-col bg-zinc-950 text-white">
@@ -406,6 +424,7 @@ export function WorkspacePanel({
               <MoreHorizontal size={23} />
             </button>
 
+            {nativeProject && <ExpoDevicePreview conversationId={conversationId} files={files} compact />}
             <PublishControls
               files={files}
               conversationId={conversationId}
@@ -460,6 +479,7 @@ export function WorkspacePanel({
         </div>
 
         <div className="ml-auto flex items-center gap-3">
+          {nativeProject && <ExpoDevicePreview conversationId={conversationId} files={files} />}
           <PublishControls
             files={files}
             conversationId={conversationId}
@@ -494,7 +514,7 @@ export function WorkspacePanel({
       {viewMode === "preview" ? (
         <div className="flex-1 overflow-hidden">{previewContent}</div>
       ) : (
-        <WorkspaceDashboard conversationId={conversationId}>
+        <WorkspaceDashboard conversationId={conversationId} onRequestBackend={requestBackend}>
         <Group orientation="vertical" className="flex-1">
           <Panel defaultSize={65} minSize={30}>
             <div className="flex h-full">

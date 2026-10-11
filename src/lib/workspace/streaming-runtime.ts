@@ -43,6 +43,7 @@ type RuntimeState = StreamingRuntimeSnapshot & {
   startCommand: string | null;
   installedPackageJson: string | null;
   installedRequirements: string | null;
+  projectIntent: string | null;
   serverReadyTimer: ReturnType<typeof setTimeout> | null;
 };
 
@@ -81,6 +82,7 @@ function createState(): RuntimeState {
     startCommand: null,
     installedPackageJson: null,
     installedRequirements: null,
+    projectIntent: null,
     serverReadyTimer: null,
   };
 }
@@ -353,7 +355,7 @@ async function validateCurrentProject(conversationId: string, state: RuntimeStat
   const projectFiles = Object.entries(state.files)
     .filter(([, value]) => value.type === "file")
     .map(([path, value]) => ({ path, content: value.content || "" }));
-  return callGuard({ operation: "project", conversationId, projectFiles, command });
+  return callGuard({ operation: "project", conversationId, projectFiles, command, projectIntent: state.projectIntent });
 }
 
 function detectStartCommand(state: RuntimeState) {
@@ -739,10 +741,14 @@ export function processStreamingArtifactText(
   conversationId: string,
   messageId: string,
   text: string,
+  userIntent?: string,
 ) {
   if (!text.includes("<cryzoArtifact")) return false;
 
   const state = getState(conversationId);
+  if (userIntent?.trim() && !/automatic project repair|generated project failed|fix the underlying cause by inspecting/i.test(userIntent)) {
+    state.projectIntent = userIntent.slice(0, 3000);
+  }
   if (state.blockedMessageId === messageId) return true;
   if (!state.active) state.active = true;
   state.error = null;

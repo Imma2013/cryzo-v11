@@ -53,6 +53,7 @@ type AndroidSubmitCredentials = {
   track?: "internal" | "alpha" | "beta" | "production";
 };
 type MobileRequest = {
+  forceRestart?: boolean;
   operation: "check" | "preview" | "build" | "status" | "submit";
   conversationId: string;
   sourceFiles?: SourceFile[];
@@ -224,10 +225,12 @@ async function syncNativeSource(workspace: Workspace, sourceFiles?: SourceFile[]
   if (!files.length) return 0;
   await run(
     workspace,
-    `rm -rf ${JSON.stringify(workspace.cwd)} && mkdir -p ${JSON.stringify(workspace.cwd)}`,
+    `mkdir -p ${JSON.stringify(workspace.cwd)}`,
     undefined,
     true,
   );
+  // Preserve Metro process, dependencies, and .expo state across QR opens.
+  // Overwrite current source files in place so Metro can HMR them.
   await workspace.sandbox.writeFiles(
     files.map((file) => ({
       path: `${workspace.cwd}/${file.path}`,
@@ -480,9 +483,18 @@ async function scanStoreReadiness(
   return { overall, summary, checks, counts, aiEnhanced: aiChecks.length > 0 };
 }
 
-async function startExpoPreview(workspace: Workspace) {
+async function startExpoPreview(workspace: Workspace, forceRestart = false) {
   if (!(await hasNativeExpoSource(workspace))) {
     throw new Error("Generate the Expo/React Native app before previewing it on a phone");
+  }
+  // Like Bolt, reconnect to a healthy Metro process instead of killing it
+  // each time the QR dialog is reopened. File sync/HMR continues normally.
+  if (!forceRestart) {
+    const previous = await run(workspace,
+      "if [ -f .cryzo-expo-preview.pid ] && kill -0 $(cat .cryzo-expo-preview.pid) 2>/dev/null; then cat .cryzo-expo-preview.log 2>/dev/null; fi",
+      undefined, true);
+    const previousUrl = previous.output.replace(/\x1b\[[0-9;]*m/g, "").match(/\b(exps?:\/\/[^\s\"'<>]+)/i)?.[1];
+    if (previousUrl) return { previewUrl: previousUrl, output: previous.output.slice(-6000) };
   }
   await run(workspace, "npm install --no-audit --no-fund", undefined, false);
   await run(workspace, "npm install --no-audit --no-fund --no-save @expo/ngrok@^4.1.0", undefined, true);
@@ -680,7 +692,7 @@ export async function POST(req: Request) {
       if (!nativeTarget) {
         return Response.json({ error: "Phone preview with Expo Go requires an Expo/React Native project. Select iOS or Android when creating the app." }, { status: 400 });
       }
-      const preview = await startExpoPreview(workspace);
+      const preview = await startExpoPreview(workspace, body.forceRestart === true);
       return Response.json({ success: true, sourceType: workspace.sourceType, previewUrl: preview.previewUrl, qrValue: preview.previewUrl });
     }
 
