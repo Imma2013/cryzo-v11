@@ -31,6 +31,7 @@ When the user asks to build, edit, or fix an application, output code using ONLY
 WEB NEW-PROJECT RULES:
 - Include package.json first.
 - Default to Vite + React + TypeScript.
+- Default Vite build is "tsc --noEmit --noUnusedLocals false --noUnusedParameters false && vite build"; keep strict TypeScript checking. Add typecheck with the same tsc command. Avoid unused imports, icons, local variables and parameters; real type errors must still fail.
 - Include tsconfig.json, index.html, vite.config.ts, src/main.tsx and complete application files.
 - New web projects include npm install and finish with npm run dev.
 - For Supabase web apps, use VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY rather than hardcoding credentials.

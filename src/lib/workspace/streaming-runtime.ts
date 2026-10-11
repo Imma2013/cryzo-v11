@@ -430,6 +430,19 @@ async function verifyWebBuild(conversationId: string, state: RuntimeState) {
   state.progress = "starting";
   appendOutput(state, "\nChecking Vite production compilation before preview...\n");
   emit(state);
+  if (/^vite build(?:\s|$)/.test(build) &&
+      !!(pkg as { devDependencies?: Record<string, string>; dependencies?: Record<string, string> }).devDependencies?.typescript &&
+      state.files["tsconfig.json"]?.type === "file") {
+    const project = state.files["tsconfig.app.json"]?.type === "file" ? " -p tsconfig.app.json" : "";
+    const command = `node_modules/.bin/tsc${project} --noEmit --noUnusedLocals false --noUnusedParameters false`;
+    let details = "";
+    const status = await runCommand(wc, command, (data) => {
+      details = (details + data).slice(-6000);
+      appendOutput(state, data);
+      emit(state);
+    });
+    if (status !== 0) throw new Error(`TypeScript project check failed (${status}).\n${details.slice(-4000)}`);
+  }
   let output = "";
   const code = await runCommand(wc, "npm run build", (data) => {
     output = (output + data).slice(-8000);
@@ -656,7 +669,9 @@ async function executeSandboxAction(
   }
 
   await ensureDependencies(conversationId, state);
-  await validateCurrentProject(conversationId, state, action.content);
+  const preflight = await validateCurrentProject(conversationId, state, action.content);
+  if (preflight.output) appendOutput(state, preflight.output);
+  await applyRepairedFiles(conversationId, state, preflight.repairedFiles);
   await verifyWebBuild(conversationId, state);
   await startDevServer(conversationId, state, action.content);
 }

@@ -6,6 +6,7 @@ import type { Id } from "../../../../../convex/_generated/dataModel";
 import type { ArtifactAction, FileMap } from "@/lib/workspace/types";
 import { projectReadinessIssues } from "@/lib/workspace/project-scaffold";
 import { analyzeProject } from "@/lib/workspace/project-integrity";
+import { removeUnusedGeneratedImports } from "@/lib/server/generated-import-hygiene";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -220,12 +221,27 @@ export async function POST(req: Request) {
         if (diagnostic) throw new Error(`${filePath}: ${diagnostic}`);
         files[filePath] = { type: "file", content: file.content };
       }
+      const repairedFiles: Array<{ path: string; content: string }> = [];
+      for (const file of body.projectFiles) {
+        const filePath = safeRelativePath(file.path);
+        const cleaned = removeUnusedGeneratedImports(filePath, files[filePath].content);
+        if (cleaned !== files[filePath].content) {
+          files[filePath] = { type: "file", content: cleaned };
+          repairedFiles.push({ path: filePath, content: cleaned });
+        }
+      }
       const issues = projectReadinessIssues(files, body.command);
       const diagnostics = analyzeProject(files).diagnostics;
       if (issues.length || diagnostics.length) {
         throw new Error([...issues, ...diagnostics.map((d) => d.message)].slice(0, 15).join("\n"));
       }
-      return Response.json({ repairedFiles: [], output: "Project syntax, imports and manifest validated.\n", repaired: false });
+      return Response.json({
+        repairedFiles,
+        output: repairedFiles.length
+          ? `Cleaned unused safe-library imports in ${repairedFiles.length} generated file(s).\n`
+          : "Project syntax, imports and manifest validated.\n",
+        repaired: repairedFiles.length > 0,
+      });
     }
 
     return Response.json({ error: "Unknown validation operation" }, { status: 400 });

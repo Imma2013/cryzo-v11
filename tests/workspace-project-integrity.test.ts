@@ -63,3 +63,23 @@ describe("generated project preflight", () => {
     expect(r.repairedFiles).toEqual([]);
   });
 });
+
+
+describe("no-AI deterministic TypeScript build repair", () => {
+  it("keeps semantic checking, but does not make unused variables fatal", () => {
+    const files: import("@/lib/workspace/types").FileMap = {
+      "package.json": { type: "file", content: JSON.stringify({ scripts: { dev: "vite", build: "tsc && vite build" }, devDependencies: { typescript: "^5.8.0", vite: "^6.3.0" } }) },
+      "tsconfig.json": { type: "file", content: JSON.stringify({ compilerOptions: { strict: true, noUnusedLocals: true, noUnusedParameters: true } }) },
+      "src/App.tsx": { type: "file", content: 'import { Shield } from "lucide-react"; export const App = () => <main/>;' },
+    };
+    const fixed = analyzeProject(files, true);
+    const manifest = fixed.repairedFiles.find((entry) => entry.path === "package.json");
+    expect(manifest).toBeDefined();
+    const pkg = JSON.parse(manifest!.content);
+    expect(pkg.scripts.build).toContain("tsc --noEmit --noUnusedLocals false --noUnusedParameters false && vite build");
+    expect(pkg.scripts.typecheck).toContain("tsc --noEmit");
+    expect(files["tsconfig.json"].content).toContain('"strict":true');
+    files["package.json"].content = manifest!.content;
+    expect(analyzeProject(files, true).repairedFiles.filter((entry) => entry.path === "package.json")).toHaveLength(0);
+  });
+});
