@@ -18,6 +18,7 @@ import type * as cloudAuth from "../cloudAuth.js";
 import type * as cloudAuthStore from "../cloudAuthStore.js";
 import type * as cloudRuntime from "../cloudRuntime.js";
 import type * as conversations from "../conversations.js";
+import type * as generationJobs from "../generationJobs.js";
 import type * as hosting from "../hosting.js";
 import type * as http from "../http.js";
 import type * as messages from "../messages.js";
@@ -44,6 +45,7 @@ declare const fullApi: ApiFromModules<{
   cloudAuthStore: typeof cloudAuthStore;
   cloudRuntime: typeof cloudRuntime;
   conversations: typeof conversations;
+  generationJobs: typeof generationJobs;
   hosting: typeof hosting;
   http: typeof http;
   messages: typeof messages;
