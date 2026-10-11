@@ -561,7 +561,7 @@ export async function POST(req: Request) {
                   model: resolved.model, system: systemPrompt,
                   messages: [...modelMessages,
                     { role: "assistant", content: fullText },
-                    { role: "user", content: `Design quality audit found these issues:\n${critique.map((c) => `- ${c}`).join("\n")}\nReturn a NEW complete Cryzo artifact containing ONLY necessary replacement files. Fix responsive mobile layout; do not delete working features.` }],
+                    { role: "user", content: `Design quality audit found these issues:\n${critique.map((c: string) => `- ${c}`).join("\n")}\nReturn a NEW complete Cryzo artifact containing ONLY necessary replacement files. Fix responsive mobile layout; do not delete working features.` }],
                   maxRetries: 1,
                 });
                 for await (const delta of revision.textStream) {
