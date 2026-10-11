@@ -9,7 +9,7 @@ import {
   type FileUIPart,
   type UIMessage,
 } from "ai";
-import { useMutation } from "convex/react";
+import { useMutation, useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { useAuth } from "@/providers/AuthProvider";
 import { useChatHistory } from "@/hooks/use-chat-history";
@@ -117,6 +117,7 @@ export function ChatArea({
 
   const { conversation, loadedMessages, saveMessages, generateTitle } =
     useChatHistory(userId, conversationId);
+  const generationJob = useQuery(api.generationJobs.latest, { conversationId });
   const createArtifact = useMutation(api.artifacts.create);
   const updateChatMode = useMutation(api.conversations.updateChatMode);
   const updateModel = useMutation(api.conversations.updateModel);
@@ -233,6 +234,26 @@ export function ChatArea({
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  // Safari may discard a tab while its Vercel function keeps generating.
+  // Recover the most recent job by its originating user-message ID; never
+  // replay another conversation's text or duplicate a completed assistant.
+  useEffect(() => {
+    if (!loadedRef.current || !generationJob?.text || status === "streaming" || status === "submitted" || localLoading) return;
+    const current = messagesRef.current;
+    const lastUserIndex = current.findLastIndex((m) => m.role === "user");
+    if (lastUserIndex < 0 || current[lastUserIndex]?.id !== generationJob.promptId) return;
+    const existing = current.slice(lastUserIndex + 1).find((m) => m.role === "assistant");
+    if (existing && textFromMessage(existing).length >= generationJob.text.length) return;
+    const recoveredId = existing?.id || `recovered:${generationJob._id}`;
+    liveMessageIdsRef.current.add(recoveredId);
+    setMessages((previous) => {
+      const idx = previous.findIndex((m) => m.id === recoveredId);
+      const message: UIMessage = { id: recoveredId, role: "assistant", parts: [{ type: "text", text: generationJob.text }] };
+      if (idx >= 0) return previous.map((m, n) => n === idx ? message : m);
+      return [...previous, message];
+    });
+  }, [generationJob?._id, generationJob?.text, generationJob?.promptId, status, localLoading, setMessages]);
 
   // Feed the currently-generated assistant message directly into the browser
   // runtime. This intentionally bypasses the Convex persistence round-trip for
@@ -838,6 +859,16 @@ export function ChatArea({
               >
                 &times;
               </button>
+            </div>
+          )}
+          {generationJob?.status === "running" && status !== "streaming" && status !== "submitted" && (
+            <div role="status" className="mx-3 mb-2 rounded-lg bg-blue-950/40 px-3 py-2 text-xs text-blue-200">
+              AI generation is continuing on the server. Restoring progress from Cryzo Cloud…
+            </div>
+          )}
+          {generationJob?.status === "failed" && (
+            <div role="alert" className="mx-3 mb-2 rounded-lg bg-red-950/40 px-3 py-2 text-xs text-red-200">
+              Background generation stopped: {generationJob.error || "Unknown model error"}. You can retry the request.
             </div>
           )}
           <ChatInput

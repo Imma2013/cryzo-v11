@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { Id } from "../../convex/_generated/dataModel";
@@ -10,6 +10,7 @@ import {
   getStreamingRuntimeSnapshot,
   isStreamingRuntimeActive,
   restoreStreamingRuntime,
+  recoverStreamingRuntime,
   saveStreamingRuntimeFile,
   subscribeStreamingRuntime,
 } from "@/lib/workspace/streaming-runtime";
@@ -22,6 +23,8 @@ export function useWorkspace(conversationId: Id<"conversations">) {
     getStreamingRuntimeSnapshot(runtimeId),
   );
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
+  const hiddenAt = useRef<number | null>(null);
+  const recoveryPending = useRef(false);
 
   const artifacts = useQuery(api.artifacts.listByConversation, {
     conversationId,
@@ -46,6 +49,36 @@ export function useWorkspace(conversationId: Id<"conversations">) {
     const actions = artifacts.flatMap((artifact) => artifact.actions);
     void restoreStreamingRuntime(runtimeId, actions);
   }, [artifacts, authLoading, authToken, isAuthenticated, runtimeId]);
+
+  useEffect(() => {
+    const resume = () => {
+      if (document.visibilityState !== "visible" || recoveryPending.current || !artifacts?.length) return;
+      // Distinguish brief transitions from a long, potentially killed browser kernel.
+      if (hiddenAt.current === null || Date.now() - hiddenAt.current < 1200) return;
+      hiddenAt.current = null;
+      recoveryPending.current = true;
+      void recoverStreamingRuntime(runtimeId, artifacts.flatMap((a) => a.actions))
+        .catch((error) => console.warn("Cryzo preview recovery failed", error))
+        .finally(() => { recoveryPending.current = false; });
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") hiddenAt.current = Date.now();
+      else resume();
+    };
+    const onPageShow = (e: PageTransitionEvent) => {
+      if (e.persisted) hiddenAt.current ||= Date.now() - 1500;
+      resume();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("pageshow", onPageShow);
+    const onTransportFailure = () => { hiddenAt.current = Date.now() - 1500; resume(); };
+    window.addEventListener("cryzo:preview-transport-failed", onTransportFailure);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("pageshow", onPageShow);
+      window.removeEventListener("cryzo:preview-transport-failed", onTransportFailure);
+    };
+  }, [runtimeId, artifacts]);
 
   const firstFile = useMemo(
     () =>

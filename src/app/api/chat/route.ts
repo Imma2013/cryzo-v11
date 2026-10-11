@@ -10,6 +10,9 @@ import {
   type UIMessage,
 } from "ai";
 import { ConvexHttpClient } from "convex/browser";
+import { after } from "next/server";
+import { checkpointGenerationStream } from "@/lib/server/background-generation";
+import { planWebsiteDesign, auditWebsiteDraft } from "@/lib/server/design-quality";
 import { api } from "../../../../convex/_generated/api";
 import { readFileSync } from "fs";
 import { join } from "path";
@@ -184,6 +187,7 @@ function buildCurrentProjectContext(artifacts: any[]) {
 }
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 300; // Vercel bounded background work; checkpoints survive client suspension.
 
 export async function POST(req: Request) {
   try {
@@ -200,6 +204,7 @@ export async function POST(req: Request) {
       modelBaseUrl,
       modelApiKey,
       authToken,
+      convexAuthToken,
     } = (await req.json()) as {
       messages: UIMessage[];
       conversationId?: string;
@@ -213,6 +218,7 @@ export async function POST(req: Request) {
       modelBaseUrl?: string;
       modelApiKey?: string;
       authToken?: string;
+      convexAuthToken?: string;
     };
 
     const mode = chatMode === "plan" ? "plan" : "build";
@@ -287,7 +293,7 @@ export async function POST(req: Request) {
 
     let cryzoCloudAppId: string | undefined;
     let currentProjectContext = "";
-    const authenticatedConvex = authedConvexClient(authToken);
+    const authenticatedConvex = authedConvexClient(convexAuthToken || authToken);
     if (conversationId && authenticatedConvex) {
       try {
         const artifacts = await authenticatedConvex.query(
@@ -412,6 +418,16 @@ export async function POST(req: Request) {
       ? `\n\n## MCP CONNECTORS\nCryzo has enabled MCP tools for this user. Use an MCP tool when it directly helps answer or execute the user's request. Never expose connector credentials, internal tool names, or raw authentication material. Ask before destructive external actions unless the user explicitly requested that action.`
       : "";
 
+    // v5 generated a design plan before coding. Keep this isolated from tools
+    // and fail open if a particular BYOK model cannot return JSON.
+    let layoutPlan = "";
+    if (mode === "build" && resolvedProjectPlatforms.includes("web") && lastUserText.trim()) {
+      try {
+        layoutPlan = await planWebsiteDesign({ model: resolved.model,
+          prompt: lastUserText, reference: recipeContent || undefined });
+      } catch (error) { console.warn("Cryzo design layout planning unavailable", error); }
+    }
+
     const systemPrompt =
       buildCryzoSystemPrompt({
         useComposioTools,
@@ -421,6 +437,7 @@ export async function POST(req: Request) {
       }) +
       backendRequirementPrompt(backendRequirements) +
       currentProjectContext +
+      layoutPlan +
       mcpPrompt;
 
     let responseSessionId = composioSessionId;
@@ -533,6 +550,27 @@ export async function POST(req: Request) {
             resources = parseCryzoCloudResources(fullText);
           }
 
+          // Text-only design audit from v5; one corrective pass. The user sees
+          // the first draft as it streams and then focused replacement files.
+          if (layoutPlan && fullText.includes("<cryzoArtifact")) {
+            try {
+              const critique = await auditWebsiteDraft({ model: resolved.model,
+                prompt: lastUserText, layoutPlan, draft: fullText });
+              if (critique.length) {
+                const revision = streamText({
+                  model: resolved.model, system: systemPrompt,
+                  messages: [...modelMessages,
+                    { role: "assistant", content: fullText },
+                    { role: "user", content: `Design quality audit found these issues:\n${critique.map((c) => `- ${c}`).join("\n")}\nReturn a NEW complete Cryzo artifact containing ONLY necessary replacement files. Fix responsive mobile layout; do not delete working features.` }],
+                  maxRetries: 1,
+                });
+                for await (const delta of revision.textStream) {
+                  fullText += delta;
+                  writer.write({ type: "text-delta", id: textId, delta });
+                }
+              }
+            } catch (error) { console.warn("Cryzo design audit degraded", error); }
+          }
           await syncGeneratedCloudResources(fullText);
           const stillMissing = missingBackendRequirements(backendRequirements, resources);
           if (stillMissing.length && cryzoCloudAppId) {
@@ -575,6 +613,23 @@ export async function POST(req: Request) {
       headers.set("x-cryzo-cloud-app-id", cryzoCloudAppId);
     }
 
+    // Keep consuming the model stream in the server after Safari drops its
+    // connection; Convex checkpoints permit a new tab to reconnect. This is
+    // bounded by Vercel maxDuration, not a guarantee of unlimited compute.
+    if (mode === "build" && conversationId && authenticatedConvex && response.body) {
+      try {
+        const promptId = lastUserMsg?.id || generateId();
+        const jobId = await authenticatedConvex.mutation(api.generationJobs.start, {
+          conversationId: conversationId as any, promptId,
+        });
+        const [toBrowser, toCheckpoint] = response.body.tee();
+        after(checkpointGenerationStream(toCheckpoint, authenticatedConvex, jobId));
+        headers.set("x-cryzo-generation-job", String(jobId));
+        return new Response(toBrowser, { status: response.status, statusText: response.statusText, headers });
+      } catch (error) {
+        console.warn("Could not initialize background generation checkpoint", error);
+      }
+    }
     return new Response(response.body, {
       status: response.status,
       statusText: response.statusText,

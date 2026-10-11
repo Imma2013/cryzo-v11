@@ -19,7 +19,7 @@ const VIVARI_SERVICE_WORKER = "/sw.js";
 type VivariModule = typeof import("@vivari/core");
 
 export type PreviewMessage = {
-  type: "PREVIEW_UNCAUGHT_EXCEPTION" | "PREVIEW_UNHANDLED_REJECTION";
+  type: "PREVIEW_UNCAUGHT_EXCEPTION" | "PREVIEW_UNHANDLED_REJECTION" | "PREVIEW_LAYOUT_DIAGNOSTIC";
   message?: string;
   stack?: string;
 };
@@ -57,7 +57,7 @@ export class Sandbox {
       window.addEventListener("message", (event: MessageEvent) => {
         if (event.origin !== window.location.origin) return;
         const type = event.data?.type;
-        if (type !== "PREVIEW_UNCAUGHT_EXCEPTION" && type !== "PREVIEW_UNHANDLED_REJECTION") return;
+        if (type !== "PREVIEW_UNCAUGHT_EXCEPTION" && type !== "PREVIEW_UNHANDLED_REJECTION" && type !== "PREVIEW_LAYOUT_DIAGNOSTIC") return;
         for (const listener of this.previewListeners) listener(event.data as PreviewMessage);
       });
     }
@@ -226,6 +226,19 @@ export async function resetSandboxProject(sandbox: Sandbox) {
 // The runtime is a per-document singleton shared across conversations. Switching
 // Cryzo projects clears the project directory instead of booting a second kernel,
 // which keeps the package-manager cache warm.
+/** Force a fresh browser runtime after iOS Safari suspends its workers.
+ * Do not unregister the origin Service Worker: it also serves other tabs. */
+export async function rebootSandboxRuntime() {
+  const previous = instance;
+  instance = null;
+  bootPromise = null;
+  isolationFailure = null;
+  if (previous) {
+    const kernel = (previous as any).vivari;
+    try { await (kernel?.dispose?.() ?? kernel?.destroy?.()); } catch { /* Worker may already be gone. */ }
+  }
+}
+
 export async function teardownSandbox() {
   if (isolationFailure) throw isolationFailure;
   const sandbox = instance ?? (bootPromise ? await bootPromise : null);

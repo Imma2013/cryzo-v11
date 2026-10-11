@@ -152,6 +152,32 @@
   viteObserver.observe(document.documentElement, { subtree: true, childList: true });
   checkViteOverlay();
 
+  // Inspect actual mobile DOM geometry, not just whether Vite compiles.
+  // In a Safari iframe screenshots may be cross-origin-tainted; measurable
+  // overflow and clipped viewport content are reliable, deterministic signals.
+  let lastLayoutDiagnostic = '';
+  function inspectResponsiveLayout() {
+    if (window.innerWidth > 768 || !document.body) return;
+    const width = window.innerWidth;
+    const overflow = Math.max(document.documentElement.scrollWidth, document.body.scrollWidth) - width;
+    if (overflow <= 6) { lastLayoutDiagnostic = ''; return; }
+    const offenders = Array.from(document.body.querySelectorAll('*'))
+      .filter(function (element) {
+        if (!(element instanceof HTMLElement) && !(element instanceof SVGElement)) return false;
+        const rect = element.getBoundingClientRect();
+        return rect.width > 0 && (rect.right > width + 6 || rect.left < -6);
+      })
+      .slice(0, 5)
+      .map(function (element) { return element.tagName.toLowerCase() + (element.id ? '#' + element.id : '') + (typeof element.className === 'string' ? '.' + element.className.split(' ')[0] : ''); });
+    const diagnostic = 'Mobile viewport overflow: document is ' + Math.round(overflow) + 'px wider than ' + width + 'px viewport. Offending elements: ' + offenders.join(', ') + '. Fix responsive CSS rather than hiding body overflow.';
+    if (diagnostic === lastLayoutDiagnostic) return;
+    lastLayoutDiagnostic = diagnostic;
+    post('PREVIEW_LAYOUT_DIAGNOSTIC', { message: diagnostic });
+  }
+  window.addEventListener('load', function () { setTimeout(inspectResponsiveLayout, 850); });
+  window.addEventListener('resize', function () { setTimeout(inspectResponsiveLayout, 350); });
+  setTimeout(inspectResponsiveLayout, 1200);
+
   // Surface uncaught preview errors in the builder's runtime log.
   window.addEventListener('error', function (event) {
     post('PREVIEW_UNCAUGHT_EXCEPTION', {

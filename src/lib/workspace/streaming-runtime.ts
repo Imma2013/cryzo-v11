@@ -6,6 +6,7 @@ import {
   collectDirectoryFiles,
   directoryExists,
   getSandbox,
+  rebootSandboxRuntime,
   runCommand,
   teardownSandbox,
   writeFiles,
@@ -266,6 +267,15 @@ async function ensureContainer(conversationId: string, state: RuntimeState) {
 
     wc.on("preview-message", (message: any) => {
       if (activeConversationId !== conversationId) return;
+      if (message?.type === "PREVIEW_LAYOUT_DIAGNOSTIC") {
+        const diagnostic = String(message.message || "Mobile layout issue");
+        appendOutput(state, `\nResponsive layout audit: ${diagnostic}\n`);
+        emit(state);
+        if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("cryzo:project-repair-needed", {
+          detail: { conversationId, message: diagnostic },
+        }));
+        return;
+      }
       if (
         message?.type !== "PREVIEW_UNCAUGHT_EXCEPTION" &&
         message?.type !== "PREVIEW_UNHANDLED_REJECTION"
@@ -860,13 +870,61 @@ export async function restoreStreamingRuntime(
   await restoreTask;
 }
 
+const recoveringConversations = new Set<string>();
+
+/** Return from Safari background: revive the dev process, or restore persisted files. */
+export async function recoverStreamingRuntime(conversationId: string, savedActions: ArtifactAction[]) {
+  if (recoveringConversations.has(conversationId)) return;
+  const state = getState(conversationId);
+  if (state.progress === "writing" || state.progress === "installing") return;
+  recoveringConversations.add(conversationId);
+  try {
+    if (!Object.keys(state.files).length) {
+      if (savedActions.length) await restoreStreamingRuntime(conversationId, savedActions);
+      return;
+    }
+    if (!state.previewUrl && state.progress !== "error") return;
+    appendOutput(state, "\nChecking browser preview after Safari resumed...\n");
+    try {
+      // A stale Vivari filesystem can hang after iOS suspends a background tab.
+      const wc = await Promise.race([
+        getSandbox(),
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error("Vivari did not respond after Safari resumed")), 7000)),
+      ]);
+      const hasManifest = await Promise.race([
+        wc.fs.exists("package.json"),
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error("Vivari filesystem did not respond")), 7000)),
+      ]);
+      if (!hasManifest && state.files["package.json"]?.type === "file") throw new Error("Vivari project storage was lost");
+      await restartStreamingRuntime(conversationId);
+    } catch (error) {
+      appendOutput(state, `\nPreview transport failed; restoring saved project: ${String(error)}\n`);
+      stopDevProcess(state);
+      await rebootSandboxRuntime();
+      activeConversationId = null;
+      state.active = false;
+      state.initialized = false;
+      state.previewUrl = null;
+      state.files = {};
+      state.installedPackageJson = null;
+      state.verifiedBuild = null;
+      state.processedActionsByMessage.clear();
+      state.progress = "restoring";
+      emit(state);
+      if (savedActions.length) await restoreStreamingRuntime(conversationId, savedActions);
+      else throw new Error("No saved project files are available for preview restoration");
+    }
+  } finally { recoveringConversations.delete(conversationId); }
+}
+
 export async function restartStreamingRuntime(conversationId: string) {
   const state = getState(conversationId);
   await state.queue;
   state.active = true;
   state.progress = "starting";
   state.error = null;
-  appendOutput(state, "\nRestarting preview server...\n");
+  state.previewUrl = null;
+  appendOutput(state, "\nRestoring browser preview…\n");
   emit(state);
 
   try {

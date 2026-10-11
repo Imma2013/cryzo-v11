@@ -91,6 +91,23 @@ export function LivePreview({
     return () => window.removeEventListener("message", handleMessage);
   }, [onElementSelected, postInspectorState]);
 
+  // Safari sometimes reports a failed Service Worker response only on the
+  // parent window. Send it through the same restoration path as pageshow.
+  useEffect(() => {
+    const failed = (event: ErrorEvent | PromiseRejectionEvent) => {
+      const detail = "message" in event ? event.message : String(event.reason || "");
+      if (/FetchEvent\.respondWith|Load failed|ServiceWorker.*failed/i.test(detail)) {
+        window.dispatchEvent(new Event("cryzo:preview-transport-failed"));
+      }
+    };
+    window.addEventListener("error", failed);
+    window.addEventListener("unhandledrejection", failed);
+    return () => {
+      window.removeEventListener("error", failed);
+      window.removeEventListener("unhandledrejection", failed);
+    };
+  }, []);
+
   const toggleInspector = useCallback(() => {
     setInspector(!inspectorActiveRef.current);
   }, [setInspector]);

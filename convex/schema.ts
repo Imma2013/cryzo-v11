@@ -43,6 +43,13 @@ export default defineSchema({
     createdAt: v.number(),
   }).index("by_conversation", ["conversationId", "createdAt"]),
 
+  generationJobs: defineTable({
+    conversationId: v.id("conversations"), userId: v.id("users"), promptId: v.string(),
+    status: v.union(v.literal("running"), v.literal("complete"), v.literal("failed"), v.literal("cancelled")),
+    text: v.string(), error: v.optional(v.string()), createdAt: v.number(), updatedAt: v.number(),
+  }).index("by_conversation_prompt", ["conversationId", "promptId"])
+    .index("by_conversation_created", ["conversationId", "createdAt"]),
+
   artifacts: defineTable({
     conversationId: v.id("conversations"),
     artifactId: v.string(),
