@@ -18,7 +18,7 @@ const isolationHeaders = [
 const runtimeAssetSources = ["/vivari/:path*", "/assets/:path*", "/vendor/:path*", "/vv-devtools/:path*"];
 
 const nextConfig: NextConfig = {
-  outputFileTracingIncludes: { "/api/**/*": ["./managed-model-smoke.json"] },
+  outputFileTracingIncludes: { "/api/**/*": ["./managed-model-smoke.json", "./vendor/design-recipes/**/*"] },
   async headers() {
     return [
       {

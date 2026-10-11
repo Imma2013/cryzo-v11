@@ -13,9 +13,9 @@ import { ConvexHttpClient } from "convex/browser";
 import { after } from "next/server";
 import { checkpointGenerationStream } from "@/lib/server/background-generation";
 import { planWebsiteDesign, auditWebsiteDraft } from "@/lib/server/design-quality";
+import { CANONICAL_DESIGN_LIBRARY_PATH, getDesignReferenceLibrary, routeDesignReferences } from "@/lib/server/design-reference-library";
+import { buildCanonicalDesignPreamble, buildCompiledReferenceBlock } from "@/lib/server/design-guidance";
 import { api } from "../../../../convex/_generated/api";
-import { readFileSync } from "fs";
-import { join } from "path";
 import { resolveServerModel } from "@/lib/server/model-provider";
 import { buildProjectMcpTools } from "@/lib/server/mcp-client";
 import { classifyCreditCost, describeCreditCharge } from "@/lib/stripe";
@@ -50,62 +50,6 @@ function getComposio() {
     composio = new Composio<VercelProvider>({ provider: new VercelProvider() });
   }
   return composio;
-}
-
-const RECIPE_KEYWORDS: Record<string, string[]> = {
-  "cryzo-10": ["dog", "pet", "cat", "animal", "puppy", "kitten", "vet"],
-  "cryzo-1": ["festival", "concert", "event", "lineup", "music event", "rave"],
-  "cryzo-2": ["3d", "futuristic", "immersive", "artifact"],
-  "cryzo-3": ["furniture", "interior", "home decor", "design studio"],
-  "cryzo-4": ["car rental", "vehicle", "fleet"],
-  "cryzo-5": ["hypercar", "supercar", "speed", "performance car"],
-  "cryzo-6": ["travel", "luxury travel", "concierge", "destination"],
-  "cryzo-7": ["restaurant", "dining", "food", "nightlife", "bar", "chef"],
-  "cryzo-8": ["book", "publisher", "author", "literary", "novel"],
-  "cryzo-9": ["luxury car", "motorsport", "automotive luxury"],
-  airbnb: ["stay", "rental", "booking", "hotel", "accommodation", "airbnb"],
-  stripe: ["payment", "billing", "api", "fintech", "merchant"],
-  spotify: ["music", "streaming", "audio", "playlist", "podcast"],
-  ferrari: ["ferrari", "racing", "supercar editorial"],
-  tesla: ["electric", "ev", "tesla"],
-  notion: ["productivity", "notes", "docs", "workspace", "wiki"],
-  figma: ["design tool", "interface", "prototype", "figma"],
-  vercel: ["deploy", "frontend", "developer platform"],
-  apple: ["phone", "device", "product launch", "consumer tech"],
-  coinbase: ["crypto", "exchange", "wallet", "bitcoin"],
-  "linear.app": ["issue", "project management", "sprint", "kanban"],
-  framer: ["website builder", "motion", "animation"],
-  cursor: ["code editor", "ai coding", "ide"],
-  spacex: ["rocket", "space", "mission", "aerospace"],
-};
-
-const RECIPE_STYLE_SIGNAL =
-  /\b(style|styled|aesthetic|visual|theme|editorial|fashion|poster|experimental|brutalist|futuristic|immersive|minimalist|cinematic|art-directed|art directed)\b|\b(inspired by|similar to|make it like|looks? like)\b/i;
-
-function pickDesignRecipe(userMessage: string): string | null {
-  const msg = userMessage.toLowerCase();
-
-  // Subject matter alone is not a design decision. A request such as
-  // "create a website for dogs" should get Cryzo's polished baseline instead
-  // of silently forcing the avant-garde pet recipe. Recipes become binding
-  // only when the user also expresses a visual/style intent.
-  if (!RECIPE_STYLE_SIGNAL.test(msg)) return null;
-
-  for (const [slug, keywords] of Object.entries(RECIPE_KEYWORDS)) {
-    if (keywords.some((keyword) => msg.includes(keyword))) return slug;
-  }
-  return null;
-}
-
-function loadRecipeContent(slug: string): string {
-  try {
-    return readFileSync(
-      join(process.cwd(), `vendor/design-recipes/${slug}/DESIGN.md`),
-      "utf-8",
-    );
-  } catch {
-    return "";
-  }
 }
 
 const EXTERNAL_ACTION_PATTERN = /\b(send|email|reply|forward|post|publish|schedule|calendar|invite|slack|tweet|x post|github issue|pull request|create issue|open issue|comment on|upload to|connect|disconnect|create event|create meeting|send message|setup|set up|configure|authorize|stripe|gmail|payment)\b/i;
@@ -350,11 +294,39 @@ export async function POST(req: Request) {
       return resources;
     };
 
-    const recipeSlug = pickDesignRecipe(lastUserText);
-    const recipeContent = recipeSlug ? loadRecipeContent(recipeSlug) : "";
-    const recipeBlock = recipeContent
-      ? `\n\n## ACTIVE DESIGN RECIPE — FOLLOW AS BINDING GUIDANCE (selected: ${recipeSlug})\n${recipeContent}\n\nCRITICAL: The recipe controls composition, typography attitude, palette behavior, section structure, imagery approach, and CTA styling. Adapt it to the active project platform rather than forcing desktop web patterns into a mobile app.`
+    // Cryzo V5 selects one canonical visual system for EVERY web build,
+    // based on product/industry/design-family signals, not only style words.
+    const designIsWeb = resolvedProjectPlatforms.includes("web") && (mode === "build" || mode === "plan");
+    const designRouting = designIsWeb ? routeDesignReferences(lastUserText, 1) : null;
+    const selectedPrimaryReference = designRouting?.primary;
+    const selectedDesignReference = selectedPrimaryReference
+      ? {
+          slug: selectedPrimaryReference.slug,
+          relativePath: selectedPrimaryReference.relativePath,
+          excerpt: selectedPrimaryReference.excerpt,
+          markdown: selectedPrimaryReference.markdown,
+          profile: selectedPrimaryReference.profile,
+          source: selectedPrimaryReference.source,
+        }
+      : undefined;
+    const compiledReferenceBrief = selectedDesignReference
+      ? buildCompiledReferenceBlock(selectedDesignReference)
       : "";
+    const recipeBlock = selectedDesignReference
+      ? buildCanonicalDesignPreamble({
+          libraryPath: CANONICAL_DESIGN_LIBRARY_PATH,
+          availableReferences: getDesignReferenceLibrary().map((item) => item.slug),
+          selectedReferences: [selectedDesignReference],
+          selectionSource: designRouting?.selectionSource,
+        })
+      : "";
+    if (designIsWeb) {
+      console.info("[Cryzo design] V5 reference routing", {
+        primary: selectedPrimaryReference?.slug || "none",
+        selectionSource: designRouting?.selectionSource,
+        matchedSignals: designRouting?.matchedSignals,
+      });
+    }
 
     const modelMessages = await convertToModelMessages(messages);
 
@@ -418,20 +390,27 @@ export async function POST(req: Request) {
       ? `\n\n## MCP CONNECTORS\nCryzo has enabled MCP tools for this user. Use an MCP tool when it directly helps answer or execute the user's request. Never expose connector credentials, internal tool names, or raw authentication material. Ask before destructive external actions unless the user explicitly requested that action.`
       : "";
 
-    // v5 generated a design plan before coding. Keep this isolated from tools
-    // and fail open if a particular BYOK model cannot return JSON.
+    // Faithful V5 layout lock: exact reference execution packet drives the
+    // hero, typography, overlap, section order and image relationships.
     let layoutPlan = "";
-    if (mode === "build" && resolvedProjectPlatforms.includes("web") && lastUserText.trim()) {
+    if (mode === "build" && selectedPrimaryReference && compiledReferenceBrief && lastUserText.trim()) {
       try {
-        layoutPlan = await planWebsiteDesign({ model: resolved.model,
-          prompt: lastUserText, reference: recipeContent || undefined });
-      } catch (error) { console.warn("Cryzo design layout planning unavailable", error); }
+        layoutPlan = await planWebsiteDesign({
+          model: resolved.model,
+          prompt: lastUserText,
+          primaryReference: selectedPrimaryReference,
+          executionPacket: compiledReferenceBrief,
+        });
+      } catch (error) {
+        console.warn("[Cryzo design] V5 layout plan unavailable", error);
+      }
     }
 
     const systemPrompt =
+      recipeBlock + "\n\n" +
       buildCryzoSystemPrompt({
         useComposioTools,
-        recipeBlock,
+        recipeBlock: "",
         projectPlatforms: resolvedProjectPlatforms,
         cryzoCloudAppId,
       }) +
@@ -550,18 +529,33 @@ export async function POST(req: Request) {
             resources = parseCryzoCloudResources(fullText);
           }
 
-          // Text-only design audit from v5; one corrective pass. The user sees
-          // the first draft as it streams and then focused replacement files.
-          if (layoutPlan && fullText.includes("<cryzoArtifact")) {
+          // Reference-fidelity audit from V5 (not a generic aesthetic score).
+          // One corrective pass preserves V11's streamed code and existing
+          // Vivari/Convex execution and avoids unbounded model API costs.
+          if (selectedPrimaryReference && compiledReferenceBrief && layoutPlan && fullText.includes("<cryzoArtifact")) {
             try {
-              const critique = await auditWebsiteDraft({ model: resolved.model,
-                prompt: lastUserText, layoutPlan, draft: fullText });
-              if (critique.length) {
+              const audit = await auditWebsiteDraft({
+                model: resolved.model,
+                prompt: lastUserText,
+                layoutPlan,
+                draft: fullText,
+                primaryReference: selectedPrimaryReference,
+                executionPacket: compiledReferenceBrief,
+              });
+              console.info("[Cryzo design] V5 fidelity audit", {
+                primary: selectedPrimaryReference.slug,
+                verdict: audit.verdict,
+                score: audit.score,
+              });
+              if (audit.verdict === "retry" && audit.critique.length) {
                 const revision = streamText({
-                  model: resolved.model, system: systemPrompt,
-                  messages: [...modelMessages,
+                  model: resolved.model,
+                  system: systemPrompt + `\n\n<design_audit_retry>\nThe draft drifted from the locked ${selectedPrimaryReference.slug} reference. Preserve the exact design execution packet; fix the following:\n${audit.critique.map((c: string) => `- ${c}`).join("\n")}\nDo not output another generic hero/cards/footer layout.\n</design_audit_retry>`,
+                  messages: [
+                    ...modelMessages,
                     { role: "assistant", content: fullText },
-                    { role: "user", content: `Design quality audit found these issues:\n${critique.map((c: string) => `- ${c}`).join("\n")}\nReturn a NEW complete Cryzo artifact containing ONLY necessary replacement files. Fix responsive mobile layout; do not delete working features.` }],
+                    { role: "user", content: `Correct the design fidelity problems and retain all working functionality. Emit complete Cryzo file actions for the necessary replacements, not explanations. Make the new composition recognizably faithful to ${selectedPrimaryReference.slug}.` },
+                  ],
                   maxRetries: 1,
                 });
                 for await (const delta of revision.textStream) {
@@ -569,7 +563,9 @@ export async function POST(req: Request) {
                   writer.write({ type: "text-delta", id: textId, delta });
                 }
               }
-            } catch (error) { console.warn("Cryzo design audit degraded", error); }
+            } catch (error) {
+              console.warn("[Cryzo design] V5 reference audit unavailable", error);
+            }
           }
           await syncGeneratedCloudResources(fullText);
           const stillMissing = missingBackendRequirements(backendRequirements, resources);
