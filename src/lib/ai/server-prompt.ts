@@ -1,3 +1,4 @@
+import { RUNTIME_RULES } from "./runtime-rules";
 import {
   normalizeProjectPlatforms,
   projectPlatformSummary,
@@ -179,10 +180,7 @@ ${toolUsageBlock}
 - Every generated file must contain only the intended raw file contents between its cryzoAction tags.
 
 ## Runtime Architecture
-Generated applications execute inside an isolated remote Vercel Sandbox running Linux and Node.js. The user's browser displays a development preview of the project.
-- Cryzo owns sandbox hostnames, ports, process lifetime, preview routing, and security configuration.
-- NEVER hardcode a *.vercel.run hostname, server.allowedHosts entry, public port, or other sandbox-specific infrastructure into generated project files.
-- A long-running preview process belongs in the final <cryzoAction type="start"> action.
+${RUNTIME_RULES}
 
 ${targetBlock}
 

@@ -10,7 +10,7 @@
 - Firebase Auth (client-side only, currently bypassed for testing)
 - Convex (DB + real-time queries)
 - Tailwind CSS 4 (dark theme: zinc/black palette)
-- WebContainer API for workspace preview
+- Vivari (`@vivari/core`) in-browser runtime for workspace preview
 - `react-resizable-panels` v4 (uses `Group`, `Panel`, `Separator` — NOT `PanelGroup`/`PanelResizeHandle`)
 
 ## Conventions
@@ -33,16 +33,21 @@
 - Type as `Composio<VercelProvider>` to avoid generic mismatch
 - Session IDs are per-conversation, stored in Convex `conversations.composioSessionId`
 
-### WebContainer Workspace
-- All workspace components are `"use client"` — WebContainer is browser-only
-- COEP header MUST be `require-corp` (NOT `credentialless`) — bolt.diy uses this, it's what enables SharedArrayBuffer on ChromeOS
-- COOP header: `same-origin`
-- Headers apply to ALL routes (workspace is inline on chat page, not a separate route)
+### In-browser runtime (Vivari)
+- The preview runtime is Vivari (`@vivari/core`, MIT). All of it goes through `src/lib/workspace/sandbox.ts` — do not import `@vivari/core` anywhere else
+- All workspace components are `"use client"` — the runtime is browser-only
+- The SDK is NOT bundled by Next.js. `scripts/sync-vivari-assets.mjs` (runs before `dev` and `build`) copies it to `public/` and `sandbox.ts` loads `/vivari/index.js` with a native `import()`. Generated files under `public/assets`, `public/vivari`, `public/vendor`, `public/vv-devtools` and `public/sw.js` are git-ignored
+- COEP header MUST be `require-corp` (NOT `credentialless`) and COOP `same-origin` on `/chat` and on the runtime's static files (see `next.config.ts`)
+- `/sw.js` is the preview Service Worker; it serves `/preview/<port>/…` from the dev server running in the tab
+- Project files live in `/cryzo-project` inside the runtime; `sandbox.fs` paths are relative to it
+- Run command lines with `sandbox.spawnShell()` (`sh -c`). The shell has no `jsh`, and native binaries (git, curl, ffmpeg) do not exist
 - AI outputs code in `<cryzoArtifact>` / `<cryzoAction>` XML tags
 - Artifact parser strips XML from display text during streaming (shows progress card, NOT raw code)
-- WebContainer singleton stays alive across conversation switches — do NOT teardown on navigation
-- Inspector script injected via `setPreviewScript()` after boot
-- New artifacts (edits) get written to the running container — Vite HMR refreshes preview
+- The runtime singleton stays alive across conversation switches — do NOT tear it down on navigation; the project directory is cleared instead
+- `public/inspector-script.js` (element picker + preview error reporter) is injected into every preview page through Vivari's `/vv-devtools/chobitsu.js` slot
+- Every preview iframe must be attached with `attachSandboxPreview()` or Vite HMR never connects
+- New artifacts (edits) get written to the running runtime → Vite HMR refreshes preview
+- Node + npm is the default; Bun and Python only when the user asks (rules in `src/lib/ai/runtime-rules.ts`)
 
 ### Chat + Workspace Layout (like bolt.diy/Dyad)
 - Chat on LEFT, workspace on RIGHT — same page, NOT separate routes
@@ -73,13 +78,12 @@
 - Never use `Cross-Origin-Embedder-Policy: credentialless` — use `require-corp` (credentialless doesn't enable crossOriginIsolated on ChromeOS)
 - Never put workspace on a separate route — it must be inline with chat (same page, resizable panels)
 - Never show raw `<cryzoArtifact>` XML in chat — parser must handle streaming (incomplete tags) by showing a progress card
-- Never teardown WebContainer on conversation switch — keep it alive, just write new files
+- Never tear down the runtime on conversation switch — keep it alive, just write new files
 - Never tell user to paste code manually — AI must output artifact with the edit
 - Never use `PanelGroup`/`PanelResizeHandle` — react-resizable-panels v4 uses `Group`/`Panel`/`Separator`
-- Never use `coep: "credentialless"` in WebContainer.boot() — not needed with require-corp headers
 
 ## Reference Projects
-- `/home/lloydebnchenge/bolt.diy` — WebContainer patterns, inspector script, COEP headers, design instructions
+- `/home/lloydebnchenge/bolt.diy` — inspector script, COEP headers, design instructions
 - `/home/lloydebnchenge/dyad` — UI layout (chat+workspace split), element picker, response processing, proxy injection
 
 ## Deploy

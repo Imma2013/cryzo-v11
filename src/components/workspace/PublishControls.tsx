@@ -172,7 +172,7 @@ async function buildAndCollectStaticFiles(
   conversationId: string,
   onOutput: (line: string) => void,
 ) {
-  onOutput("$ npm run build (Cryzo WebContainer)\n");
+  onOutput("$ npm run build (Cryzo runtime)\n");
   const { buildStreamingRuntime } = await import("@/lib/workspace/streaming-runtime");
   const result = await buildStreamingRuntime(conversationId);
   if (result.output) onOutput(`${result.output}\n`);
@@ -538,7 +538,7 @@ function DeployPublishModal({
   };
 
   const deployNetlify = async () => {
-    setStatus({ type: "loading", message: "Building project in Cryzo WebContainer…" });
+    setStatus({ type: "loading", message: "Building project in the Cryzo runtime…" });
     setBuildLog("");
     storeDeveloperToken("netlify", netlifyToken);
     try {

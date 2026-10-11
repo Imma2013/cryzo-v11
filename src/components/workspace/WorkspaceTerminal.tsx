@@ -3,17 +3,10 @@
 import { useEffect, useRef, useState } from "react";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal as XTerm } from "@xterm/xterm";
-import { getWebContainer } from "@/lib/workspace/webcontainer";
+import { getSandbox, type SandboxProcess } from "@/lib/workspace/sandbox";
 import "@xterm/xterm/css/xterm.css";
 
 type TerminalTab = "terminal" | "output";
-
-type ShellProcess = {
-  kill: () => void;
-  resize: (dimensions: { cols: number; rows: number }) => void;
-  input: WritableStream<string>;
-  output: ReadableStream<string>;
-};
 
 function createTerminal(readonly = false) {
   const style = getComputedStyle(document.documentElement);
@@ -66,7 +59,7 @@ export function WorkspaceTerminal({ output }: { output: string }) {
   const outputTerminalRef = useRef<XTerm | null>(null);
   const shellFitRef = useRef<FitAddon | null>(null);
   const outputFitRef = useRef<FitAddon | null>(null);
-  const shellProcessRef = useRef<ShellProcess | null>(null);
+  const shellProcessRef = useRef<SandboxProcess | null>(null);
   const lastOutputRef = useRef("");
 
   useEffect(() => {
@@ -95,15 +88,14 @@ export function WorkspaceTerminal({ output }: { output: string }) {
 
     let disposed = false;
     let inputWriter: WritableStreamDefaultWriter<string> | null = null;
+    // Vivari's shell is line-oriented: it reads whole lines on stdin and echoes
+    // each command itself. Keystrokes are edited locally and sent on Enter.
+    let line = "";
 
     const fit = () => {
       try {
         shellFit.fit();
         outputFit.fit();
-        const process = shellProcessRef.current;
-        if (process && shellTerminal.cols > 0 && shellTerminal.rows > 0) {
-          process.resize({ cols: shellTerminal.cols, rows: shellTerminal.rows });
-        }
       } catch {
         // The panel can briefly have zero width while resizable panels settle.
       }
@@ -114,41 +106,85 @@ export function WorkspaceTerminal({ output }: { output: string }) {
     resizeObserver.observe(outputHost);
     requestAnimationFrame(fit);
 
+    const eraseLocalEcho = () => {
+      if (line.length > 0) shellTerminal.write("\b \b".repeat(line.length));
+    };
+
+    const startShell = async () => {
+      const sandbox = await getSandbox();
+      if (disposed) return;
+
+      const process = await sandbox.spawn("sh");
+      if (disposed) {
+        process.kill();
+        return;
+      }
+
+      shellProcessRef.current = process;
+      inputWriter = process.input.getWriter();
+
+      void process.output
+        .pipeTo(
+          new WritableStream({
+            write(data) {
+              if (!disposed && shellProcessRef.current === process) {
+                shellTerminal.write(data.replace(/\r?\n/g, "\r\n"));
+              }
+            },
+          }),
+        )
+        .catch(() => {});
+    };
+
+    const restartShell = () => {
+      const current = shellProcessRef.current;
+      shellProcessRef.current = null;
+      try {
+        inputWriter?.releaseLock();
+      } catch {}
+      inputWriter = null;
+      try {
+        current?.kill();
+      } catch {}
+      void startShell().catch(() => {});
+    };
+
     const dataDisposable = shellTerminal.onData((data) => {
       if (!inputWriter) return;
-      void inputWriter.write(data).catch(() => {});
+      // Cursor keys and other escape sequences have no meaning to a line-based shell.
+      if (data.startsWith("\x1b")) return;
+
+      for (const char of data) {
+        if (char === "\r" || char === "\n") {
+          const command = line;
+          eraseLocalEcho();
+          line = "";
+          void inputWriter.write(`${command}\n`).catch(() => {});
+        } else if (char === "\x7f" || char === "\b") {
+          if (line.length > 0) {
+            line = line.slice(0, -1);
+            shellTerminal.write("\b \b");
+          }
+        } else if (char === "\x15") {
+          eraseLocalEcho();
+          line = "";
+        } else if (char === "\x03") {
+          // Ctrl+C: there is no signal channel on stdin, so stop the shell (and
+          // whatever it is running) and start a fresh one.
+          line = "";
+          shellTerminal.write("^C\r\n");
+          restartShell();
+          return;
+        } else if (char >= " ") {
+          line += char;
+          shellTerminal.write(char);
+        }
+      }
     });
 
     void (async () => {
       try {
-        const webcontainer = await getWebContainer();
-        if (disposed) return;
-
-        const process = (await webcontainer.spawn("/bin/jsh", ["--osc"], {
-          terminal: {
-            cols: shellTerminal.cols || 80,
-            rows: shellTerminal.rows || 15,
-          },
-        })) as unknown as ShellProcess;
-
-        if (disposed) {
-          process.kill();
-          return;
-        }
-
-        shellProcessRef.current = process;
-        inputWriter = process.input.getWriter();
-
-        void process.output
-          .pipeTo(
-            new WritableStream({
-              write(data) {
-                if (!disposed) shellTerminal.write(data);
-              },
-            }),
-          )
-          .catch(() => {});
-
+        await startShell();
         fit();
         shellTerminal.focus();
       } catch (error) {
@@ -242,7 +278,7 @@ export function WorkspaceTerminal({ output }: { output: string }) {
           </button>
         </div>
         <span className="ml-auto pr-1 text-[10px] text-zinc-600">
-          {tab === "terminal" ? "WebContainer shell" : "Runtime logs"}
+          {tab === "terminal" ? "Project shell" : "Runtime logs"}
         </span>
       </div>
 

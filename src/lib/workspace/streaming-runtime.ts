@@ -3,11 +3,11 @@ import type { ProgressStage } from "./action-runner";
 import {
   collectDirectoryFiles,
   directoryExists,
-  getWebContainer,
+  getSandbox,
   runCommand,
-  teardownWebContainer,
+  teardownSandbox,
   writeFiles,
-} from "./webcontainer";
+} from "./sandbox";
 import { readSupabaseRuntimeContext } from "@/lib/developer-connections";
 
 export interface StreamingRuntimeSnapshot {
@@ -35,6 +35,7 @@ type RuntimeState = StreamingRuntimeSnapshot & {
   devProcess: KillableProcess | null;
   startCommand: string | null;
   installedPackageJson: string | null;
+  installedRequirements: string | null;
   serverReadyTimer: ReturnType<typeof setTimeout> | null;
 };
 
@@ -69,6 +70,7 @@ function createState(): RuntimeState {
     devProcess: null,
     startCommand: null,
     installedPackageJson: null,
+    installedRequirements: null,
     serverReadyTimer: null,
   };
 }
@@ -225,11 +227,11 @@ async function ensureContainer(conversationId: string, state: RuntimeState) {
     previous.initialized = false;
     previous.progress = "idle";
     emit(previous);
-    await teardownWebContainer();
+    await teardownSandbox();
     activeConversationId = null;
   }
 
-  const wc = await getWebContainer();
+  const wc = await getSandbox();
   if (activeConversationId !== conversationId) {
     activeConversationId = conversationId;
 
@@ -304,7 +306,38 @@ function detectStartCommand(state: RuntimeState) {
   return null;
 }
 
+function fileContent(state: RuntimeState, path: string) {
+  return state.files[path]?.type === "file" ? state.files[path]?.content || "" : "";
+}
+
+function usesBun(state: RuntimeState) {
+  return state.files["bun.lock"]?.type === "file" || state.files["bun.lockb"]?.type === "file";
+}
+
+// Python projects (run on Vivari's CPython) declare dependencies in requirements.txt.
+async function ensurePythonDependencies(conversationId: string, state: RuntimeState) {
+  const requirements = fileContent(state, "requirements.txt");
+  if (!requirements.trim() || state.installedRequirements === requirements) return;
+
+  const wc = await ensureContainer(conversationId, state);
+  state.progress = "installing";
+  state.error = null;
+  appendOutput(state, "\nInstalling Python packages in the Cryzo runtime...\n");
+  emit(state);
+
+  const exitCode = await runCommand(wc, "pip install -r requirements.txt", (data) => {
+    appendOutput(state, data);
+    emit(state);
+  });
+  if (exitCode !== 0) {
+    throw new Error(`pip install exited with code ${exitCode}`);
+  }
+  state.installedRequirements = requirements;
+}
+
 async function ensureDependencies(conversationId: string, state: RuntimeState) {
+  await ensurePythonDependencies(conversationId, state);
+
   const packageJson = packageJsonContent(state);
   if (!packageJson) return;
 
@@ -318,20 +351,17 @@ async function ensureDependencies(conversationId: string, state: RuntimeState) {
     state,
     nodeModules
       ? "\npackage.json changed; updating dependencies...\n"
-      : "\nInstalling dependencies in WebContainer...\n",
+      : "\nInstalling dependencies in the Cryzo runtime...\n",
   );
   emit(state);
 
-  const exitCode = await runCommand(
-    wc,
-    "npm install --no-audit --no-fund",
-    (data) => {
-      appendOutput(state, data);
-      emit(state);
-    },
-  );
+  const installCommand = usesBun(state) ? "bun install" : "npm install --no-audit --no-fund";
+  const exitCode = await runCommand(wc, installCommand, (data) => {
+    appendOutput(state, data);
+    emit(state);
+  });
   if (exitCode !== 0) {
-    throw new Error(`npm install exited with code ${exitCode}`);
+    throw new Error(`${installCommand.split(" --")[0]} exited with code ${exitCode}`);
   }
   state.installedPackageJson = packageJson;
 }
@@ -350,7 +380,7 @@ async function startDevServer(
   appendOutput(state, `\n$ ${state.startCommand}\n`);
   emit(state);
 
-  const process = await wc.spawn("jsh", ["-c", state.startCommand]);
+  const process = await wc.spawnShell(state.startCommand);
   state.devProcess = process;
 
   void process.output
@@ -369,7 +399,7 @@ async function startDevServer(
     if (state.devProcess === process && !state.previewUrl) {
       setError(
         state,
-        "The WebContainer dev server did not expose a preview URL. Check the terminal output and the project's dev script.",
+        "The dev server did not expose a preview URL. Check the terminal output and the project's dev script.",
       );
     }
   }, 60000);
@@ -385,7 +415,12 @@ async function startDevServer(
 }
 
 function isInstallAction(action: ArtifactAction) {
-  return action.type === "shell" && /(^|\s)npm\s+(install|i)(\s|$)/.test(action.content.trim());
+  return (
+    action.type === "shell" &&
+    /(^|\s)((npm|pnpm|yarn|bun)\s+(install|i|add)|pip3?\s+install|python3?\s+-m\s+pip\s+install)(\s|$)/.test(
+      action.content.trim(),
+    )
+  );
 }
 
 async function executeSupabaseAction(
@@ -440,7 +475,7 @@ export async function syncSupabaseRuntime(conversationId: string) {
   return true;
 }
 
-async function executeWebContainerAction(
+async function executeSandboxAction(
   conversationId: string,
   state: RuntimeState,
   action: ArtifactAction,
@@ -470,6 +505,7 @@ async function executeWebContainerAction(
     await writeFiles(wc, [safeAction]);
     updateFileMap(state, safeAction);
     if (safeAction.filePath === "package.json") state.installedPackageJson = null;
+    if (safeAction.filePath === "requirements.txt") state.installedRequirements = null;
     state.progress = state.previewUrl ? "ready" : "writing";
     state.error = null;
     appendOutput(state, `Wrote ${safeAction.filePath}\n`);
@@ -491,6 +527,9 @@ async function executeWebContainerAction(
 
     if (isInstallAction(action)) {
       state.installedPackageJson = packageJsonContent(state) || state.installedPackageJson;
+      if (/\bpip3?\b/.test(action.content)) {
+        state.installedRequirements = fileContent(state, "requirements.txt") || state.installedRequirements;
+      }
       const validation = await callGuard({ operation: "project", conversationId });
       if (validation.output) appendOutput(state, validation.output);
       await applyRepairedFiles(conversationId, state, validation.repairedFiles);
@@ -591,7 +630,7 @@ export function processStreamingArtifactText(
 
   for (const action of newActions) {
     state.queue = state.queue
-      .then(() => executeWebContainerAction(conversationId, state, action))
+      .then(() => executeSandboxAction(conversationId, state, action))
       .catch((error) => setError(state, error));
   }
 
@@ -604,14 +643,14 @@ export async function prebootStreamingRuntime(conversationId: string) {
   state.initialized = true;
   state.error = null;
 
-  // Prebooting only warms the singleton WebContainer. It is not a file write
+  // Prebooting only warms the singleton Cryzo runtime. It is not a file write
   // and should never put a reloaded chat into a "Writing files" state.
   if (!state.active) state.progress = "idle";
   emit(state);
 
   try {
     await ensureContainer(conversationId, state);
-    appendOutput(state, "WebContainer ready.\n");
+    appendOutput(state, "Cryzo runtime ready.\n");
     emit(state);
     await syncSupabaseRuntime(conversationId).catch(() => false);
   } catch (error) {
@@ -632,7 +671,7 @@ export async function restoreStreamingRuntime(
   state.active = true;
   state.progress = "restoring";
   state.error = null;
-  appendOutput(state, "Restoring project in WebContainer...\n");
+  appendOutput(state, "Restoring project in the Cryzo runtime...\n");
   emit(state);
 
   try {
@@ -658,7 +697,11 @@ export async function restoreStreamingRuntime(
 
     await syncSupabaseRuntime(conversationId).catch(() => false);
 
-    if (safeNonSupabase.some(isInstallAction) || packageJsonContent(state)) {
+    if (
+      safeNonSupabase.some(isInstallAction) ||
+      packageJsonContent(state) ||
+      fileContent(state, "requirements.txt")
+    ) {
       await ensureDependencies(conversationId, state);
     }
 
@@ -689,7 +732,7 @@ export async function restartStreamingRuntime(conversationId: string) {
   state.active = true;
   state.progress = "starting";
   state.error = null;
-  appendOutput(state, "\nRestarting WebContainer preview server...\n");
+  appendOutput(state, "\nRestarting preview server...\n");
   emit(state);
 
   try {
@@ -712,7 +755,7 @@ export async function restartStreamingRuntime(conversationId: string) {
 export async function refreshStreamingRuntimeLogs(conversationId: string) {
   const state = getState(conversationId);
   const diagnostics = [
-    "--- WebContainer diagnostics ---",
+    "--- Cryzo runtime diagnostics (Vivari) ---",
     `Conversation: ${conversationId}`,
     `Cross-origin isolated: ${typeof window !== "undefined" ? window.crossOriginIsolated : "unknown"}`,
     `Preview URL: ${state.previewUrl || "not ready"}`,
@@ -742,7 +785,7 @@ export async function buildStreamingRuntime(conversationId: string) {
     throw error;
   }
 
-  appendOutput(state, "\n$ npm run build (WebContainer)\n");
+  appendOutput(state, "\n$ npm run build (Cryzo runtime)\n");
   emit(state);
   let buildOutput = "";
   const exitCode = await runCommand(wc, "npm run build", (data) => {
@@ -767,7 +810,7 @@ export async function buildStreamingRuntime(conversationId: string) {
     maxFiles: 500,
     maxBytes: 15_000_000,
   });
-  if (files.length === 0) throw new Error("WebContainer build produced no publishable files");
+  if (files.length === 0) throw new Error("The build produced no publishable files");
   return { files, output: buildOutput };
 }
 
