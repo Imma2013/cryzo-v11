@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { useRef, useState, useEffect, useCallback } from "react";
 import type { ProgressStage } from "@/lib/workspace/action-runner";
+import { attachSandboxPreview } from "@/lib/workspace/sandbox";
 
 export interface ElementInfo {
   tagName: string;
@@ -110,6 +111,14 @@ export function LivePreview({
   useEffect(() => {
     if (refreshToken > 0) handleRefresh();
   }, [refreshToken, handleRefresh]);
+
+  // The dev server's HMR / SSE frames reach the preview through the runtime, not
+  // the network, so each preview iframe has to be attached to it.
+  useEffect(() => {
+    const frame = iframeRef.current;
+    if (!frame || !url) return;
+    return attachSandboxPreview(frame);
+  }, [url, mobile]);
 
   useEffect(() => {
     if (inspectRequest <= 0 || !url) return;

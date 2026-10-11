@@ -97,7 +97,7 @@ export default function PrivacyPage() {
           </Section>
 
           <Section title="5. Browser previews and project execution">
-            <p>For supported web projects, some development and preview execution can occur inside a browser-based WebContainer environment. That means portions of source-code execution, dependency installation, preview rendering, and terminal activity may happen locally in your browser session.</p>
+            <p>For supported web projects, some development and preview execution can occur inside a browser-based runtime environment. That means portions of source-code execution, dependency installation, preview rendering, and terminal activity may happen locally in your browser session.</p>
             <p>Project artifacts, account state, conversations, and other persistent service data may still be stored or synchronized through Cryzo&apos;s backend systems so you can return to your work later.</p>
           </Section>
 

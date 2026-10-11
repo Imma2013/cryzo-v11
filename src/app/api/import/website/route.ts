@@ -265,7 +265,7 @@ export async function POST(req: Request) {
 
     // Keep localized Cryzo CSS local while making the remaining deployed-page assets explicit.
     // A <base> tag cannot be used here because it would redirect /styles/imported-*.css back
-    // to the source website instead of the WebContainer preview origin.
+    // to the source website instead of the Cryzo preview origin.
     html = rewriteHtmlAssetUrls(html, finalUrl);
 
     files.unshift({ path: "index.html", content: html });

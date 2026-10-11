@@ -6,7 +6,7 @@ import { Menu, RefreshCw } from "lucide-react";
 import { Sidebar } from "@/components/Sidebar";
 import { useAuth } from "@/providers/AuthProvider";
 
-const ISOLATION_RELOAD_KEY = "cryzo:webcontainer-isolation-reload";
+const ISOLATION_RELOAD_KEY = "cryzo:runtime-isolation-reload";
 
 type IsolationState = "checking" | "ready" | "failed";
 
@@ -69,7 +69,7 @@ export default function ChatLayout({ children }: { children: React.ReactNode }) 
         <div className="max-w-md rounded-2xl border border-[var(--cryzo-border)] bg-[var(--cryzo-card)] p-6 text-center shadow-xl">
           <h1 className="text-lg font-semibold">Builder reload required</h1>
           <p className="mt-2 text-sm leading-6 text-[var(--cryzo-muted)]">
-            Cryzo could not enable the browser isolation required by WebContainers in this document.
+            Cryzo could not enable the browser isolation its live preview runtime requires in this document.
             Reload the builder to start a fresh preview runtime.
           </p>
           <button

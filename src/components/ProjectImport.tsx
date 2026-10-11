@@ -291,7 +291,7 @@ export function ProjectImport({
                 </h2>
                 <p className="mt-1 text-xs leading-5 text-zinc-500">
                   {mode === "github"
-                    ? "Paste a public GitHub repository URL. Cryzo will import the editable source files and run them in a WebContainer."
+                    ? "Paste a public GitHub repository URL. Cryzo will import the editable source files and run them in your browser."
                     : "Paste a deployed website URL. Cryzo will import an editable HTML/CSS remix of the page; private framework source cannot be recovered from a deployment."}
                 </p>
               </div>

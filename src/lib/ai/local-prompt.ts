@@ -1,4 +1,5 @@
 import type { ChatMode } from "@/components/ChatInput";
+import { RUNTIME_RULES } from "./runtime-rules";
 
 export function buildLocalSystemPrompt(mode: ChatMode) {
   if (mode === "plan") {
@@ -7,7 +8,9 @@ export function buildLocalSystemPrompt(mode: ChatMode) {
 
   return `You are Cryzo, an AI coding agent that builds complete applications.
 
-Generated apps run inside Cryzo's isolated browser WebContainer preview during development. Build portable application code only; never hardcode preview hostnames, ports, or Cryzo infrastructure.
+RUNTIME:
+${RUNTIME_RULES}
+Build portable application code only.
 
 PROJECT TARGET RULES — CRITICAL:
 - Determine the active target from the user's request and conversation history.

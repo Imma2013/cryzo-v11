@@ -7,7 +7,7 @@ The hosted product lives at **cryzo.me**. This repository is the community/self-
 ## What Cryzo includes
 
 - **AI builder** — build and edit projects by chatting with Cryzo-managed models, BYOK providers, or supported local OpenAI-compatible endpoints.
-- **Browser-native web development** — React + TypeScript + Vite projects run inside WebContainers, so hosted development does not require installing Node.js locally or waiting for a remote preview VM.
+- **Browser-native web development** — React + TypeScript + Vite projects run inside the browser on the open-source [Vivari](https://vivari.run) runtime, so hosted development does not require installing Node.js locally or waiting for a remote preview VM.
 - **Native mobile apps** — one Expo + React Native codebase targets iOS and Android. Native source remains the source of truth.
 - **Cryzo Cloud** — Convex-powered database, generated-app auth/users, ownership rules, and the managed application API.
 - **Developer connections** — GitHub, Vercel, Supabase, Stripe, Composio-powered apps, and remote MCP servers.
@@ -19,7 +19,7 @@ The hosted product lives at **cryzo.me**. This repository is the community/self-
 ```text
 Browser / Cryzo UI
   ├─ AI builder
-  ├─ WebContainer project runtime + live preview
+  ├─ Vivari project runtime + live preview
   ├─ Code/files/editor
   └─ Project dashboard
           │
@@ -46,7 +46,7 @@ Next.js application on Vercel
   └─ billing/usage
 ```
 
-Generated source and artifacts are durable in Convex. The browser WebContainer is disposable runtime state: a project can be reconstructed from its saved artifacts when a conversation is reopened.
+Generated source and artifacts are durable in Convex. The in-browser runtime is disposable state: a project can be reconstructed from its saved artifacts when a conversation is reopened.
 
 ### Cryzo Cloud
 
@@ -86,11 +86,11 @@ npm run dev
 
 Then open `http://localhost:3000`.
 
-## WebContainer previews
+## In-browser previews (Vivari)
 
-Cryzo's hosted web builder runs generated projects inside a browser WebContainer. Project files are written into the container, dependencies are installed there, and the project's dev server is embedded into the Cryzo preview workspace.
+Cryzo's hosted web builder runs generated projects inside the browser tab on [Vivari](https://vivari.run), an MIT-licensed runtime for Node.js, Bun and Python. Project files are written into its virtual filesystem, dependencies are installed there with the real npm CLI, and the project's dev server is embedded into the Cryzo preview workspace through a Service Worker. See [docs/VIVARI.md](docs/VIVARI.md) for how the runtime is hosted.
 
-Cryzo uses cross-origin isolation headers on the builder routes required by WebContainers. Preview health reporting distinguishes a server that merely opened a port from an application that actually rendered successfully.
+Cryzo uses cross-origin isolation headers on the builder routes, which the runtime requires. Preview health reporting distinguishes a server that merely opened a port from an application that actually rendered successfully.
 
 The browser runtime is never the durable source of truth. Saved project artifacts remain in Convex.
 
@@ -112,7 +112,7 @@ Current connector flow:
 4. Enable or disable configured servers from the connector page or directly from the chat composer `+` menu.
 5. Supported tool-calling models can invoke those MCP tools during a build or external action.
 
-MCP credentials are server-side secrets and are not written to project files or exposed to the WebContainer.
+MCP credentials are server-side secrets and are not written to project files or exposed to the in-browser runtime.
 
 ## Optional services
 
@@ -132,7 +132,7 @@ Never commit production API keys, OAuth secrets, store credentials, MCP credenti
 
 ### Web
 
-Cryzo's default web target is React + TypeScript + Vite. Development previews execute in a WebContainer directly in the browser.
+Cryzo's default web target is React + TypeScript + Vite. Development previews execute directly in the browser. Bun and Python projects can run there too when requested.
 
 ### iOS + Android
 

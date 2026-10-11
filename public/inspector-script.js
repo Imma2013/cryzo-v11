@@ -137,6 +137,21 @@
     if (!active) clearHover();
   }
 
+  // Surface uncaught preview errors in the builder's runtime log.
+  window.addEventListener('error', function (event) {
+    post('PREVIEW_UNCAUGHT_EXCEPTION', {
+      message: event.message || String(event.error || 'Unknown error'),
+      stack: event.error && event.error.stack ? String(event.error.stack) : undefined,
+    });
+  });
+  window.addEventListener('unhandledrejection', function (event) {
+    var reason = event.reason;
+    post('PREVIEW_UNHANDLED_REJECTION', {
+      message: reason && reason.message ? String(reason.message) : String(reason),
+      stack: reason && reason.stack ? String(reason.stack) : undefined,
+    });
+  });
+
   window.addEventListener('message', function (event) {
     if (event.data && event.data.type === 'INSPECTOR_ACTIVATE') {
       setActive(event.data.active);
