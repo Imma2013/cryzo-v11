@@ -1064,7 +1064,7 @@ export async function recoverStreamingRuntime(conversationId: string, savedActio
       if (savedActions.length) await restoreStreamingRuntime(conversationId, savedActions, state.nativeTarget);
       return;
     }
-    if (!state.previewUrl && state.progress !== "error") return;
+    if (!state.previewUrl) return;
     appendOutput(state, "\nChecking browser preview after Safari resumed...\n");
     try {
       // A stale Vivari filesystem can hang after iOS suspends a background tab.
