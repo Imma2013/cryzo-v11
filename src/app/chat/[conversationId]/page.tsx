@@ -12,6 +12,7 @@ import {
 import { MobileBuilderHeader } from "@/components/MobileBuilderHeader";
 import type { ElementInfo } from "@/components/workspace/LivePreview";
 import { prebootStreamingRuntime } from "@/lib/workspace/streaming-runtime";
+import { nativeTargetFromActions } from "@/lib/workspace/native-target";
 import { Id } from "../../../../convex/_generated/dataModel";
 import { useAuth } from "@/providers/AuthProvider";
 
@@ -42,11 +43,14 @@ export default function ConversationPage({
   const workspaceStarted = workspaceOpen || hasArtifacts;
 
   useEffect(() => {
-    if (authLoading || !isAuthenticated || !authToken) return;
-    void prebootStreamingRuntime(String(id)).catch(() => {
+    if (authLoading || !isAuthenticated || !authToken || !conversation || artifacts === undefined) return;
+    // Wait for project metadata/files before choosing a kernel; native apps never boot Vivari.
+    const native = conversation.projectPlatforms?.some((p) => p === "ios" || p === "android") ||
+      artifacts.some(a => nativeTargetFromActions(a.actions));
+    void prebootStreamingRuntime(String(id), Boolean(native)).catch(() => {
       // Workspace state will surface an actionable error if startup fails.
     });
-  }, [authLoading, authToken, id, isAuthenticated]);
+  }, [authLoading, authToken, id, isAuthenticated, conversation, artifacts]);
 
   useEffect(() => {
     const media = window.matchMedia("(max-width: 767px)");

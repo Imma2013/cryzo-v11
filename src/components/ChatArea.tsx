@@ -23,6 +23,7 @@ import {
   filesToUIParts,
   takeInitialChatMessage,
 } from "@/lib/chat/initial-message";
+import { inferProjectPlatforms } from "@/lib/project-platform";
 import {
   DEFAULT_MODEL_SELECTION,
   getProvider,
@@ -128,6 +129,7 @@ export function ChatArea({
     useChatHistory(userId, conversationId);
   const generationJob = useQuery(api.generationJobs.latest, { conversationId });
   const createArtifact = useMutation(api.artifacts.create);
+  const updateProjectPlatforms = useMutation(api.conversations.updateProjectPlatforms);
   const updateChatMode = useMutation(api.conversations.updateChatMode);
   const updateModel = useMutation(api.conversations.updateModel);
   const savedArtifactsRef = useRef<Set<string>>(new Set());
@@ -152,6 +154,22 @@ export function ChatArea({
     optimisticMode?.conversationId === conversationId
       ? optimisticMode.mode
       : conversation?.chatMode ?? "build";
+
+  // Existing chats created while project selection defaulted to web can have
+  // native source yet web metadata. Repair only when their ORIGINAL request
+  // unambiguously asked for a mobile app; never reinterpret ordinary websites.
+  useEffect(() => {
+    if (!conversation || !loadedMessages?.length ||
+        !conversation.projectPlatforms?.includes("web")) return;
+    const firstPrompt = loadedMessages.find(m => m.role === "user");
+    if (!firstPrompt) return;
+    const text = textFromMessage(firstPrompt);
+    if (!/\b(mobile app|phone app|native app|react native|expo|ios app|android app|iphone app)\b/i.test(text)) return;
+    const inferred = inferProjectPlatforms(text);
+    if (inferred.includes("web")) return;
+    void updateProjectPlatforms({ id: conversationId, projectPlatforms: inferred }).catch((error) =>
+      console.warn("Could not restore the original native project target", error));
+  }, [conversation, loadedMessages, conversationId, updateProjectPlatforms]);
 
   const modelSelection: ModelSelection =
     optimisticModel?.conversationId === conversationId

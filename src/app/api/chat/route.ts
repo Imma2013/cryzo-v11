@@ -255,15 +255,31 @@ export async function POST(req: Request) {
       }
     }
 
-    const resolvedProjectPlatforms = projectPlatforms?.length
-      ? normalizeProjectPlatforms(projectPlatforms)
-      : storedProjectPlatforms?.length
-        ? normalizeProjectPlatforms(storedProjectPlatforms)
-        : inferProjectPlatforms(lastUserText, ["web"], false);
+    // A first-request mobile build must never inherit stale web defaults.
+    // Later edits retain the already chosen framework.
+    const inferredFirstTarget = inferProjectPlatforms(projectIntent);
+    const firstNativeBuild = mode === "build" && !isAutomaticRepair &&
+      earlierUserRequests.length <= 1 && !inferredFirstTarget.includes("web") &&
+      /\b(mobile app|phone app|native app|react native|expo|ios app|android app|iphone app|build an app|make an app|create an app)\b/i.test(projectIntent);
+    const resolvedProjectPlatforms = firstNativeBuild ? inferredFirstTarget
+      : projectPlatforms?.length ? normalizeProjectPlatforms(projectPlatforms)
+      : storedProjectPlatforms?.length ? normalizeProjectPlatforms(storedProjectPlatforms)
+      : inferProjectPlatforms(lastUserText, ["web"], false);
 
     let cryzoCloudAppId: string | undefined;
     let currentProjectContext = "";
     const authenticatedConvex = authedConvexClient(convexAuthToken || authToken);
+    if (firstNativeBuild && storedProjectPlatforms?.includes("web") && conversationId && authenticatedConvex) {
+      try {
+        await authenticatedConvex.mutation(api.conversations.updateProjectPlatforms, {
+          id: conversationId as any,
+          projectPlatforms: resolvedProjectPlatforms,
+        });
+      } catch (migrationError) {
+        console.warn("Native framework persistence failed", migrationError);
+        return Response.json({ error: "Unable to save the native project target. Please retry." }, { status: 409 });
+      }
+    }
     if (conversationId && authenticatedConvex) {
       try {
         const artifacts = await authenticatedConvex.query(

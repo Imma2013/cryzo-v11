@@ -693,7 +693,7 @@ export async function POST(req: Request) {
 
     if (body.operation === "preview") {
       if (!nativeTarget) {
-        return Response.json({ error: "Phone preview with Expo Go requires an Expo/React Native project. Select iOS or Android when creating the app." }, { status: 400 });
+        return Response.json({ error: "This conversation is still marked as a website. Cryzo is restoring its original mobile target; reload the chat and try Device Preview again." }, { status: 400 });
       }
       const preview = await startExpoPreview(workspace, body.forceRestart === true);
       return Response.json({ success: true, sourceType: workspace.sourceType, previewUrl: preview.previewUrl, qrValue: preview.previewUrl });

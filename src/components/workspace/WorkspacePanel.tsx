@@ -31,6 +31,7 @@ import { WorkspaceTerminal } from "./WorkspaceTerminal";
 import { PublishControls } from "./PublishControls";
 import { WorkspaceDashboard } from "./WorkspaceDashboard";
 import { ExpoDevicePreview } from "./ExpoDevicePreview";
+import { hasNativeSource } from "@/lib/workspace/native-target";
 import { Id } from "../../../convex/_generated/dataModel";
 
 type ViewMode = "preview" | "dashboard";
@@ -56,7 +57,6 @@ export function WorkspacePanel({
   mobile?: boolean;
 }) {
   const conversation = useQuery(api.conversations.get, { id: conversationId });
-  const nativeProject = Boolean(conversation?.projectPlatforms?.some((platform) => platform === "ios" || platform === "android"));
   const [viewMode, setViewMode] = useState<ViewMode>("preview");
   const [mobilePanel, setMobilePanel] = useState<MobilePanel>("preview");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -78,6 +78,7 @@ export function WorkspacePanel({
     setSelectedFile,
     saveFile,
   } = useWorkspace(conversationId);
+  const nativeProject = Boolean(conversation?.projectPlatforms?.some((platform) => platform === "ios" || platform === "android")) || hasNativeSource(files);
 
   useEffect(() => {
     onStatusChange?.({
@@ -329,7 +330,7 @@ export function WorkspacePanel({
           <Smartphone size={32} className="text-zinc-300" />
           <h2 className="text-xl font-semibold text-white">Native Expo preview</h2>
           <p className="text-sm leading-6 text-zinc-400">Open the React Native app on your phone using Expo Go.</p>
-          <ExpoDevicePreview conversationId={conversationId} files={files} ready={progress === "ready"} />
+          <ExpoDevicePreview conversationId={conversationId} files={files} ready={progress === "ready" && Boolean(conversation?.projectPlatforms?.some(platform => platform === "ios" || platform === "android"))} autoOpen />
         </div>
       ) : isBooting || !previewUrl || error ? (
         loadingContent
@@ -432,7 +433,7 @@ export function WorkspacePanel({
               <MoreHorizontal size={23} />
             </button>
 
-            {nativeProject && <ExpoDevicePreview conversationId={conversationId} files={files} compact ready={progress === "ready"} />}
+            {nativeProject && <ExpoDevicePreview conversationId={conversationId} files={files} compact ready={progress === "ready" && Boolean(conversation?.projectPlatforms?.some(platform => platform === "ios" || platform === "android"))} />}
             <PublishControls
               files={files}
               conversationId={conversationId}
@@ -455,7 +456,7 @@ export function WorkspacePanel({
         This is an Expo + React Native project, not a Vite website. Open it on your phone with Expo Go.
         The same source runs on iOS and Android.
       </p>
-      <ExpoDevicePreview conversationId={conversationId} files={files} ready={progress === "ready"} />
+      <ExpoDevicePreview conversationId={conversationId} files={files} ready={progress === "ready" && Boolean(conversation?.projectPlatforms?.some(platform => platform === "ios" || platform === "android"))} autoOpen />
       <p className="text-xs text-zinc-500">Expo Metro starts in Cryzo Cloud. You can keep editing while your phone is connected.</p>
     </div>
   ) : isBooting || !previewUrl || error ? (
@@ -500,7 +501,7 @@ export function WorkspacePanel({
         </div>
 
         <div className="ml-auto flex items-center gap-3">
-          {nativeProject && <ExpoDevicePreview conversationId={conversationId} files={files} ready={progress === "ready"} />}
+          {nativeProject && <ExpoDevicePreview conversationId={conversationId} files={files} ready={progress === "ready" && Boolean(conversation?.projectPlatforms?.some(platform => platform === "ios" || platform === "android"))} autoOpen />}
           <PublishControls
             files={files}
             conversationId={conversationId}

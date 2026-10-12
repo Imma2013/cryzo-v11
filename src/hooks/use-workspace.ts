@@ -6,11 +6,13 @@ import { api } from "../../convex/_generated/api";
 import { Id } from "../../convex/_generated/dataModel";
 import { useAuth } from "@/providers/AuthProvider";
 import type { StreamingRuntimeSnapshot } from "@/lib/workspace/streaming-runtime";
+import { nativeTargetFromActions } from "@/lib/workspace/native-target";
 import {
   getStreamingRuntimeSnapshot,
   isStreamingRuntimeActive,
   restoreStreamingRuntime,
   recoverStreamingRuntime,
+  configureStreamingRuntimeTarget,
   saveStreamingRuntimeFile,
   subscribeStreamingRuntime,
 } from "@/lib/workspace/streaming-runtime";
@@ -30,7 +32,12 @@ export function useWorkspace(conversationId: Id<"conversations">) {
     conversationId,
   });
   const conversation = useQuery(api.conversations.get, { id: conversationId });
-  const isNativeProject = Boolean(conversation?.projectPlatforms?.some((platform) => platform === "ios" || platform === "android"));
+  const isNativeProject = Boolean(conversation?.projectPlatforms?.some((platform) => platform === "ios" || platform === "android")) ||
+    Boolean(artifacts?.some((artifact) => nativeTargetFromActions(artifact.actions)));
+
+  useEffect(() => {
+    if (isNativeProject) configureStreamingRuntimeTarget(runtimeId, true);
+  }, [isNativeProject, runtimeId]);
 
   useEffect(() => {
     setRuntime(getStreamingRuntimeSnapshot(runtimeId));
@@ -59,7 +66,7 @@ export function useWorkspace(conversationId: Id<"conversations">) {
       if (hiddenAt.current === null || Date.now() - hiddenAt.current < 1200) return;
       hiddenAt.current = null;
       recoveryPending.current = true;
-      void recoverStreamingRuntime(runtimeId, artifacts.flatMap((a) => a.actions), forceTransportRecovery)
+      void recoverStreamingRuntime(runtimeId, artifacts.flatMap((a) => a.actions), forceTransportRecovery, isNativeProject)
         .catch((error) => console.warn("Cryzo preview recovery failed", error))
         .finally(() => { recoveryPending.current = false; });
     };
@@ -80,7 +87,7 @@ export function useWorkspace(conversationId: Id<"conversations">) {
       window.removeEventListener("pageshow", onPageShow);
       window.removeEventListener("cryzo:preview-transport-failed", onTransportFailure);
     };
-  }, [runtimeId, artifacts]);
+  }, [runtimeId, artifacts, isNativeProject]);
 
   const firstFile = useMemo(
     () =>

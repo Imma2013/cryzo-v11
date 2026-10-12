@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useAuthToken } from "@convex-dev/auth/react";
 import { ExternalLink, Loader2, QrCode, RefreshCw, X } from "lucide-react";
 import type { Id } from "../../../convex/_generated/dataModel";
@@ -9,17 +9,19 @@ import { mobileSourceFiles } from "@/lib/workspace/mobile-source-files";
 import { isExpoProject } from "@/lib/workspace/expo-starter";
 
 /** Expo preview is available only for an actual Expo/React Native project. */
-export function ExpoDevicePreview({ conversationId, files, compact = false, ready = true }: {
+export function ExpoDevicePreview({ conversationId, files, compact = false, ready = true, autoOpen = false }: {
   conversationId: Id<"conversations">;
   files: FileMap;
   compact?: boolean;
   ready?: boolean;
+  autoOpen?: boolean;
 }) {
   const authToken = useAuthToken();
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [url, setUrl] = useState("");
   const [error, setError] = useState("");
+  const openedAutomatically = useRef(false);
 
   const start = async (refresh = false) => {
     setOpen(true);
@@ -53,6 +55,14 @@ export function ExpoDevicePreview({ conversationId, files, compact = false, read
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (!autoOpen || !ready || !authToken || openedAutomatically.current || !isExpoProject(files)) return;
+    openedAutomatically.current = true;
+    void start();
+  // Auto-open when the validated Expo project first becomes ready.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoOpen, ready, files, authToken]);
 
   return (
     <>
