@@ -12,7 +12,7 @@ import {
   getSandbox,
   rebootSandboxRuntime,
   runCommand,
-  teardownSandbox,
+  resetSandboxProject,
   writeFiles,
 } from "./sandbox";
 import { readSupabaseRuntimeContext } from "@/lib/developer-connections";
@@ -142,13 +142,23 @@ function clearServerReadyTimer(state: RuntimeState) {
   state.serverReadyTimer = null;
 }
 
-function setError(state: RuntimeState, error: unknown) {
+function setError(state: RuntimeState, error: unknown, requestRepair = false) {
   clearServerReadyTimer(state);
   const message = error instanceof Error ? error.message : String(error);
   state.error = message;
   state.progress = "error";
   appendOutput(state, `\nError: ${message}\n`);
   emit(state);
+  // Restoration and explicit restarts must use the same bounded model repair
+  // path as streamed actions. Infrastructure/auth failures need no code edits.
+  if (requestRepair || /project preflight failed|generated (?:file|project) validation failed|generated dependency installation failed|generated project failed|typescript project check failed|does not export|cannot resolve local import|missing npm dependency|invalid json in|postcss|npm run build exited/i.test(message)) {
+    const conversationId = [...runtimes].find(([, runtime]) => runtime === state)?.[0];
+    if (conversationId && typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("cryzo:project-repair-needed", {
+        detail: { conversationId, message: message.slice(0, 6000) },
+      }));
+    }
+  }
 }
 
 function updateFileMap(state: RuntimeState, action: ArtifactAction) {
@@ -269,12 +279,15 @@ async function ensureContainer(conversationId: string, state: RuntimeState) {
     previous.processedActionsByMessage.clear();
     previous.progress = "idle";
     emit(previous);
-    await teardownSandbox();
     activeConversationId = null;
   }
 
   const wc = await getSandbox();
   if (activeConversationId !== conversationId) {
+    // Vivari may persist its directory across document reloads. Claim a clean
+    // project before writing the authoritative snapshot so tsc cannot compile
+    // orphaned files absent from preflight validation.
+    await resetSandboxProject(wc);
     activeConversationId = conversationId;
 
     wc.on("server-ready", (_port, url) => {
@@ -310,10 +323,7 @@ async function ensureContainer(conversationId: string, state: RuntimeState) {
           ? "Unhandled promise rejection"
           : "Uncaught preview exception";
       const detail = `${title}: ${message.message || "Unknown error"}${message.stack ? `\n${message.stack}` : ""}`;
-      appendOutput(state, `\n${detail}\n`);
-      state.error = detail;
-      state.progress = "error";
-      emit(state);
+      setError(state, detail, true);
     });
   }
 
@@ -393,7 +403,14 @@ async function validateCurrentProject(conversationId: string, state: RuntimeStat
   const projectFiles = Object.entries(state.files)
     .filter(([, value]) => value.type === "file")
     .map(([path, value]) => ({ path, content: value.content || "" }));
-  return callGuard({ operation: "project", conversationId, projectFiles, command, projectIntent: state.projectIntent });
+  try {
+    return await callGuard({ operation: "project", conversationId, projectFiles, command, projectIntent: state.projectIntent });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    // Keep authentication and transport errors separate from generated code.
+    if (/unauthorized|authentication|failed to fetch|request failed with (?:401|403|5\d\d)/i.test(message)) throw error;
+    throw new Error(`Generated project validation failed:\n${message}`);
+  }
 }
 
 function detectStartCommand(state: RuntimeState) {
@@ -521,12 +538,14 @@ async function ensureDependencies(conversationId: string, state: RuntimeState) {
   emit(state);
 
   const installCommand = usesBun(state) ? "bun install" : "npm install --no-audit --no-fund";
+  let installOutput = "";
   const exitCode = await runCommand(wc, installCommand, (data) => {
+    installOutput = (installOutput + data).slice(-6000);
     appendOutput(state, data);
     emit(state);
   });
   if (exitCode !== 0) {
-    throw new Error(`${installCommand.split(" --")[0]} exited with code ${exitCode}`);
+    throw new Error(`Generated dependency installation failed: ${installCommand.split(" --")[0]} exited with code ${exitCode}.\n${installOutput}`);
   }
   state.installedPackageJson = packageJson;
 }
@@ -909,12 +928,7 @@ export function processStreamingArtifactText(
       .catch((error) => {
         if (state.blockedMessageId === messageId) return;
         state.blockedMessageId = messageId;
-        setError(state, error);
-        if (typeof window !== "undefined") {
-          window.dispatchEvent(new CustomEvent("cryzo:project-repair-needed", {
-            detail: { conversationId, message: error instanceof Error ? error.message.slice(0, 3500) : String(error).slice(0, 3500) },
-          }));
-        }
+        setError(state, error, true);
       });
   }
 

@@ -2,6 +2,8 @@ import type { FileMap } from "./types";
 
 /** Dependencies known to work with the browser-based Vite runtime. Never guess a version for an unknown package. */
 const VERIFIED_DEPENDENCIES: Record<string, string> = {
+  "@vitejs/plugin-react": "^4.4.0",
+  "@types/canvas-confetti": "^1.9.0",
   "canvas-confetti": "^1.9.3", "lucide-react": "^0.468.0", "react-icons": "^5.4.0",
   "framer-motion": "^12.0.0", "motion": "^12.0.0", "clsx": "^2.1.1",
   "tailwind-merge": "^3.0.0", "class-variance-authority": "^0.7.1",
@@ -85,6 +87,7 @@ export function analyzeProject(files: FileMap, autoRepair = false): IntegrityRes
   }
   const diagnostics: ProjectDiagnostic[] = [];
   const updated: Record<string, string> = {};
+  const typescriptProject = Object.keys(files).some((path) => /\.tsx?$/.test(path));
   const dep = (name: string, from: string) => {
     if (hasDependency(pkg, name) || BUILTINS.has(name)) return;
     const version = web ? VERIFIED_DEPENDENCIES[name] : undefined;
@@ -105,6 +108,14 @@ export function analyzeProject(files: FileMap, autoRepair = false): IntegrityRes
       } else if (!spec.startsWith("/") && !spec.startsWith("@/") && !spec.startsWith("~/") && !spec.startsWith("#")) {
         dep(packageName(spec), path);
       }
+    }
+  }
+  if (web && typescriptProject && hasDependency(pkg, "canvas-confetti") && !hasDependency(pkg, "@types/canvas-confetti")) {
+    if (autoRepair) {
+      pkg.devDependencies = { ...(pkg.devDependencies || {}), "@types/canvas-confetti": VERIFIED_DEPENDENCIES["@types/canvas-confetti"] };
+      changed = true;
+    } else {
+      diagnostics.push({ type: "dependency", file: "package.json", message: 'Missing npm dependency "@types/canvas-confetti" required by TypeScript imports of canvas-confetti.' });
     }
   }
   const configPath = postcssConfig(files);

@@ -17,6 +17,7 @@ describe("generated project preflight", () => {
     const pkg = JSON.parse(patched.repairedFiles.find((x) => x.path === "package.json")!.content);
     expect(pkg.dependencies.react).toBe("^19.2.0");
     expect(pkg.dependencies["canvas-confetti"]).toMatch(/^\^1/);
+    expect(pkg.devDependencies["@types/canvas-confetti"]).toBe("^1.9.0");
     f["package.json"].content = JSON.stringify(pkg);
     expect(analyzeProject(f).diagnostics).toEqual([]);
   });
@@ -61,6 +62,19 @@ describe("generated project preflight", () => {
     const r = analyzeProject(f, true);
     expect(r.diagnostics[0].type).toBe("dependency");
     expect(r.repairedFiles).toEqual([]);
+  });
+
+  it("reconciles all components in a generated website before installation", () => {
+    const f = web({
+      "src/components/Dashboard.tsx": { type: "file", content: 'import { ChartBar } from "lucide-react"; import confetti from "canvas-confetti"; export const celebrate = () => confetti();' },
+      "src/components/Events.tsx": { type: "file", content: 'import { format } from "date-fns"; export const today = format(new Date(), "yyyy");' },
+    });
+    const repair = analyzeProject(f, true);
+    for (const file of repair.repairedFiles) f[file.path] = { type: "file", content: file.content };
+    const pkg = JSON.parse(f["package.json"].content!);
+    expect(Object.keys(pkg.dependencies)).toEqual(expect.arrayContaining(["lucide-react", "canvas-confetti", "date-fns"]));
+    expect(analyzeProject(f).diagnostics).toEqual([]);
+    expect(analyzeProject(f, true).repairedFiles).toEqual([]);
   });
 });
 
