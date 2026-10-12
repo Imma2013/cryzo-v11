@@ -17,6 +17,7 @@ import {
   RefreshCw,
   RotateCcw,
   Save,
+  Smartphone,
 } from "lucide-react";
 import { useWorkspace } from "@/hooks/use-workspace";
 import {
@@ -323,6 +324,13 @@ export function WorkspacePanel({
             )}
           </div>
         </div>
+      ) : nativeProject ? (
+        <div className="flex h-full flex-col items-center justify-center gap-4 bg-[#111115] px-6 text-center">
+          <Smartphone size={32} className="text-zinc-300" />
+          <h2 className="text-xl font-semibold text-white">Native Expo preview</h2>
+          <p className="text-sm leading-6 text-zinc-400">Open the React Native app on your phone using Expo Go.</p>
+          <ExpoDevicePreview conversationId={conversationId} files={files} ready={progress === "ready"} />
+        </div>
       ) : isBooting || !previewUrl || error ? (
         loadingContent
       ) : (
@@ -424,7 +432,7 @@ export function WorkspacePanel({
               <MoreHorizontal size={23} />
             </button>
 
-            {nativeProject && <ExpoDevicePreview conversationId={conversationId} files={files} compact />}
+            {nativeProject && <ExpoDevicePreview conversationId={conversationId} files={files} compact ready={progress === "ready"} />}
             <PublishControls
               files={files}
               conversationId={conversationId}
@@ -437,7 +445,20 @@ export function WorkspacePanel({
     );
   }
 
-  const previewContent = isBooting || !previewUrl || error ? (
+  const previewContent = nativeProject ? (
+    <div className="flex h-full min-h-[320px] flex-col items-center justify-center gap-4 bg-[#111115] px-6 text-center">
+      <div className="flex h-16 w-16 items-center justify-center rounded-2xl border border-zinc-700 bg-zinc-900 text-white">
+        <Smartphone size={30} />
+      </div>
+      <h2 className="text-xl font-semibold text-white">Native mobile preview</h2>
+      <p className="max-w-sm text-sm leading-relaxed text-zinc-400">
+        This is an Expo + React Native project, not a Vite website. Open it on your phone with Expo Go.
+        The same source runs on iOS and Android.
+      </p>
+      <ExpoDevicePreview conversationId={conversationId} files={files} ready={progress === "ready"} />
+      <p className="text-xs text-zinc-500">Expo Metro starts in Cryzo Cloud. You can keep editing while your phone is connected.</p>
+    </div>
+  ) : isBooting || !previewUrl || error ? (
     loadingContent
   ) : (
     <LivePreview
@@ -479,7 +500,7 @@ export function WorkspacePanel({
         </div>
 
         <div className="ml-auto flex items-center gap-3">
-          {nativeProject && <ExpoDevicePreview conversationId={conversationId} files={files} />}
+          {nativeProject && <ExpoDevicePreview conversationId={conversationId} files={files} ready={progress === "ready"} />}
           <PublishControls
             files={files}
             conversationId={conversationId}

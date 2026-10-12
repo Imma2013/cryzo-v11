@@ -4,7 +4,6 @@ import { useEffect, useRef, useState } from "react";
 import {
   Check,
   ChevronDown,
-  Globe2,
   Hammer,
   ImagePlus,
   Loader2,
@@ -13,7 +12,6 @@ import {
   MicOff,
   Plus,
   Send,
-  Smartphone,
   Square,
   X,
 } from "lucide-react";
@@ -24,10 +22,7 @@ import {
   DEFAULT_MODEL_SELECTION,
   type ModelSelection,
 } from "@/lib/ai/models";
-import {
-  toggleProjectPlatform,
-  type ProjectPlatform,
-} from "@/lib/project-platform";
+import type { ProjectPlatform } from "@/lib/project-platform";
 
 export type ChatMode = "build" | "plan";
 
@@ -121,8 +116,6 @@ export function ChatInput({
   onChatModeChange,
   modelSelection = DEFAULT_MODEL_SELECTION,
   onModelSelectionChange = () => {},
-  projectPlatforms,
-  onProjectPlatformsChange,
   variant = "dock",
 }: {
   value: string;
@@ -530,38 +523,7 @@ export function ChatInput({
         )}
       </div>
 
-      {isHero && projectPlatforms && onProjectPlatformsChange && (
-        <div className="mx-auto mt-3 flex max-w-3xl flex-wrap items-center justify-center gap-1.5">
-          {([
-            { id: "web" as const, label: "Web", icon: Globe2 },
-            { id: "ios" as const, label: "iOS", icon: Smartphone },
-            { id: "android" as const, label: "Android", icon: Smartphone },
-          ]).map((platform) => {
-            const Icon = platform.icon;
-            const selected = projectPlatforms.includes(platform.id);
-            return (
-              <button
-                key={platform.id}
-                type="button"
-                onClick={() =>
-                  onProjectPlatformsChange(
-                    toggleProjectPlatform(projectPlatforms, platform.id),
-                  )
-                }
-                className={cn(
-                  "inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-xs transition",
-                  selected
-                    ? "border-zinc-500 bg-zinc-800 text-white"
-                    : "border-zinc-800 bg-transparent text-zinc-500 hover:text-zinc-300",
-                )}
-                aria-pressed={selected}
-              >
-                <Icon size={13} /> {platform.label}
-              </button>
-            );
-          })}
-        </div>
-      )}
+
     </div>
   );
 }

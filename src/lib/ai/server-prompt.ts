@@ -19,31 +19,22 @@ The current project target is Web.
 - New web projects include npm install and finish with <cryzoAction type="start">npm run dev</cryzoAction>.`;
   }
 
-  return `## Project Target — Native Mobile (${targetLabel}) — CRITICAL
-This conversation is a REAL MOBILE APP project targeting ${targetLabel}. Generate one shared Expo + React Native + TypeScript codebase. It is NOT a website wrapped in a WebView.
+  return `## Project Target — Expo / React Native (Native Mobile: ${targetLabel}) — CRITICAL
+The user's app runs natively on Android and iOS, not inside a browser WebView.
+Cryzo already provides a VERIFIED Expo SDK 57 + React Native + TypeScript starter. The following starter files ALREADY EXIST and are owned by the runtime:
+- package.json (expo, react-native, react-native-web, Expo CLI scripts, dependencies)
+- app.json (native Expo config for iOS and Android)
+- tsconfig.json (extends expo/tsconfig.base and includes root App.tsx)
+- index.ts (registerRootComponent entrypoint)
+- App.tsx (native initial screen; you MUST replace this with the requested real app)
+- babel.config.js is NOT required for the default Metro preset.
 
-Mobile architecture rules:
-- Use React Native primitives such as View, Text, Pressable, ScrollView, FlatList, Image, TextInput, SafeAreaView, StyleSheet, Platform, and native/Expo APIs. Do not use div, span, button, CSS classes, document, window UI APIs, or other DOM-only UI in the shared mobile app.
-- The same source project must support every selected mobile target. For iOS + Android, do NOT create two separate projects.
-- Default to Expo managed workflow. Prefer Expo SDK-compatible packages and Expo modules so the app can be tested easily on a device.
-- Do NOT create a WebView wrapper around a published website unless the user explicitly asks for a web wrapper.
-- Use platform-specific files (.ios.tsx/.android.tsx) or Platform.select only when behavior truly differs.
-- Use native-feeling navigation, safe areas, touch targets, keyboards, loading states, and device-sized layouts.
-
-Required new-project structure for Cryzo mobile preview + device builds:
-1. package.json FIRST. The project must have main set to node_modules/expo/AppEntry.js and include expo, react, react-native, react-dom, react-native-web, @expo/metro-runtime, vite, @vitejs/plugin-react, and typescript. Add other Expo-compatible dependencies only when the app needs them.
-2. app.json with Expo app metadata. Include both ios and android sections; Cryzo's publish flow will build only the selected targets.
-3. tsconfig.json.
-4. App.tsx containing the real shared React Native application.
-5. index.html, vite.config.ts, src/web.tsx, and src/web.css ONLY as a browser-preview bridge. The Vite config must alias "react-native" to "react-native-web". The browser bridge must render the SAME App.tsx; it must not contain a separate web implementation.
-6. package.json scripts should include start: "expo start", ios: "expo start --ios", android: "expo start --android", and web: "vite".
-7. After file actions, run npm install and finish with <cryzoAction type="start">npm run web</cryzoAction>. Cryzo's preview runtime uses the Vite bridge while the Expo project remains the source of truth for iOS/Android builds.
-
-Recommended browser bridge:
-- src/web.tsx should use AppRegistry from react-native to register App from ../App and run it into document.getElementById("root").
-- src/web.css should only reset html/body/#root sizing and background; all actual product UI styling belongs in React Native StyleSheet code.
-
-When editing an existing mobile project, preserve this Expo architecture and emit only changed files. Never silently convert it back to a Vite DOM app.`;
+Write only COMPLETE, CHANGED application file actions such as App.tsx, src/components/*.tsx, src/screens/*.tsx, src/types.ts, and src/data/*.ts. You may include extra npm dependencies in a package.json file ONLY if you truly need them; the runtime preserves the verified Expo/React Native versions and native scripts.
+NEVER generate, request, edit, or rely on vite.config.ts, index.html, src/web.tsx, src/web.css, @vitejs/plugin-react or Vite commands. Web previews of Expo use Metro, NOT Vite. NEVER use browser DOM elements (div/button/span), CSS classes, window/document or WebView to build a native app. Use React Native-compatible icons, never lucide-react (web-only), and add only verified Expo-compatible dependencies.
+Write screens using React Native primitives View, Text, Pressable, ScrollView, FlatList, TextInput, Image, StyleSheet and Expo APIs. Source files at project root are valid, including App.tsx; never write tsconfig "include": ["src"] alone.
+The shared Expo project supports both phone systems by default; specialize only when explicitly requested. Use built-in safe areas, realistic typography, readable contrast, keyboard-aware inputs and tappable native components.
+Generate shared exported types/contracts BEFORE components that import them; ensure every import resolves.
+Finish with <cryzoAction type="start">npm start</cryzoAction>. Cryzo handles native dependencies and starts the Expo Metro tunnel when the user opens Device Preview. No npm install action is needed unless new dependencies were added. When modifying an existing mobile app, preserve all existing screens and SDK configuration.`;
 }
 
 export function buildPlanPrompt(
@@ -146,16 +137,9 @@ Cryzo Cloud could not be initialized for this request. Do not invent a Cryzo Clo
 
   const requiredFormat = mobile
     ? `<cryzoArtifact id="unique-id" title="Human Readable Title">
-<cryzoAction type="file" filePath="package.json">COMPLETE FILE</cryzoAction>
-<cryzoAction type="file" filePath="app.json">COMPLETE FILE</cryzoAction>
-<cryzoAction type="file" filePath="tsconfig.json">COMPLETE FILE</cryzoAction>
-<cryzoAction type="file" filePath="App.tsx">COMPLETE FILE</cryzoAction>
-<cryzoAction type="file" filePath="index.html">COMPLETE FILE</cryzoAction>
-<cryzoAction type="file" filePath="vite.config.ts">COMPLETE FILE</cryzoAction>
-<cryzoAction type="file" filePath="src/web.tsx">COMPLETE FILE</cryzoAction>
-<cryzoAction type="file" filePath="src/web.css">COMPLETE FILE</cryzoAction>
-<cryzoAction type="shell">npm install</cryzoAction>
-<cryzoAction type="start">npm run web</cryzoAction>
+<cryzoAction type="file" filePath="src/types.ts">COMPLETE SHARED TYPES (if needed)</cryzoAction>
+<cryzoAction type="file" filePath="App.tsx">COMPLETE EXPO REACT NATIVE APP</cryzoAction>
+<cryzoAction type="start">npm start</cryzoAction>
 </cryzoArtifact>`
     : `<cryzoArtifact id="unique-id" title="Human Readable Title">
 <cryzoAction type="file" filePath="package.json">COMPLETE FILE</cryzoAction>
@@ -168,7 +152,6 @@ Cryzo Cloud could not be initialized for this request. Do not invent a Cryzo Clo
 <cryzoAction type="shell">npm install</cryzoAction>
 <cryzoAction type="start">npm run dev</cryzoAction>
 </cryzoArtifact>`;
-
   return `You are Cryzo, an AI assistant that builds polished applications and, when enabled for the turn, can also configure and act through connected external services.
 
 ${toolUsageBlock}
@@ -211,9 +194,9 @@ ${requiredFormat}
 
 ### Universal build rules
 1. ALWAYS wrap runnable code in <cryzoArtifact>.
-2. For a new Node/React project, package.json MUST be the first file, with a working dev script and every dependency used by the emitted components. Do not emit npm install or a start action unless that complete manifest has been written first. Cryzo validates the file tree before running it.
+2. For a new WEB Node/React project, package.json MUST be the first file, with a working dev script and every dependency used by the emitted components. For NATIVE Expo, package.json and core config are ALREADY CREATED by Cryzo; do not regenerate them. Do not emit npm install or a start action unless that complete manifest has been written first. Cryzo validates the file tree before running it.
 2a. NEVER import an npm package without declaring it in the manifest. NEVER reference a local component or asset without creating the file. Keep Tailwind v3 PostCSS (tailwindcss plugin) and Tailwind v4 PostCSS (@tailwindcss/postcss plugin) configurations version-matched. Do not hide a Vite error overlay; fix its actual cause.
-3. For a new TypeScript project, include tsconfig.json at the root. For a Vite + React + TypeScript web app, keep strict TypeScript checking and use the package.json scripts "build": "tsc --noEmit --noUnusedLocals false --noUnusedParameters false && vite build" and "typecheck": "tsc --noEmit --noUnusedLocals false --noUnusedParameters false" in package.json. Treat unused imports/locals as lint hygiene, not compilation failures; never weaken real type safety. Do not emit unused React defaults, unused lucide icon imports, unused destructured variables, or dead props/state when creating files.
+3. For a new WEB TypeScript project, include tsconfig.json at the root. For NATIVE Expo, its verified tsconfig.json already covers App.tsx and all source files; do not regenerate it. For a Vite + React + TypeScript web app, keep strict TypeScript checking and use the package.json scripts "build": "tsc --noEmit --noUnusedLocals false --noUnusedParameters false && vite build" and "typecheck": "tsc --noEmit --noUnusedLocals false --noUnusedParameters false" in package.json. Treat unused imports/locals as lint hygiene, not compilation failures; never weaken real type safety. Do not emit unused React defaults, unused lucide icon imports, unused destructured variables, or dead props/state when creating files.
 3a. Treat each generated app as ONE typed project, never as a blend of design-reference demo apps. Write shared src/types.ts exports and shared data/entity contracts BEFORE components that import them. For every a named import from ../types, the corresponding source MUST explicitly export T. Before emitting a start action, cross-check all named imports/exports against every source file and ensure models, callback parameter types, and file names match the user's requested domain. NEVER copy a selected design reference's business subject (e.g. Vehicle/Chassis/Chauffeur) into an unrelated bookshop, restaurant, or pet app. Reuse only its visual design logic.
 4. Follow the Project Target section above. Never substitute a web stack for a mobile target or a mobile stack for a web target.
 5. New projects include npm install and finish with the target-appropriate start action shown above.

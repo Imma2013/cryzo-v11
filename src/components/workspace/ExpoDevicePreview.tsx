@@ -6,12 +6,14 @@ import { ExternalLink, Loader2, QrCode, RefreshCw, X } from "lucide-react";
 import type { Id } from "../../../convex/_generated/dataModel";
 import type { FileMap } from "@/lib/workspace/types";
 import { mobileSourceFiles } from "@/lib/workspace/mobile-source-files";
+import { isExpoProject } from "@/lib/workspace/expo-starter";
 
 /** Expo preview is available only for an actual Expo/React Native project. */
-export function ExpoDevicePreview({ conversationId, files, compact = false }: {
+export function ExpoDevicePreview({ conversationId, files, compact = false, ready = true }: {
   conversationId: Id<"conversations">;
   files: FileMap;
   compact?: boolean;
+  ready?: boolean;
 }) {
   const authToken = useAuthToken();
   const [open, setOpen] = useState(false);
@@ -22,6 +24,14 @@ export function ExpoDevicePreview({ conversationId, files, compact = false }: {
   const start = async (refresh = false) => {
     setOpen(true);
     if (loading || (url && !refresh)) return;
+    if (!ready) {
+      setError("Cryzo is still creating or checking the native app. Device Preview will be available when generation finishes.");
+      return;
+    }
+    if (!isExpoProject(files)) {
+      setError("Native Expo files are not ready yet. Generate the app first; Cryzo now initializes Expo automatically.");
+      return;
+    }
     setLoading(true);
     setError("");
     try {
@@ -35,7 +45,7 @@ export function ExpoDevicePreview({ conversationId, files, compact = false }: {
         }),
       });
       const body = await response.json();
-      if (!response.ok || !body.previewUrl) throw new Error(body.error || "Expo preview was not ready.");
+      if (!response.ok || !body.previewUrl) throw new Error(body.error || `Expo preview couldn't start (HTTP ${response.status}). Check your app source and try Reconnect.`);
       setUrl(String(body.previewUrl));
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : "Expo preview could not start");

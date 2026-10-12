@@ -38,6 +38,7 @@ import {
   inferProjectPlatforms,
   normalizeProjectPlatforms,
   type ProjectPlatform,
+  requestedNativeLanguage,
 } from "@/lib/project-platform";
 
 const convex = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
@@ -184,6 +185,13 @@ export async function POST(req: Request) {
     const projectIntent = isAutomaticRepair && earlierUserRequests.length
       ? earlierUserRequests[earlierUserRequests.length - 1]
       : lastUserText;
+    if (mode === "build" && requestedNativeLanguage(projectIntent) &&
+      /\b(build|create|make|develop|implement|generate)\b/i.test(projectIntent)) {
+      return Response.json({
+        error: "native_toolchain_unavailable",
+        message: "SwiftUI and Kotlin native compilation is not yet enabled. Cryzo currently builds previewable iOS/Android apps using Expo + React Native.",
+      }, { status: 422 });
+    }
     const backendRequirements = backendRequirementsFromPrompt(lastUserText);
     const resolved = await resolveServerModel({
       providerId: modelProvider,

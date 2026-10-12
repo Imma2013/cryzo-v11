@@ -14,9 +14,8 @@ import {
   savePendingAuthChatMessage,
 } from "@/lib/chat/initial-message";
 import {
-  DEFAULT_PROJECT_PLATFORMS,
   inferProjectPlatforms,
-  type ProjectPlatform,
+  requestedNativeLanguage,
 } from "@/lib/project-platform";
 
 export default function Home() {
@@ -25,11 +24,8 @@ export default function Home() {
   const createConversation = useMutation(api.conversations.create);
   const [input, setInput] = useState("");
   const [chatMode, setChatMode] = useState<ChatMode>("build");
-  const [projectPlatforms, setProjectPlatforms] = useState<ProjectPlatform[]>(
-    DEFAULT_PROJECT_PLATFORMS,
-  );
-  const [platformTouched, setPlatformTouched] = useState(false);
   const [isStarting, setIsStarting] = useState(false);
+  const [frameworkNotice, setFrameworkNotice] = useState<string | null>(null);
   const [authSettled, setAuthSettled] = useState(false);
 
   useEffect(() => {
@@ -63,11 +59,13 @@ export default function Home() {
     try {
       const fileParts = await filesToUIParts(files);
       const messageText = text || "Use the attached image as context.";
-      const resolvedPlatforms = inferProjectPlatforms(
-        messageText,
-        projectPlatforms,
-        platformTouched,
-      );
+      const nativeLanguage = requestedNativeLanguage(messageText);
+      if (nativeLanguage) {
+        setFrameworkNotice(`${nativeLanguage === "swift" ? "SwiftUI" : "Kotlin/Jetpack Compose"} compilation is not supported yet. Cryzo currently builds native iOS and Android apps with Expo + React Native. Ask for a React Native app to preview it in Expo Go.`);
+        return;
+      }
+      setFrameworkNotice(null);
+      const resolvedPlatforms = inferProjectPlatforms(messageText);
 
       if (!isAuthenticated || !userId) {
         savePendingAuthChatMessage({
@@ -129,7 +127,7 @@ export default function Home() {
                 What will you build today?
               </h1>
               <p className="mx-auto mt-4 max-w-2xl text-base leading-7 text-zinc-400 sm:text-lg">
-                Start with an idea, image, or rough plan. Choose the platform or just describe it in your prompt.
+                Start with an idea, image, or rough plan. Cryzo chooses the right framework from your request.
               </p>
             </div>
 
@@ -142,15 +140,11 @@ export default function Home() {
               disabled={loading || (isAuthenticated && !userId)}
               chatMode={chatMode}
               onChatModeChange={setChatMode}
-              projectPlatforms={projectPlatforms}
-              onProjectPlatformsChange={(platforms) => {
-                setProjectPlatforms(platforms);
-                setPlatformTouched(true);
-              }}
               variant="hero"
             />
+            {frameworkNotice && <p role="alert" className="mx-auto mt-2 max-w-xl text-center text-xs leading-5 text-amber-300">{frameworkNotice}</p>}
             <p className="mx-auto mt-3 max-w-xl text-center text-[11px] leading-5 text-zinc-600">
-              iOS and Android can be selected together and share one Expo + React Native codebase.
+              Ask for an app to build with Expo + React Native; ask for a website to build for the web.
             </p>
           </div>
         </section>

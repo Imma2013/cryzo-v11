@@ -19,10 +19,9 @@ import {
   type ModelSelection,
 } from "@/lib/ai/models";
 import {
-  DEFAULT_PROJECT_PLATFORMS,
   inferProjectPlatforms,
+  requestedNativeLanguage,
   normalizeProjectPlatforms,
-  type ProjectPlatform,
 } from "@/lib/project-platform";
 
 export default function ChatEmptyPage() {
@@ -38,11 +37,8 @@ export default function ChatEmptyPage() {
   const [chatMode, setChatMode] = useState<ChatMode>("build");
   const [modelSelection, setModelSelection] =
     useState<ModelSelection>(DEFAULT_MODEL_SELECTION);
-  const [projectPlatforms, setProjectPlatforms] = useState<ProjectPlatform[]>(
-    DEFAULT_PROJECT_PLATFORMS,
-  );
-  const [platformTouched, setPlatformTouched] = useState(false);
   const [isStarting, setIsStarting] = useState(false);
+  const [frameworkNotice, setFrameworkNotice] = useState<string | null>(null);
 
   useEffect(() => {
     if (!userId || pendingHandled.current) return;
@@ -80,12 +76,14 @@ export default function ChatEmptyPage() {
     try {
       const text = input.trim();
       const messageText = text || "Use the attached image as context.";
+      const nativeLanguage = requestedNativeLanguage(messageText);
+      if (nativeLanguage) {
+        setFrameworkNotice(`${nativeLanguage === "swift" ? "SwiftUI" : "Kotlin/Jetpack Compose"} compilation is not supported yet. Cryzo currently builds native iOS and Android apps with Expo + React Native. Ask for a React Native app to preview it in Expo Go.`);
+        return;
+      }
+      setFrameworkNotice(null);
       const fileParts = await filesToUIParts(files);
-      const resolvedPlatforms = inferProjectPlatforms(
-        messageText,
-        projectPlatforms,
-        platformTouched,
-      );
+      const resolvedPlatforms = inferProjectPlatforms(messageText);
       const id = await createConversation({
         userId,
         chatMode,
@@ -131,13 +129,9 @@ export default function ChatEmptyPage() {
               onChatModeChange={setChatMode}
               modelSelection={modelSelection}
               onModelSelectionChange={setModelSelection}
-              projectPlatforms={projectPlatforms}
-              onProjectPlatformsChange={(platforms) => {
-                setProjectPlatforms(platforms);
-                setPlatformTouched(true);
-              }}
               variant="hero"
             />
+            {frameworkNotice && <p role="alert" className="mx-auto mt-2 max-w-xl text-center text-xs leading-5 text-amber-300">{frameworkNotice}</p>}
             {userId && (
               <ProjectImport userId={userId} modelSelection={modelSelection} />
             )}

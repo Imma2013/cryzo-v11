@@ -497,6 +497,9 @@ async function startExpoPreview(workspace: Workspace, forceRestart = false) {
     if (previousUrl) return { previewUrl: previousUrl, output: previous.output.slice(-6000) };
   }
   await run(workspace, "npm install --no-audit --no-fund", undefined, false);
+  // Don't serve a scannable QR for an Expo project with broken imports or types.
+  // Generated SDK config is already valid; this checks the actual app screens.
+  await run(workspace, "./node_modules/.bin/tsc --noEmit --noUnusedLocals false --noUnusedParameters false", undefined, false);
   await run(workspace, "npm install --no-audit --no-fund --no-save @expo/ngrok@^4.1.0", undefined, true);
   await run(
     workspace,

@@ -29,6 +29,8 @@ export function useWorkspace(conversationId: Id<"conversations">) {
   const artifacts = useQuery(api.artifacts.listByConversation, {
     conversationId,
   });
+  const conversation = useQuery(api.conversations.get, { id: conversationId });
+  const isNativeProject = Boolean(conversation?.projectPlatforms?.some((platform) => platform === "ios" || platform === "android"));
 
   useEffect(() => {
     setRuntime(getStreamingRuntimeSnapshot(runtimeId));
@@ -43,12 +45,12 @@ export function useWorkspace(conversationId: Id<"conversations">) {
 
   useEffect(() => {
     if (authLoading || !isAuthenticated || !authToken) return;
-    if (!artifacts?.length) return;
+    if (!artifacts?.length || !conversation) return;
     if (isStreamingRuntimeActive(runtimeId)) return;
 
     const actions = artifacts.flatMap((artifact) => artifact.actions);
-    void restoreStreamingRuntime(runtimeId, actions);
-  }, [artifacts, authLoading, authToken, isAuthenticated, runtimeId]);
+    void restoreStreamingRuntime(runtimeId, actions, isNativeProject);
+  }, [artifacts, authLoading, authToken, isAuthenticated, runtimeId, conversation, isNativeProject]);
 
   useEffect(() => {
     const resume = (forceTransportRecovery = false) => {
