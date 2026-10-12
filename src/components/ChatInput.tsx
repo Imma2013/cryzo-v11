@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ModelPicker } from "@/components/ModelPicker";
+import { ReasoningPicker } from "@/components/ReasoningPicker";
 import { McpQuickMenu } from "@/components/McpQuickMenu";
 import {
   DEFAULT_MODEL_SELECTION,
@@ -82,7 +83,7 @@ const MODES = [
   },
   {
     id: "plan" as const,
-    label: "Discuss",
+    label: "Plan",
     description: "Talk through ideas without editing code",
     icon: MessageCircle,
   },
@@ -137,14 +138,12 @@ export function ChatInput({
   const recognitionRef = useRef<BrowserSpeechRecognition | null>(null);
   const attachmentsRef = useRef<ImageAttachment[]>([]);
   const valueRef = useRef(value);
-  const modeMenuRef = useRef<HTMLDivElement>(null);
   const plusMenuRef = useRef<HTMLDivElement>(null);
   const prefillTimerRef = useRef<number | null>(null);
   const [attachments, setAttachments] = useState<ImageAttachment[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [isListening, setIsListening] = useState(false);
-  const [modeOpen, setModeOpen] = useState(false);
   const [plusOpen, setPlusOpen] = useState(false);
   const [prefillNotice, setPrefillNotice] = useState<string | null>(null);
   const isHero = variant === "hero";
@@ -169,7 +168,6 @@ export function ChatInput({
   useEffect(() => {
     const closeMenus = (event: PointerEvent) => {
       const node = event.target as Node;
-      if (!modeMenuRef.current?.contains(node)) setModeOpen(false);
       if (!plusMenuRef.current?.contains(node)) setPlusOpen(false);
     };
     document.addEventListener("pointerdown", closeMenus);
@@ -278,7 +276,6 @@ export function ChatInput({
   };
 
   const activeMode = MODES.find((mode) => mode.id === chatMode) || MODES[0];
-  const ActiveModeIcon = activeMode.icon;
   const canSend = value.trim().length > 0 || attachments.length > 0;
 
   return (
@@ -411,6 +408,17 @@ export function ChatInput({
                   isHero ? "left-0 top-full mt-2" : "bottom-full left-0 mb-2",
                 )}
               >
+                {MODES.map((mode) => {
+                  const Icon = mode.icon;
+                  return <button key={mode.id} type="button" role="menuitemradio" aria-checked={mode.id === chatMode}
+                    onClick={() => { onChatModeChange(mode.id); setPlusOpen(false); }}
+                    className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm text-zinc-200 hover:bg-zinc-900">
+                    <Icon size={17} className="shrink-0 text-zinc-400"/>
+                    <span className="flex-1 text-left"><span className="block font-medium">{mode.label}</span><span className="block text-xs text-zinc-500">{mode.description}</span></span>
+                    {chatMode === mode.id && <Check size={15} className="text-white" />}
+                  </button>;
+                })}
+                <div className="my-1 border-t border-zinc-800" />
                 <button
                   type="button"
                   onClick={() => {
@@ -421,65 +429,22 @@ export function ChatInput({
                   className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm text-zinc-200 hover:bg-zinc-900 disabled:opacity-40"
                 >
                   <ImagePlus size={16} className="text-zinc-400" />
-                  Add image
+                  Upload image
                 </button>
                 <McpQuickMenu />
               </div>
             )}
           </div>
 
-          <div ref={modeMenuRef} className="relative shrink-0">
-            <button
-              type="button"
-              onClick={() => setModeOpen((open) => !open)}
-              className="inline-flex h-9 items-center gap-1.5 rounded-lg px-2 text-xs font-medium text-zinc-200 transition hover:bg-zinc-800"
-              aria-haspopup="menu"
-              aria-expanded={modeOpen}
-            >
-              <ActiveModeIcon size={14} />
-              {activeMode.label}
-              <ChevronDown size={12} />
-            </button>
-            {modeOpen && (
-              <div
-                className={cn(
-                  "absolute z-50 w-64 overflow-hidden rounded-xl border border-zinc-800 bg-zinc-950 p-1.5 shadow-2xl",
-                  isHero ? "left-0 top-full mt-2" : "bottom-full left-0 mb-2",
-                )}
-              >
-                {MODES.map((mode) => {
-                  const Icon = mode.icon;
-                  const selected = mode.id === chatMode;
-                  return (
-                    <button
-                      key={mode.id}
-                      type="button"
-                      onClick={() => {
-                        onChatModeChange(mode.id);
-                        setModeOpen(false);
-                      }}
-                      className="flex w-full items-start gap-3 rounded-lg px-3 py-2.5 text-left hover:bg-zinc-900"
-                    >
-                      <Icon size={16} className="mt-0.5 shrink-0 text-zinc-300" />
-                      <span className="min-w-0 flex-1">
-                        <span className="block text-sm font-medium text-white">{mode.label}</span>
-                        <span className="block text-xs text-zinc-500">{mode.description}</span>
-                      </span>
-                      {selected && <Check size={15} className="mt-0.5 text-white" />}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-
-          <div className="min-w-0 flex-1 overflow-hidden [&>button>span:nth-of-type(2)]:hidden">
+          <div className="min-w-0 flex-1 overflow-hidden">
             <ModelPicker
               selection={modelSelection}
               onChange={onModelSelectionChange}
               compact
             />
           </div>
+
+          <ReasoningPicker selection={modelSelection} onChange={onModelSelectionChange} />
 
           <button
             type="button"

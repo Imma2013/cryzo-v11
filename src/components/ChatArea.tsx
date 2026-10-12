@@ -164,6 +164,9 @@ export function ChatArea({
             conversation?.modelCredentialMode ||
             DEFAULT_MODEL_SELECTION.credentialMode,
           baseURL: conversation?.modelBaseUrl,
+          reasoningEffort: (conversation?.modelReasoningPreferences?.[
+            `${conversation?.modelProvider || DEFAULT_MODEL_SELECTION.providerId}:${conversation?.modelId || DEFAULT_MODEL_SELECTION.modelId}`
+          ] || "default") as ModelSelection["reasoningEffort"],
         };
 
   const prevConvIdRef = useRef<string | null>(null);
@@ -342,16 +345,20 @@ export function ChatArea({
 
   const handleModelSelectionChange = useCallback(
     (selection: ModelSelection) => {
-      setOptimisticModel({ conversationId, selection });
+      // Preserve each model's own preferred effort across switches.
+      const key = `${selection.providerId}:${selection.modelId}`;
+      const effort = selection.reasoningEffort ?? (conversation?.modelReasoningPreferences?.[key] as ModelSelection["reasoningEffort"]) ?? "default";
+      setOptimisticModel({ conversationId, selection: { ...selection, reasoningEffort: effort } });
       updateModel({
         id: conversationId,
         providerId: selection.providerId,
         modelId: selection.modelId,
         credentialMode: selection.credentialMode,
         baseUrl: selection.baseURL,
+        reasoningEffort: effort,
       });
     },
-    [conversationId, updateModel],
+    [conversationId, updateModel, conversation?.modelReasoningPreferences],
   );
 
   const fileToUIPart = async (file: File): Promise<FileUIPart> => {
@@ -596,6 +603,7 @@ export function ChatArea({
             modelProvider: selection.providerId,
             modelId: selection.modelId,
             modelCredentialMode: selection.credentialMode,
+            reasoningEffort: selection.reasoningEffort || "default",
             modelBaseUrl,
             modelApiKey,
             authToken:

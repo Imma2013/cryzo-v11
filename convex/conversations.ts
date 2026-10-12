@@ -33,6 +33,7 @@ export const create = mutation({
       v.union(v.literal("cryzo"), v.literal("device"), v.literal("account")),
     ),
     modelBaseUrl: v.optional(v.string()),
+    modelReasoningEffort: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const authUserId = await getAuthUserId(ctx);
@@ -54,6 +55,9 @@ export const create = mutation({
       modelId: args.modelId || "cryzo/nemotron-3.5-lightning-free",
       modelCredentialMode: args.modelCredentialMode || "cryzo",
       modelBaseUrl: args.modelBaseUrl?.trim() || undefined,
+      modelReasoningPreferences: args.modelReasoningEffort
+        ? { [`${args.modelProvider || "cryzo"}:${args.modelId || "cryzo/nemotron-3.5-lightning-free"}`]: args.modelReasoningEffort }
+        : {},
       createdAt: now,
       updatedAt: now,
     });
@@ -150,10 +154,17 @@ export const updateModel = mutation({
       v.literal("account"),
     ),
     baseUrl: v.optional(v.string()),
+    reasoningEffort: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    await requireOwner(ctx, args.id);
+    const conversation = await requireOwner(ctx, args.id);
+    const validEffort = ["default", "none", "minimal", "low", "medium", "high", "xhigh", "max"].includes(args.reasoningEffort || "")
+      ? args.reasoningEffort : "default";
     await ctx.db.patch(args.id, {
+      modelReasoningPreferences: {
+        ...(conversation.modelReasoningPreferences || {}),
+        [`${args.providerId}:${args.modelId}`]: validEffort || "default",
+      },
       modelProvider: args.providerId,
       modelId: args.modelId,
       modelCredentialMode: args.credentialMode,

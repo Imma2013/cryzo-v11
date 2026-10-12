@@ -92,6 +92,7 @@ export default function ChatEmptyPage() {
         modelId: modelSelection.modelId,
         modelCredentialMode: modelSelection.credentialMode,
         modelBaseUrl: modelSelection.baseURL,
+        modelReasoningEffort: modelSelection.reasoningEffort,
       });
       saveInitialChatMessage({
         conversationId: id,

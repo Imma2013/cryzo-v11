@@ -30,6 +30,7 @@ export default defineSchema({
       v.union(v.literal("cryzo"), v.literal("device"), v.literal("account")),
     ),
     modelBaseUrl: v.optional(v.string()),
+    modelReasoningPreferences: v.optional(v.record(v.string(), v.string())),
     createdAt: v.number(),
     updatedAt: v.number(),
   }).index("by_user", ["userId", "updatedAt"]),

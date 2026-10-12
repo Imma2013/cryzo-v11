@@ -1,3 +1,4 @@
+import { supportedReasoningEfforts } from "@/lib/ai/reasoning-config";
 import { PROVIDERS } from "@/lib/ai/models";
 import { managedPickerCatalog } from "@/lib/server/openrouter";
 
@@ -9,6 +10,7 @@ type CatalogModel = {
   id?: string;
   name?: string;
   reasoning?: boolean;
+  reasoning_options?: unknown;
   tool_call?: boolean;
   attachment?: boolean;
   structured_output?: boolean;
@@ -32,6 +34,7 @@ function normalizeProvider(providerId: string, provider: CatalogProvider) {
       id: model.id || modelId,
       name: model.name || modelId,
       reasoning: Boolean(model.reasoning),
+      reasoningEfforts: supportedReasoningEfforts({ reasoning: Boolean(model.reasoning), reasoningOptions: model.reasoning_options }),
       toolCall: Boolean(model.tool_call),
       attachments: Boolean(model.attachment),
       structuredOutput: Boolean(model.structured_output),
@@ -76,7 +79,7 @@ export async function GET() {
 
     const managed = await managedPickerCatalog();
     providers.cryzo = { id: "cryzo", name: "Cryzo", api: null, env: [], models: managed.map(model => ({
-      ...model, reasoning: Boolean(model.reasoning), toolCall: Boolean(model.toolCall), structuredOutput: false, releaseDate: null, lastUpdated: null,
+      ...model, reasoning: Boolean(model.reasoning), reasoningEfforts: supportedReasoningEfforts({ reasoning: Boolean(model.reasoning), reasoningOptions: model.reasoningOptions }), toolCall: Boolean(model.toolCall), structuredOutput: false, releaseDate: null, lastUpdated: null,
     })) };
     return Response.json({
       source: MODELS_URL,

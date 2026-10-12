@@ -39,6 +39,7 @@ export type CatalogModel = {
   id: string;
   name: string;
   reasoning?: boolean;
+  reasoningEfforts?: string[];
   toolCall?: boolean;
   available?: boolean;
   attachments?: boolean;
@@ -195,7 +196,7 @@ export function ModelPicker({
   }, [providerId, accountConnections, selection.baseURL, selection.providerId]);
 
   useEffect(() => {
-    if (!open || Object.keys(catalog.providers || {}).length > 0) return;
+    if (Object.keys(catalog.providers || {}).length > 0) return;
     setCatalogLoading(true);
     setCatalogError("");
     fetch("/api/models/catalog", { cache: "no-store" })
@@ -233,6 +234,7 @@ export function ModelPicker({
         id: model.id,
         name: model.name,
         reasoning: model.reasoning,
+        reasoningEfforts: model.reasoningEfforts,
         toolCall: model.toolCall,
         attachments: model.attachments,
         context: model.context, inputCost: model.inputCost, outputCost: model.outputCost,
@@ -473,14 +475,14 @@ export function ModelPicker({
         onClick={() => setOpen(true)}
         className={
           compact
-            ? "inline-flex h-9 min-w-0 shrink-0 items-center gap-1.5 rounded-lg px-2 text-xs text-zinc-400 transition-colors hover:bg-zinc-900 hover:text-white"
+            ? "inline-flex h-9 min-w-0 max-w-full items-center gap-1.5 rounded-lg px-2 text-xs text-zinc-400 transition-colors hover:bg-zinc-900 hover:text-white"
             : "inline-flex h-9 max-w-[220px] items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-900 px-2.5 text-xs text-zinc-300 hover:text-white"
         }
         title={`${selectedProvider.name} · ${selectedModelId}`}
       >
         <ModelLogo provider={selectedProvider} modelId={selectedModelId} size={26} />
-        <span className="max-w-32 truncate">{selectedModelName}</span>
-        <span className="text-[10px] text-zinc-500">{selectedProvider.id === "cryzo" ? "Included with Cryzo" : "Your key"}</span>
+        <span className="max-w-[min(40vw,17rem)] truncate text-zinc-200">{catalog.providers?.[selection.providerId]?.models?.find(model => model.id === selectedModelId)?.name || selectedModelName}</span>
+        {!compact && <span className="text-[10px] text-zinc-500">{selectedProvider.id === "cryzo" ? "Included with Cryzo" : "Your key"}</span>}
         <ChevronDown size={13} className="shrink-0" />
       </button>
 

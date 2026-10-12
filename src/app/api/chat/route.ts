@@ -1,3 +1,4 @@
+import { providerReasoningOptions } from "@/lib/ai/reasoning-config";
 import { Composio } from "@composio/core";
 import { VercelProvider } from "@composio/vercel";
 import {
@@ -149,6 +150,7 @@ export async function POST(req: Request) {
       modelProvider,
       modelId,
       modelCredentialMode,
+      reasoningEffort,
       modelBaseUrl,
       modelApiKey,
       authToken,
@@ -163,6 +165,7 @@ export async function POST(req: Request) {
       modelProvider?: string;
       modelId?: string;
       modelCredentialMode?: "cryzo" | "device" | "account";
+      reasoningEffort?: string;
       modelBaseUrl?: string;
       modelApiKey?: string;
       authToken?: string;
@@ -201,6 +204,7 @@ export async function POST(req: Request) {
       modelBaseUrl,
       authToken,
     });
+    const providerOptions = providerReasoningOptions(resolved.providerId, resolved.upstreamModelId, reasoningEffort);
 
     const baseMessageCharge = resolved.usesCryzoCredits
       ? classifyCreditCost({
@@ -445,6 +449,7 @@ export async function POST(req: Request) {
     if (mode === "plan") {
       const result = streamText({
         model: resolved.model,
+        providerOptions,
         system:
           buildPlanPrompt(recipeBlock, resolvedProjectPlatforms) +
           currentProjectContext,
@@ -547,6 +552,7 @@ export async function POST(req: Request) {
 
       const result = streamText({
         model: resolved.model,
+        providerOptions,
         system: systemPrompt,
         messages: modelMessages,
         tools,
@@ -597,6 +603,7 @@ export async function POST(req: Request) {
           for (let segment = 0; segment < MAX_BUILD_SEGMENTS; segment++) {
             const result = streamText({
               model: resolved.model,
+              providerOptions,
               system: systemPrompt,
               messages: continuationMessages,
               maxRetries: 2,
@@ -631,6 +638,7 @@ export async function POST(req: Request) {
           if (missing.length && cryzoCloudAppId) {
             const repair = streamText({
               model: resolved.model,
+              providerOptions,
               system: systemPrompt,
               messages: [
                 ...modelMessages,
@@ -667,6 +675,7 @@ export async function POST(req: Request) {
               if (audit.verdict === "retry" && audit.critique.length) {
                 const revision = streamText({
                   model: resolved.model,
+                  providerOptions,
                   system: systemPrompt + `\n\n<design_audit_retry>\nThe draft drifted from the locked ${selectedPrimaryReference.slug} reference. Preserve the exact design execution packet; fix the following:\n${audit.critique.map((c: string) => `- ${c}`).join("\n")}\nDo not output another generic hero/cards/footer layout.\n</design_audit_retry>`,
                   messages: [
                     ...modelMessages,

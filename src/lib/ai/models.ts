@@ -1,3 +1,4 @@
+import type { ReasoningEffort } from "./reasoning-config";
 import {
   DEFAULT_MANAGED_MODEL_ID,
   getManagedModel,
@@ -10,6 +11,7 @@ export type ModelSelection = {
   modelId: string;
   credentialMode: CredentialMode;
   baseURL?: string;
+  reasoningEffort?: ReasoningEffort;
 };
 
 export type ProviderDefinition = {
