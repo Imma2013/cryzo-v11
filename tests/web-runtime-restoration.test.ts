@@ -11,7 +11,7 @@ const mocks = vi.hoisted(() => {
     writeFiles: vi.fn(async (_sandbox: unknown, actions: ArtifactAction[]) => {
       for (const action of actions) if (action.type === "file" && action.filePath) files.set(action.filePath, action.content);
     }),
-    runCommand: vi.fn(async (_sandbox: unknown, command: string, onData: (text: string) => void) => {
+    runCommand: vi.fn(async (_sandbox: unknown, command: string, onData: (text: string) => void): Promise<number> => {
       if (command === "npm run build") {
         onData('src/App.tsx(1,1): error TS2322: Type string is not assignable to number.');
         return 2;
