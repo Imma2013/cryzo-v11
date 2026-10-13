@@ -35,6 +35,7 @@ import {
   getManagedModel,
 } from "@/lib/ai/managed-models";
 import { ModelLogo, ProviderLogo } from "@/components/ProviderLogo";
+import type { ReasoningEffort } from "@/lib/ai/reasoning-config";
 
 export type CatalogModel = {
   id: string;
@@ -257,7 +258,8 @@ export function ModelPicker({
   }, [catalog.providers, discoveredModels, provider.id, search]);
 
   const selectedCatalogModel = providerModels.find((model) => model.id === modelId);
-  const selectedReasoningEfforts = (selectedCatalogModel?.reasoningEfforts || []).filter((effort) => effort !== "default");
+  const selectedReasoningEfforts = (selectedCatalogModel?.reasoningEfforts || [])
+    .filter((effort) => effort !== "default") as ReasoningEffort[];
   const reasoningLabel = (effort: string) => effort === "xhigh" ? "Extra High" : effort.charAt(0).toUpperCase() + effort.slice(1);
 
   useEffect(() => {
