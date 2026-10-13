@@ -33,11 +33,11 @@ export function providerReasoningOptions(providerId: string, modelId: string, ef
   if (!effort || effort === "default" || !REASONING_EFFORTS.some(value => value === effort)) return undefined;
 
   const effectiveProviderId = providerId === "cryzo"
-    ? /^gpt-/i.test(modelId)
+    ? /(?:^|\/)openai-|^gpt-/i.test(modelId)
       ? "openai"
-      : /^claude-/i.test(modelId)
+      : /(?:^|\/)anthropic-|^claude-/i.test(modelId)
         ? "anthropic"
-        : /^gemini-/i.test(modelId)
+        : /(?:^|\/)google-|^gemini-/i.test(modelId)
           ? "google"
           : "openrouter"
     : providerId;
