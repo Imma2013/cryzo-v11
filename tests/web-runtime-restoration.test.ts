@@ -27,6 +27,10 @@ vi.mock("@/lib/workspace/sandbox", () => ({
   runCommand: mocks.runCommand,
   directoryExists: vi.fn(async () => false),
   teardownSandbox: vi.fn(), rebootSandboxRuntime: vi.fn(), collectDirectoryFiles: vi.fn(),
+  isSandboxInfrastructureError: (error: unknown) => {
+    const code = error && typeof error === "object" && "code" in error ? String((error as { code?: unknown }).code || "") : "";
+    return ["ERR_BOOT_TIMEOUT", "ERR_BOOT_FAILED", "ERR_WORKER", "ERR_NOT_ISOLATED", "ERR_PREVIEW_SERVICE_WORKER"].includes(code);
+  },
 }));
 vi.mock("@/lib/developer-connections", () => ({ readSupabaseRuntimeContext: () => null }));
 
@@ -100,4 +104,26 @@ describe("web restoration validation and repair", () => {
     expect(repair.mock.calls[0][0].detail.message).toContain('does not export "Team"');
     expect(mocks.runCommand.mock.calls.some(([, command]) => command === "npm run build")).toBe(false);
   });
+
+  it("does not send Vivari infrastructure failures to automatic project repair", async () => {
+    const bootError = Object.assign(new Error("Vivari.boot() did not complete within 45000ms"), { code: "ERR_BOOT_TIMEOUT" });
+    const sandboxModule = await import("@/lib/workspace/sandbox");
+    const getSandboxMock = vi.mocked(sandboxModule.getSandbox);
+    getSandboxMock.mockRejectedValueOnce(bootError);
+
+    const runtime = await import("@/lib/workspace/streaming-runtime");
+    runtime.setStreamingRuntimeAuthToken("test-token");
+    const repair = vi.fn();
+    window.addEventListener("cryzo:project-repair-needed", repair);
+
+    const artifact = `<cryzoArtifact id="runtime-failure" title="Web app">
+<cryzoAction type="file" filePath="package.json">{"scripts":{"dev":"vite"},"dependencies":{"react":"^19.2.0","react-dom":"^19.2.0"},"devDependencies":{"vite":"^6.3.0"}}</cryzoAction>
+</cryzoArtifact>`;
+    runtime.processStreamingArtifactText("runtime-infra-failure", "ai-runtime", artifact, "Build a website");
+
+    await vi.waitFor(() => expect(runtime.getStreamingRuntimeSnapshot("runtime-infra-failure").progress).toBe("error"));
+    expect(repair).not.toHaveBeenCalled();
+    expect(runtime.getStreamingRuntimeSnapshot("runtime-infra-failure").error).toContain("Vivari.boot");
+  });
+
 });

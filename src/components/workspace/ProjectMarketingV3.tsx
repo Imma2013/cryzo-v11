@@ -23,6 +23,7 @@ import ProjectSocialAccounts from "./ProjectSocialAccounts";
 import SocialPostPreview from "./SocialPostPreview";
 
 const CHANNELS = [
+  { id: "x", label: "X", color: "bg-black text-white" },
   { id: "linkedin", label: "LinkedIn", color: "bg-[#0a66c2] text-white" },
   { id: "instagram", label: "Instagram", color: "bg-[#d62976] text-white" },
   { id: "facebook", label: "Facebook", color: "bg-[#1877f2] text-white" },

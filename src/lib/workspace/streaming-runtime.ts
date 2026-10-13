@@ -10,6 +10,7 @@ import {
   collectDirectoryFiles,
   directoryExists,
   getSandbox,
+  isSandboxInfrastructureError,
   rebootSandboxRuntime,
   runCommand,
   resetSandboxProject,
@@ -928,7 +929,7 @@ export function processStreamingArtifactText(
       .catch((error) => {
         if (state.blockedMessageId === messageId) return;
         state.blockedMessageId = messageId;
-        setError(state, error, true);
+        setError(state, error, !isSandboxInfrastructureError(error));
       });
   }
 

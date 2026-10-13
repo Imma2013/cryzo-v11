@@ -8,6 +8,7 @@ import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 
 const networks = [
+  { toolkit: "twitter", channel: "x", label: "X", mark: "X", accent: "bg-black text-white" },
   { toolkit: "facebook", channel: "facebook", label: "Facebook", mark: "f", accent: "bg-[#1877f2] text-white" },
   { toolkit: "instagram", channel: "instagram", label: "Instagram", mark: "◎", accent: "bg-gradient-to-br from-[#833ab4] via-[#fd1d1d] to-[#fcb045] text-white" },
   { toolkit: "youtube", channel: "youtube", label: "YouTube", mark: "▶", accent: "bg-[#ff0033] text-white" },
@@ -122,7 +123,7 @@ export default function ProjectSocialAccounts() {
             )}
           </div>
           <p className="mt-1 text-xs text-zinc-400">
-            Facebook, Instagram, YouTube, and LinkedIn are active in Marketing right now.
+            X, Facebook, Instagram, YouTube, and LinkedIn are active in Marketing right now.
           </p>
         </div>
         <button
@@ -152,7 +153,7 @@ export default function ProjectSocialAccounts() {
       )}
 
       {open && (
-        <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
           {networks.map((network) => {
             const accounts = visibleAccounts.filter((account) => account.channel === network.channel);
             const connecting = busyToolkit === network.toolkit;

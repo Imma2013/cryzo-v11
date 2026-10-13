@@ -129,6 +129,25 @@ export function isSandboxReloadRequiredError(error: unknown) {
   );
 }
 
+const SANDBOX_INFRASTRUCTURE_CODES = new Set([
+  SANDBOX_RELOAD_ERROR_CODE,
+  "ERR_NOT_ISOLATED",
+  "ERR_BOOT_FAILED",
+  "ERR_BOOT_TIMEOUT",
+  "ERR_WORKER",
+  "ERR_TORN_DOWN",
+  "ERR_ABORTED",
+  "ERR_PREVIEW_SERVICE_WORKER",
+]);
+
+export function isSandboxInfrastructureError(error: unknown) {
+  if (!error) return false;
+  const code = typeof error === "object" && "code" in error ? (error as { code?: string }).code : undefined;
+  if (code && SANDBOX_INFRASTRUCTURE_CODES.has(code)) return true;
+  const message = error instanceof Error ? error.message : String(error);
+  return /Cryzo runtime could not start|Vivari\.boot|kernel worker|preview Service Worker|cross.?origin.?isolat|SharedArrayBuffer/i.test(message);
+}
+
 function assertCrossOriginIsolation() {
   if (typeof window !== "undefined" && !window.crossOriginIsolated) {
     throw reloadRequiredError(
@@ -154,16 +173,25 @@ async function bootSandbox(): Promise<Sandbox> {
     }
     previewOrigin = parsed.origin;
   }
+  // Bring the kernel online before installing the preview Service Worker. Vivari
+  // Studio uses this ordering because a Service Worker activation during worker
+  // module loading can interrupt the kernel before it reports ready.
   const vivari = await VivariRuntime.boot({
-    serviceWorkerUrl: VIVARI_SERVICE_WORKER,
+    serviceWorkerUrl: false,
     ...(previewOrigin ? { previewOrigin, previewPopout: "isolated" as const } : {}),
     workerName: "Cryzo Runtime",
-    // Vivari's "devtools" slot injects /vv-devtools/chobitsu.js into every preview
-    // page. Cryzo serves its own element picker + error reporter at that path
-    // (see scripts/sync-vivari-assets.mjs), so no DevTools backend is loaded.
-    devtools: true,
+    timeout: 45_000,
   });
   await vivari.fs.mkdir(SANDBOX_PROJECT_DIR, { recursive: true });
+
+  const previewReady = await vivari.internal.registerServiceWorker(VIVARI_SERVICE_WORKER);
+  if (!previewReady) {
+    vivari.teardown();
+    const error = new Error("The Cryzo preview Service Worker could not be registered.") as Error & { code?: string };
+    error.code = "ERR_PREVIEW_SERVICE_WORKER";
+    throw error;
+  }
+  vivari.internal.setDevtoolsEnabled(true);
   return new Sandbox(vivari);
 }
 
@@ -190,9 +218,13 @@ export async function getSandbox(): Promise<Sandbox> {
               );
         throw isolationFailure;
       }
-      throw new Error(
+      const wrapped = new Error(
         `The Cryzo runtime could not start in this browser. ${error instanceof Error ? error.message : String(error)}`,
-      );
+      ) as Error & { code?: string };
+      if (error && typeof error === "object" && "code" in error) {
+        wrapped.code = String((error as { code?: unknown }).code || "");
+      }
+      throw wrapped;
     });
 
   return bootPromise;

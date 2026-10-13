@@ -32,13 +32,14 @@ describe("social Composio configuration", () => {
 
   it("exposes only funded/supported networks in the current Marketing product", () => {
     expect(ACTIVE_MARKETING_TOOLKITS).toEqual([
+      "twitter",
       "facebook",
       "instagram",
       "youtube",
       "linkedin",
     ]);
     expect(isActiveMarketingToolkit("linkedin")).toBe(true);
-    expect(isActiveMarketingToolkit("twitter")).toBe(false);
+    expect(isActiveMarketingToolkit("twitter")).toBe(true);
     expect(isActiveMarketingToolkit("reddit")).toBe(false);
     expect(isActiveMarketingToolkit("tiktok")).toBe(false);
   });

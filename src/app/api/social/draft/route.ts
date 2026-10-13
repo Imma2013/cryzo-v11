@@ -28,7 +28,7 @@ function getComposio() {
 
 function wantsSocialAction(prompt: string) {
   return /\b(post|publish|send|share|schedule|upload)\b/i.test(prompt) &&
-    /\b(linkedin|instagram|facebook|youtube|social|all (?:of )?(?:them|my accounts|networks)|connected accounts?)\b/i.test(prompt);
+    /\b(x|twitter|linkedin|instagram|facebook|youtube|social|all (?:of )?(?:them|my accounts|networks)|connected accounts?)\b/i.test(prompt);
 }
 
 function activeChannel(value: string) {
@@ -80,7 +80,7 @@ export async function POST(req: Request) {
     const channels = Array.isArray(body.channels)
       ? body.channels
           .filter((channel): channel is string => typeof channel === "string" && activeChannel(channel))
-          .slice(0, 4)
+          .slice(0, 5)
       : [];
     const media = Array.isArray(body.media)
       ? (body.media as MediaItem[])
@@ -124,7 +124,7 @@ export async function POST(req: Request) {
     const system = [
       "You are Cryzo Marketing, the social-media version of the main Cryzo agent.",
       "You can draft content and, when the user explicitly asks to post, publish, share, upload, or schedule it, you must use the connected social tools instead of saying you cannot act.",
-      "Marketing currently supports Facebook, Instagram, LinkedIn, and YouTube only. Never use X/Twitter, Reddit, or TikTok from this Marketing agent.",
+      "Marketing currently supports X/Twitter, Facebook, Instagram, LinkedIn, and YouTube. Never use Reddit or TikTok from this Marketing agent.",
       "If the user asks only to write, rewrite, brainstorm, review, or prepare copy, do not call tools; return a ready-to-publish draft.",
       "An imperative such as 'post this on LinkedIn' or 'publish this to Instagram and Facebook' is the user's explicit authorization for that requested action.",
       "Use attached media URLs as the media inputs for the requested network when applicable. Do not invent a media URL.",
@@ -163,7 +163,7 @@ export async function POST(req: Request) {
           const allTools = await session.tools();
           const socialTools = Object.fromEntries(
             Object.entries(allTools as Record<string, unknown>).filter(([name]) =>
-              /facebook|instagram|youtube|linkedin/i.test(name),
+              /twitter|facebook|instagram|youtube|linkedin/i.test(name),
             ),
           ) as any;
           const calledTools: string[] = [];
