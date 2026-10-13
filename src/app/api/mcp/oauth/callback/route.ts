@@ -7,10 +7,11 @@ import { decodeMcpOauthState } from "@/lib/server/mcp-oauth";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-function redirectResult(req: Request, status: "connected" | "error", message?: string) {
+function redirectResult(req: Request, status: "connected" | "error", message?: string, serverId?: string) {
   const url = new URL("/chat/apps/mcp", new URL(req.url).origin);
   url.searchParams.set("oauth", status);
   if (message) url.searchParams.set("message", message.slice(0, 180));
+  if (serverId) url.searchParams.set("serverId", serverId);
   return Response.redirect(url, 302);
 }
 
@@ -102,7 +103,7 @@ export async function GET(req: Request) {
       { token: state.authToken },
     );
 
-    return redirectResult(req, "connected");
+    return redirectResult(req, "connected", undefined, state.serverId);
   } catch (error) {
     const message = error instanceof Error ? error.message : "MCP OAuth failed.";
     return redirectResult(req, "error", message);
