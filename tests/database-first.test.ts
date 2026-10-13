@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { parseDatabasePlan, verifiedBackendContext } from "@/lib/server/database-plan";
+import { projectNeedsDatabase } from "@/lib/server/database-first";
 
 const DOGS = JSON.stringify({
   name: "Paw Haven", authProviders: ["password"],
@@ -24,6 +25,11 @@ describe("database-first planning", () => {
   it("rejects undeclared data and fake personal records", () => {
     expect(() => parseDatabasePlan('{"entities":[{"name":"Dogs","fields":{"name":"string"},"access":"public-read","seed":[{"missing":"not allowed"}]}]}')).toThrow(/undeclared/);
     expect(() => parseDatabasePlan('{"entities":[{"name":"Profiles","fields":{"name":"string"},"access":"private","seed":[{"name":"John"}]}]}')).toThrow(/Private/);
+  });
+  it("classifies dynamic app ideas before frontend generation", () => {
+    expect(projectNeedsDatabase("Build a social app with profiles, posts, likes and comments")).toBe(true);
+    expect(projectNeedsDatabase("Build a bookstore website with a searchable catalog")).toBe(true);
+    expect(projectNeedsDatabase("Build a static landing page for a festival")).toBe(false);
   });
   it("does not allow unbounded seed payloads", () => {
     expect(() => parseDatabasePlan(JSON.stringify({ entities:[{name:"Dogs",fields:{name:"string"},access:"public-read",seed:Array.from({length:7},()=>({name:"Poppy"}))}]}))).toThrow(/Too many/);
