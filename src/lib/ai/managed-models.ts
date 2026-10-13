@@ -4,7 +4,7 @@ export type ManagedModelDefinition = {
   id: string; name: string; providerName: string; logoProviderId: string;
   upstreamProvider: ManagedUpstreamProvider; upstreamModel: string; tier: ManagedModelTier;
   creditMultiplier: number; minimumPlan: "free" | "starter";
-  reasoning?: boolean; toolCall?: boolean; multimodal?: boolean;
+  reasoning?: boolean; reasoningOptions?: unknown; toolCall?: boolean; multimodal?: boolean;
   description: string; badge: string;
 };
 
@@ -17,6 +17,7 @@ function definition(input: {
   providerName?: string;
   logoProviderId?: string;
   reasoning?: boolean;
+  reasoningOptions?: unknown;
   toolCall?: boolean;
   multimodal?: boolean;
 }): ManagedModelDefinition {
@@ -68,6 +69,7 @@ const paidModels = [
     name: "Claude Sonnet 5.5",
     upstreamProvider: "anthropic",
     upstreamModel: "claude-sonnet-5-5",
+    reasoningOptions: { supportedEfforts: ["low", "medium", "high", "xhigh", "max"] },
     tier: "premium",
     reasoning: true, toolCall: true, multimodal: true,
   }),
@@ -76,6 +78,7 @@ const paidModels = [
     name: "Claude Opus 5.5",
     upstreamProvider: "anthropic",
     upstreamModel: "claude-opus-5-5",
+    reasoningOptions: { supportedEfforts: ["low", "medium", "high", "xhigh", "max"] },
     tier: "premium",
     reasoning: true, toolCall: true, multimodal: true,
   }),
@@ -84,6 +87,7 @@ const paidModels = [
     name: "Claude Fable 5.1",
     upstreamProvider: "anthropic",
     upstreamModel: "claude-fable-5-1",
+    reasoningOptions: { supportedEfforts: ["low", "medium", "high", "xhigh", "max"] },
     tier: "premium",
     reasoning: true, toolCall: true, multimodal: true,
   }),
@@ -92,6 +96,7 @@ const paidModels = [
     name: "Gemini 3.8 Flash",
     upstreamProvider: "google",
     upstreamModel: "gemini-3.8-flash",
+    reasoningOptions: { supportedEfforts: ["low", "medium", "high"] },
     tier: "premium",
     reasoning: true, toolCall: true, multimodal: true,
   }),
@@ -100,6 +105,7 @@ const paidModels = [
     name: "GPT-6.1 Sol",
     upstreamProvider: "openai",
     upstreamModel: "gpt-6.1-sol",
+    reasoningOptions: { supportedEfforts: ["low", "medium", "high", "xhigh", "max"] },
     tier: "premium",
     reasoning: true, toolCall: true, multimodal: true,
   }),
@@ -108,6 +114,7 @@ const paidModels = [
     name: "GPT-6 Astra",
     upstreamProvider: "openai",
     upstreamModel: "gpt-6-astra",
+    reasoningOptions: { supportedEfforts: ["low", "medium", "high", "xhigh", "max"] },
     tier: "premium",
     reasoning: true, toolCall: true, multimodal: true,
   }),
@@ -116,6 +123,7 @@ const paidModels = [
     name: "GPT-5.6 Terra",
     upstreamProvider: "openai",
     upstreamModel: "gpt-5.6-terra",
+    reasoningOptions: { supportedEfforts: ["none", "low", "medium", "high", "xhigh", "max"] },
     tier: "premium",
     reasoning: true, toolCall: true, multimodal: true,
   }),

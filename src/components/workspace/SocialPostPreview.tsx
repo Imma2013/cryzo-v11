@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import { SocialNetworkLogo } from "@/components/SocialNetworkLogo";
 
 export type SocialPreviewChannel =
   | "x"
@@ -17,16 +18,15 @@ export type SocialPreviewMedia = {
 };
 
 const PLATFORM = {
-  x: { name: "X", mark: "X", accent: "bg-black text-white", action: "Reply · Repost · Like · Share" },
-  linkedin: { name: "LinkedIn", mark: "in", accent: "bg-[#0a66c2] text-white", action: "Like · Comment · Repost · Send" },
-  reddit: { name: "Reddit", mark: "r/", accent: "bg-[#ff4500] text-white", action: "Vote · Comment · Share" },
-  youtube: { name: "YouTube", mark: "▶", accent: "bg-[#ff0033] text-white", action: "Like · Share · Subscribe" },
-  tiktok: { name: "TikTok", mark: "♪", accent: "bg-black text-white ring-1 ring-zinc-700", action: "Like · Comment · Share" },
-  instagram: { name: "Instagram", mark: "◎", accent: "bg-gradient-to-br from-[#833ab4] via-[#fd1d1d] to-[#fcb045] text-white", action: "Like · Comment · Send · Save" },
-  facebook: { name: "Facebook", mark: "f", accent: "bg-[#1877f2] text-white", action: "Like · Comment · Share" },
+  x: { name: "X", accent: "bg-black text-white", action: "Reply · Repost · Like · Share" },
+  linkedin: { name: "LinkedIn", accent: "bg-[#0a66c2] text-white", action: "Like · Comment · Repost · Send" },
+  reddit: { name: "Reddit", accent: "bg-[#ff4500] text-white", action: "Vote · Comment · Share" },
+  youtube: { name: "YouTube", accent: "bg-[#ff0033] text-white", action: "Like · Share · Subscribe" },
+  tiktok: { name: "TikTok", accent: "bg-black text-white ring-1 ring-zinc-700", action: "Like · Comment · Share" },
+  instagram: { name: "Instagram", accent: "bg-gradient-to-br from-[#833ab4] via-[#fd1d1d] to-[#fcb045] text-white", action: "Like · Comment · Send · Save" },
+  facebook: { name: "Facebook", accent: "bg-[#1877f2] text-white", action: "Like · Comment · Share" },
 } satisfies Record<SocialPreviewChannel, {
   name: string;
-  mark: string;
   accent: string;
   action: string;
 }>;
@@ -62,7 +62,7 @@ export default function SocialPostPreview({
     >
       <header className="flex items-center gap-2.5 p-3">
         <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-full text-xs font-bold ${platform.accent}`}>
-          {platform.mark}
+          <SocialNetworkLogo channel={channel} size={17} />
         </span>
         <div className="min-w-0 flex-1">
           <p className="truncate font-semibold">{accountName}</p>

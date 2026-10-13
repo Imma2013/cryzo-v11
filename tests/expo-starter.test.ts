@@ -10,6 +10,8 @@ describe("SDK 57 first-pass native project", () => {
     expect(isExpoProject(files)).toBe(true);
     expect(files["App.tsx"].content).toContain("react-native");
     expect(files["index.ts"].content).toContain("registerRootComponent");
+    expect(JSON.parse(files["package.json"].content!).dependencies["expo-dev-client"]).toBe("~57.0.20");
+    expect(JSON.parse(files["app.json"].content!).expo.scheme).toBe("cryzo-app");
     expect(files["vite.config.ts"]).toBeUndefined();
     expect(files["index.html"]).toBeUndefined();
     expect(JSON.parse(files["package.json"].content!).scripts.start).toBe("expo start");

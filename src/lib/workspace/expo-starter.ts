@@ -18,6 +18,7 @@ export const EXPO_STARTER_PACKAGE = {
   dependencies: {
     expo: "~57.0.17",
     "expo-status-bar": "~57.0.1",
+    "expo-dev-client": "~57.0.20",
     react: "19.2.3",
     "react-native": "0.86.3",
     "react-dom": "19.2.3",
@@ -32,7 +33,7 @@ export function expoStarterFiles(): Array<{ path: string; content: string }> {
   return [
     { path: "package.json", content: JSON.stringify(EXPO_STARTER_PACKAGE, null, 2) + "\n" },
     { path: "app.json", content: JSON.stringify({ expo: {
-      name: "Cryzo App", slug: "cryzo-native-app", version: "1.0.0", orientation: "portrait",
+      name: "Cryzo App", slug: "cryzo-native-app", scheme: "cryzo-app", version: "1.0.0", orientation: "portrait",
       userInterfaceStyle: "automatic", ios: { supportsTablet: true }, android: {}, web: { bundler: "metro" },
     } }, null, 2) + "\n" },
     { path: "tsconfig.json", content: JSON.stringify({ extends: "expo/tsconfig.base", compilerOptions: { strict: true },

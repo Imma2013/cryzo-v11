@@ -21,6 +21,7 @@ import type { Id } from "../../../convex/_generated/dataModel";
 import { useAuth } from "@/providers/AuthProvider";
 import ProjectSocialAccounts from "./ProjectSocialAccounts";
 import SocialPostPreview from "./SocialPostPreview";
+import { SocialNetworkLogo } from "@/components/SocialNetworkLogo";
 
 const CHANNELS = [
   { id: "x", label: "X", color: "bg-black text-white" },
@@ -386,7 +387,7 @@ export default function ProjectMarketingV3() {
   const postCard = (post: SocialPost) => (
     <button key={String(post._id)} type="button" onClick={() => setSelectedPost(post)} className="w-full rounded-xl border border-zinc-800 bg-zinc-950 p-2.5 text-left transition hover:border-zinc-600">
       <div className="flex flex-wrap items-center gap-1.5">
-        <span className="text-[10px] font-semibold text-zinc-300">{post.channels.filter(isActiveChannel).map(channelLabel).join(" · ")}</span>
+        <span className="flex flex-wrap items-center gap-1.5 text-[10px] font-semibold text-zinc-300">{post.channels.filter(isActiveChannel).map((channel) => <span key={channel} className="inline-flex items-center gap-1"><SocialNetworkLogo channel={channel} size={11} />{channelLabel(channel)}</span>)}</span>
         <span className={`rounded-full px-1.5 py-0.5 text-[8px] font-semibold uppercase ${statusClass(post.status)}`}>{post.status}</span>
       </div>
       <p className="mt-1 line-clamp-2 text-[11px] leading-4 text-zinc-400">{post.content || "Untitled post"}</p>
@@ -411,7 +412,8 @@ export default function ProjectMarketingV3() {
         )}
         <div className="mt-3 flex flex-wrap gap-2">
           {CHANNELS.map((channel) => (
-            <button key={channel.id} type="button" onClick={() => toggleChannel(channel.id)} className={`rounded-full border px-3 py-1.5 text-[11px] font-semibold ${channels.includes(channel.id) ? `${channel.color} border-transparent` : "border-zinc-700 text-zinc-500"}`}>
+            <button key={channel.id} type="button" onClick={() => toggleChannel(channel.id)} className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] font-semibold ${channels.includes(channel.id) ? `${channel.color} border-transparent` : "border-zinc-700 text-zinc-500"}`}>
+              <SocialNetworkLogo channel={channel.id} size={13} />
               {channel.label}
             </button>
           ))}
@@ -565,7 +567,7 @@ export default function ProjectMarketingV3() {
             <textarea value={content} onChange={(event) => setContent(event.target.value)} placeholder="Write your post…" className="mt-5 min-h-44 w-full rounded-2xl border border-zinc-700 bg-black p-4 text-sm outline-none placeholder:text-zinc-600" />
 
             <div className="mt-4 flex flex-wrap gap-2">
-              {CHANNELS.map((channel) => <button key={channel.id} type="button" onClick={() => toggleChannel(channel.id)} className={`rounded-full border px-3 py-2 text-xs font-semibold ${channels.includes(channel.id) ? `${channel.color} border-transparent` : "border-zinc-700 text-zinc-500"}`}>{channel.label}</button>)}
+              {CHANNELS.map((channel) => <button key={channel.id} type="button" onClick={() => toggleChannel(channel.id)} className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-2 text-xs font-semibold ${channels.includes(channel.id) ? `${channel.color} border-transparent` : "border-zinc-700 text-zinc-500"}`}><SocialNetworkLogo channel={channel.id} size={14} />{channel.label}</button>)}
             </div>
 
             <div className="mt-4 rounded-2xl border border-zinc-800 bg-black/30 p-4">

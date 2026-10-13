@@ -67,7 +67,7 @@ export function ExpoDevicePreview({ conversationId, files, compact = false, read
   return (
     <>
       <button type="button" onClick={() => void start()}
-        aria-label="Device Preview (Expo Go)"
+        aria-label="Device Preview (Expo development build)"
         className={compact
           ? "inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-white text-black shadow-sm"
           : "inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-700 px-2.5 text-xs font-medium text-zinc-200 hover:bg-zinc-800"}>
@@ -80,19 +80,19 @@ export function ExpoDevicePreview({ conversationId, files, compact = false, read
             className="relative w-full max-w-md rounded-2xl border border-zinc-700 bg-[#121216] p-6 text-center text-white shadow-2xl">
             <button type="button" onClick={() => setOpen(false)} aria-label="Close" className="absolute right-3 top-3 rounded-lg p-2 text-zinc-400 hover:text-white"><X size={18}/></button>
             <h2 className="mt-1 text-2xl font-bold">Expo</h2>
-            <p className="mt-3 text-sm text-zinc-300">Scan the code to reconnect to your React Native app.</p>
-            <p className="mt-3 text-sm text-zinc-400">1. Install Expo Go on your phone<br/>2. Scan the QR code with your camera or Expo Go</p>
+            <p className="mt-3 text-sm text-zinc-300">Scan the code to connect your Cryzo Expo development build to Metro.</p>
+            <p className="mt-3 text-sm text-zinc-400">1. Install/open your development build on the phone<br/>2. Scan this QR code with the camera or the dev-client launcher</p>
             {loading && <div className="my-8 flex items-center justify-center gap-2 text-sm text-zinc-300"><Loader2 className="animate-spin" size={18}/> Starting Expo tunnel…</div>}
             {error && <p role="alert" className="my-5 rounded-xl border border-red-800 bg-red-950/40 p-3 text-sm text-red-300">{error}</p>}
             {url && !loading && (
               <div className="mt-6 flex flex-col items-center gap-3">
-                <div className="rounded-xl bg-white p-3"><img alt="Expo Go scannable QR code" width={240} height={240}
+                <div className="rounded-xl bg-white p-3"><img alt="Expo development client QR code" width={240} height={240}
                   src={`/api/publish/mobile/qr?data=${encodeURIComponent(url)}`} /></div>
                 <a className="flex max-w-full items-center gap-1.5 break-all text-xs text-blue-300 underline" href={url} target="_blank" rel="noopener noreferrer"><ExternalLink size={14}/> Open Expo preview link</a>
               </div>
             )}
             <button type="button" disabled={loading} onClick={() => void start(true)} className="mt-5 inline-flex items-center gap-2 rounded-lg border border-zinc-700 px-3 py-2 text-sm text-zinc-200 disabled:opacity-40"><RefreshCw size={14}/> Reconnect</button>
-            <p className="mt-4 text-xs text-zinc-500">Keep this Cryzo project open while testing. Custom native modules may require an Expo development build.</p>
+            <p className="mt-4 text-xs text-zinc-500">Keep this Cryzo project open while testing. The QR targets the installed development client, so custom native modules can load without Expo Go.</p>
           </section>
         </div>
       )}

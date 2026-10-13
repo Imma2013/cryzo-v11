@@ -273,6 +273,7 @@ function legacyWrapperFiles({
       react: "19.2.3",
       "react-native": "0.86.0",
       "react-native-webview": "13.16.1",
+      "expo-dev-client": "~57.0.20",
     },
     devDependencies: {},
   };
@@ -280,6 +281,7 @@ function legacyWrapperFiles({
     expo: {
       name: appName,
       slug,
+      scheme: `cryzo-${slug}`,
       version: "1.0.0",
       orientation: "default",
       userInterfaceStyle: "automatic",
@@ -487,39 +489,43 @@ async function startExpoPreview(workspace: Workspace, forceRestart = false) {
   if (!(await hasNativeExpoSource(workspace))) {
     throw new Error("Generate the Expo/React Native app before previewing it on a phone");
   }
-  // Like Bolt, reconnect to a healthy Metro process instead of killing it
-  // each time the QR dialog is reopened. File sync/HMR continues normally.
+
+  const appJson = (await readJsonFile(workspace, "app.json")) || {};
+  const configuredScheme = String(appJson?.expo?.scheme || "").trim();
+  const allowedScheme = /^cryzo-[a-z0-9-]+$/i.test(configuredScheme) ? configuredScheme : "";
+  const escapedScheme = allowedScheme.replace(/[.*+?^$\{\}()|[\]\\]/g, "\\$&");
+  const previewPattern = allowedScheme
+    ? new RegExp(`\\b(?:${escapedScheme}|exps?):\\/\\/[^\\s"'<>]+`, "i")
+    : /\b(exps?:\/\/[^\s"'<>]+)/i;
+
   if (!forceRestart) {
     const previous = await run(workspace,
       "if [ -f .cryzo-expo-preview.pid ] && kill -0 $(cat .cryzo-expo-preview.pid) 2>/dev/null; then cat .cryzo-expo-preview.log 2>/dev/null; fi",
       undefined, true);
-    const previousUrl = previous.output.replace(/\x1b\[[0-9;]*m/g, "").match(/\b(exps?:\/\/[^\s\"'<>]+)/i)?.[1];
-    if (previousUrl) return { previewUrl: previousUrl, output: previous.output.slice(-6000) };
+    const previousUrl = previous.output.replace(/\x1b\[[0-9;]*m/g, "").match(previewPattern)?.[0];
+    if (previousUrl) return { previewUrl: previousUrl, output: previous.output.slice(-6000), stage: "dev_client_url_ready" as const };
   }
+
   await run(workspace, "npm install --no-audit --no-fund", undefined, false);
-  // Don't serve a scannable QR for an Expo project with broken imports or types.
-  // Generated SDK config is already valid; this checks the actual app screens.
   await run(workspace, "./node_modules/.bin/tsc --noEmit --noUnusedLocals false --noUnusedParameters false", undefined, false);
   await run(workspace, "npm install --no-audit --no-fund --no-save @expo/ngrok@^4.1.0", undefined, true);
   await run(
     workspace,
-    `if [ -f .cryzo-expo-preview.pid ]; then kill $(cat .cryzo-expo-preview.pid) 2>/dev/null || true; fi; rm -f .cryzo-expo-preview.log; (CI=1 EXPO_NO_TELEMETRY=1 npx expo start --tunnel --port ${EXPO_PREVIEW_PORT} > .cryzo-expo-preview.log 2>&1 & echo $! > .cryzo-expo-preview.pid)`,
+    `if [ -f .cryzo-expo-preview.pid ]; then kill $(cat .cryzo-expo-preview.pid) 2>/dev/null || true; fi; rm -f .cryzo-expo-preview.log; (CI=1 EXPO_NO_TELEMETRY=1 npx expo start --dev-client --tunnel --port ${EXPO_PREVIEW_PORT} > .cryzo-expo-preview.log 2>&1 & echo $! > .cryzo-expo-preview.pid)`,
     undefined,
     true,
   );
 
   let lastOutput = "";
-  for (let attempt = 0; attempt < 24; attempt++) {
+  for (let attempt = 0; attempt < 30; attempt++) {
     await new Promise((resolve) => setTimeout(resolve, 1500));
     const logs = await run(workspace, "cat .cryzo-expo-preview.log 2>/dev/null || true", undefined, true);
     lastOutput = logs.output.replace(/\x1b\[[0-9;]*m/g, "");
-    const match = lastOutput.match(/\b(exps?:\/\/[^\s"'<>]+)/i);
-    if (match?.[1]) {
-      return { previewUrl: match[1], output: lastOutput.slice(-6000) };
-    }
-    if (/CommandError|error:/i.test(lastOutput) && !/waiting|starting/i.test(lastOutput)) break;
+    const match = lastOutput.match(previewPattern);
+    if (match?.[0]) return { previewUrl: match[0], output: lastOutput.slice(-6000), stage: "dev_client_url_ready" as const };
+    if (/CommandError|Error:|ERR_/i.test(lastOutput) && !/waiting|starting|tunnel ready/i.test(lastOutput)) break;
   }
-  throw new Error(`Expo phone preview could not start. ${lastOutput.slice(-1800)}`.trim());
+  throw new Error(`Expo development-client preview could not start. ${lastOutput.slice(-1800)}`.trim());
 }
 
 async function configureNativeExpoProject(
@@ -543,6 +549,7 @@ async function configureNativeExpoProject(
       ...expo,
       name: appName,
       slug,
+      scheme: expo.scheme || `cryzo-${slug}`,
       version: expo.version || "1.0.0",
       orientation: expo.orientation || "default",
       userInterfaceStyle: expo.userInterfaceStyle || "automatic",
@@ -696,7 +703,7 @@ export async function POST(req: Request) {
         return Response.json({ error: "This conversation is still marked as a website. Cryzo is restoring its original mobile target; reload the chat and try Device Preview again." }, { status: 400 });
       }
       const preview = await startExpoPreview(workspace, body.forceRestart === true);
-      return Response.json({ success: true, sourceType: workspace.sourceType, previewUrl: preview.previewUrl, qrValue: preview.previewUrl });
+      return Response.json({ success: true, sourceType: workspace.sourceType, previewUrl: preview.previewUrl, qrValue: preview.previewUrl, stage: preview.stage });
     }
 
     if (body.operation === "build" && !canUseManagedMobileBuilds(subscription.plan)) {
