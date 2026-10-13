@@ -31,22 +31,32 @@ export function supportedReasoningEfforts(info?: ReasoningMetadata): ReasoningEf
 export function providerReasoningOptions(providerId: string, modelId: string, effort?: string | null):
   Record<string, Record<string, any>> | undefined {
   if (!effort || effort === "default" || !REASONING_EFFORTS.some(value => value === effort)) return undefined;
-  if (providerId === "cryzo" || providerId === "openrouter") {
+
+  const effectiveProviderId = providerId === "cryzo"
+    ? /^gpt-/i.test(modelId)
+      ? "openai"
+      : /^claude-/i.test(modelId)
+        ? "anthropic"
+        : /^gemini-/i.test(modelId)
+          ? "google"
+          : "openrouter"
+    : providerId;
+
+  if (effectiveProviderId === "openrouter") {
     if (effort === "none") return { openrouter: { reasoning: { enabled: false } } };
-    if (effort === "max" || effort === "minimal") return undefined; // unsupported by this provider surface
+    if (effort === "max" || effort === "minimal") return undefined;
     return { openrouter: { reasoning: { effort } } };
   }
-  if (providerId === "openai") return { openai: { reasoningEffort: effort } };
-  if (providerId === "anthropic") {
+  if (effectiveProviderId === "openai") return { openai: { reasoningEffort: effort } };
+  if (effectiveProviderId === "anthropic") {
     if (effort === "none" || effort === "minimal" || effort === "xhigh") return undefined;
-    const modern = /claude-(?:sonnet|opus)-4-[6-9]|claude-(?:sonnet|opus)-5/i.test(modelId);
+    const modern = /claude-(?:sonnet|opus|fable)-5/i.test(modelId);
     const budgets: Record<string, number> = { low: 2048, medium: 8192, high: 16384, max: 24576 };
     return modern
       ? { anthropic: { thinking: { type: "adaptive" }, effort } }
       : { anthropic: { thinking: { type: "enabled", budgetTokens: budgets[effort] ?? 8192 } } };
   }
-  if (providerId === "google") {
-    // Gemini 3+ supports thinkingLevel. Earlier versions accept thinkingBudget.
+  if (effectiveProviderId === "google") {
     if (/gemini-3|gemini-4/i.test(modelId)) {
       if (effort === "minimal" || effort === "xhigh" || effort === "max") return undefined;
       return { google: { thinkingConfig: { thinkingLevel: effort === "none" ? "minimal" : effort } } };
@@ -55,7 +65,7 @@ export function providerReasoningOptions(providerId: string, modelId: string, ef
     const budgets: Record<string, number> = { none: 0, low: 1024, medium: 4096, high: 8192 };
     return { google: { thinkingConfig: { thinkingBudget: budgets[effort] ?? 4096 } } };
   }
-  if (providerId === "xai" && ["low", "medium", "high"].includes(effort)) return { xai: { reasoningEffort: effort } };
+  if (effectiveProviderId === "xai" && ["low", "medium", "high"].includes(effort)) return { xai: { reasoningEffort: effort } };
   return undefined;
 }
 

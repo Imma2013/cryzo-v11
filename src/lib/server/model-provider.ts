@@ -42,6 +42,20 @@ function cryzoHeaders() {
   };
 }
 
+const MANAGED_KEY_ENV = {
+  openai: "OPENAI_API_KEY",
+  anthropic: "ANTHROPIC_API_KEY",
+  google: "GOOGLE_GENERATIVE_AI_API_KEY",
+  openrouter: "OPENROUTER_API_KEY",
+} as const;
+
+function managedServerKey(providerId: keyof typeof MANAGED_KEY_ENV) {
+  const environmentName = MANAGED_KEY_ENV[providerId];
+  const apiKey = process.env[environmentName]?.trim();
+  if (!apiKey) throw new Error(`${environmentName} is not configured`);
+  return apiKey;
+}
+
 async function resolveManagedCryzoModel(requestedModel?: string) {
   const normalizedRequested = normalizeManagedModelId(requestedModel);
   const definition = getManagedModel(normalizedRequested);
@@ -50,27 +64,32 @@ async function resolveManagedCryzoModel(requestedModel?: string) {
     throw new Error("This model is no longer supported. Choose another model.");
   }
 
-  const apiKey = process.env.OPENROUTER_API_KEY?.trim();
-  if (!apiKey) {
-    throw new Error("OPENROUTER_API_KEY is not configured");
-  }
-
   const capabilities = await resolveModelCapabilities(
-    "openrouter",
+    definition.upstreamProvider,
     definition.upstreamModel,
   );
-  const provider = createOpenRouter({
-    apiKey,
-    headers: cryzoHeaders(),
-  });
 
-  return {
-    model: provider.chat(definition.upstreamModel, {
+  let model;
+  if (definition.upstreamProvider === "openrouter") {
+    const apiKey = managedServerKey("openrouter");
+    const provider = createOpenRouter({ apiKey, headers: cryzoHeaders() });
+    model = provider.chat(definition.upstreamModel, {
       usage: { include: true },
       extraBody: { provider: { allow_fallbacks: true } },
-    }),
+    });
+  } else if (definition.upstreamProvider === "openai") {
+    model = createOpenAI({ apiKey: managedServerKey("openai") }).responses(definition.upstreamModel);
+  } else if (definition.upstreamProvider === "anthropic") {
+    model = createAnthropic({ apiKey: managedServerKey("anthropic") })(definition.upstreamModel);
+  } else {
+    model = createGoogleGenerativeAI({ apiKey: managedServerKey("google") })(definition.upstreamModel);
+  }
+
+  return {
+    model,
     providerId: "cryzo",
     modelId: definition.id,
+    upstreamProviderId: definition.upstreamProvider,
     upstreamModelId: definition.upstreamModel,
     billingTier: definition.tier,
     usesCryzoCredits: definition.tier === "premium",

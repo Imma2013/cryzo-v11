@@ -15,7 +15,12 @@ const isolationHeaders = [
 
 // Static runtime files written to public/ by scripts/sync-vivari-assets.mjs. Worker
 // scripts started from an isolated page must carry the same policy.
-const runtimeAssetSources = ["/vivari/:path*", "/assets/:path*", "/vendor/:path*", "/vv-devtools/:path*"];
+const runtimeEntrySources = ["/vivari/:path*", "/vv-devtools/:path*"];
+const runtimeImmutableSources = ["/assets/:path*", "/vendor/:path*"];
+const runtimeResourceHeaders = [
+  ...isolationHeaders,
+  { key: "Cross-Origin-Resource-Policy", value: "same-origin" },
+];
 
 const nextConfig: NextConfig = {
   outputFileTracingIncludes: { "/api/**/*": ["./managed-model-smoke.json", "./vendor/design-recipes/**/*"] },
@@ -39,7 +44,14 @@ const nextConfig: NextConfig = {
           { key: "Cache-Control", value: "no-cache" },
         ],
       },
-      ...runtimeAssetSources.map((source) => ({ source, headers: isolationHeaders })),
+      ...runtimeEntrySources.map((source) => ({
+        source,
+        headers: [...runtimeResourceHeaders, { key: "Cache-Control", value: "no-cache, no-store, must-revalidate" }],
+      })),
+      ...runtimeImmutableSources.map((source) => ({
+        source,
+        headers: [...runtimeResourceHeaders, { key: "Cache-Control", value: "public, max-age=31536000, immutable" }],
+      })),
     ];
   },
 };

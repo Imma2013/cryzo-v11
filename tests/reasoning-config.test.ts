@@ -15,7 +15,10 @@ describe("Model-specific reasoning controls", () => {
   });
   it("passes real provider reasoning arguments, never fabricated defaults", () => {
     expect(providerReasoningOptions("openai", "gpt-6", "high")).toEqual({ openai: { reasoningEffort: "high" } });
-    expect(providerReasoningOptions("cryzo", "cryzo/reasoning-model", "high")).toEqual({ openrouter: { reasoning: { effort: "high" } } });
+    expect(providerReasoningOptions("cryzo", "openai/gpt-router-model", "high")).toEqual({ openrouter: { reasoning: { effort: "high" } } });
+    expect(providerReasoningOptions("cryzo", "gpt-6.1-sol", "high")).toEqual({ openai: { reasoningEffort: "high" } });
+    expect(providerReasoningOptions("cryzo", "claude-sonnet-5-5", "high")).toEqual({ anthropic: { thinking: { type: "adaptive" }, effort: "high" } });
+    expect(providerReasoningOptions("cryzo", "gemini-3.8-flash", "high")).toEqual({ google: { thinkingConfig: { thinkingLevel: "high" } } });
     expect(providerReasoningOptions("openrouter", "openai/gpt", "none")).toEqual({ openrouter: { reasoning: { enabled: false } } });
     expect(providerReasoningOptions("anthropic", "claude-opus-4-6", "high")).toEqual({ anthropic: { thinking: { type: "adaptive" }, effort: "high" } });
     expect(providerReasoningOptions("google", "gemini-3-pro", "high")).toEqual({ google: { thinkingConfig: { thinkingLevel: "high" } } });
