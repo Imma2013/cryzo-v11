@@ -62,7 +62,7 @@ async function projectRows(ctx: any, userId: any, conversationId: any) {
     )
     .collect();
   const byServer = new Map<string, any>(
-    bindings.map((row: any) => [String(row.serverId), row] as [string, any]),
+    bindings.map((row: any) => [String(row.serverId), row]),
   );
   return servers.map((server: any) => ({
     ...server,
