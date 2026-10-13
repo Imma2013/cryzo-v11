@@ -4,15 +4,16 @@ import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { useAuthToken } from "@convex-dev/auth/react";
 import { Check, Loader2, Plus, Unplug } from "lucide-react";
+import { SocialNetworkLogo } from "@/components/SocialNetworkLogo";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 
 const networks = [
-  { toolkit: "twitter", channel: "x", label: "X", mark: "X", accent: "bg-black text-white" },
-  { toolkit: "facebook", channel: "facebook", label: "Facebook", mark: "f", accent: "bg-[#1877f2] text-white" },
-  { toolkit: "instagram", channel: "instagram", label: "Instagram", mark: "◎", accent: "bg-gradient-to-br from-[#833ab4] via-[#fd1d1d] to-[#fcb045] text-white" },
-  { toolkit: "youtube", channel: "youtube", label: "YouTube", mark: "▶", accent: "bg-[#ff0033] text-white" },
-  { toolkit: "linkedin", channel: "linkedin", label: "LinkedIn", mark: "in", accent: "bg-[#0a66c2] text-white" },
+  { toolkit: "twitter", channel: "x", label: "X", accent: "bg-black text-white" },
+  { toolkit: "facebook", channel: "facebook", label: "Facebook", accent: "bg-[#1877f2] text-white" },
+  { toolkit: "instagram", channel: "instagram", label: "Instagram", accent: "bg-gradient-to-br from-[#833ab4] via-[#fd1d1d] to-[#fcb045] text-white" },
+  { toolkit: "youtube", channel: "youtube", label: "YouTube", accent: "bg-[#ff0033] text-white" },
+  { toolkit: "linkedin", channel: "linkedin", label: "LinkedIn", accent: "bg-[#0a66c2] text-white" },
 ] as const;
 
 const activeChannels = new Set(networks.map((network) => network.channel));
@@ -142,7 +143,7 @@ export default function ProjectSocialAccounts() {
             return (
               <div key={account._id} className="flex items-center gap-2 rounded-full border border-zinc-700 bg-zinc-950 px-3 py-1.5 text-xs text-zinc-200">
                 <span className={`grid h-5 w-5 place-items-center rounded-full text-[10px] font-bold ${network?.accent ?? "bg-zinc-700"}`}>
-                  {network?.mark ?? "•"}
+                  {network ? <SocialNetworkLogo channel={network.channel} size={12} /> : "•"}
                 </span>
                 <span>{account.name}</span>
                 <Check size={12} className="text-emerald-400" />
@@ -161,7 +162,7 @@ export default function ProjectSocialAccounts() {
               <article key={network.toolkit} className="rounded-2xl border border-zinc-800 bg-zinc-950 p-4">
                 <div className="flex items-start gap-3">
                   <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl text-sm font-bold ${network.accent}`}>
-                    {network.mark}
+                    <SocialNetworkLogo channel={network.channel} size={18} />
                   </span>
                   <div className="min-w-0 flex-1">
                     <h3 className="text-sm font-semibold text-white">{network.label}</h3>

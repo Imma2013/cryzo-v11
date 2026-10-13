@@ -38,7 +38,7 @@ export function ReasoningPicker({ selection, onChange }: {
   if (efforts.length <= 1) return null;
   const current = selection.reasoningEffort && efforts.includes(selection.reasoningEffort)
     ? selection.reasoningEffort : "default";
-  const label = (value: string) => value === "default" ? "Default" : value === "xhigh" ? "Xhigh" : value.charAt(0).toUpperCase() + value.slice(1);
+  const label = (value: string) => value === "default" ? "Default" : value === "xhigh" ? "Extra High" : value.charAt(0).toUpperCase() + value.slice(1);
   return <div className="relative shrink-0">
     <button type="button" aria-label="Reasoning effort" aria-expanded={open} aria-haspopup="menu"
       onClick={() => setOpen(value => !value)}

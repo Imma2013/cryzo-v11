@@ -1,4 +1,4 @@
-import { fetchQuery } from "convex/nextjs";
+import { fetchMutation, fetchQuery } from "convex/nextjs";
 import { api } from "../../../../../convex/_generated/api";
 import {
   assertPublicMcpUrl,
@@ -15,31 +15,66 @@ function bearer(req: Request) {
 }
 
 export async function POST(req: Request) {
+  const token = bearer(req);
+  let serverId = "";
+
   try {
-    const token = bearer(req);
-    if (!token) return Response.json({ error: "Unauthorized" }, { status: 401 });
+    if (!token) {
+      return Response.json({ error: "Unauthorized" }, { status: 401 });
+    }
     const body = (await req.json()) as { serverId?: string };
-    const serverId = body.serverId?.trim();
-    if (!serverId) return Response.json({ error: "Server is required." }, { status: 400 });
+    serverId = body.serverId?.trim() || "";
+    if (!serverId) {
+      return Response.json({ error: "Server is required." }, { status: 400 });
+    }
 
     const server = (await fetchQuery(
       (api as any).mcpServers.get,
       { serverId: serverId as any },
       { token },
     )) as McpServerRecord | null;
-    if (!server) return Response.json({ error: "MCP server not found." }, { status: 404 });
+    if (!server) {
+      return Response.json(
+        { error: "MCP server not found." },
+        { status: 404 },
+      );
+    }
 
     await assertPublicMcpUrl(server.url);
     const tools = await listRemoteMcpTools(server, token);
+    await fetchMutation(
+      (api as any).mcpServers.updateHealth,
+      {
+        serverId: serverId as any,
+        tools,
+      },
+      { token },
+    );
+
     return Response.json({
       ok: true,
       protocol: "MCP",
       transport: "Streamable HTTP",
+      authType: server.authType,
       toolCount: tools.length,
-      tools: tools.map((item) => ({ name: item.name, description: item.description })),
+      tools: tools.map((item) => ({
+        name: item.name,
+        description: item.description,
+      })),
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "MCP connection failed.";
+    const message =
+      error instanceof Error ? error.message : "MCP connection failed.";
+    if (token && serverId) {
+      await fetchMutation(
+        (api as any).mcpServers.updateHealth,
+        {
+          serverId: serverId as any,
+          error: message,
+        },
+        { token },
+      ).catch(() => {});
+    }
     return Response.json({ error: message }, { status: 400 });
   }
 }

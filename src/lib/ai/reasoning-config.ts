@@ -33,11 +33,11 @@ export function providerReasoningOptions(providerId: string, modelId: string, ef
   if (!effort || effort === "default" || !REASONING_EFFORTS.some(value => value === effort)) return undefined;
 
   const effectiveProviderId = providerId === "cryzo"
-    ? /^gpt-/i.test(modelId)
+    ? /(?:^|\/)openai-|^gpt-/i.test(modelId)
       ? "openai"
-      : /^claude-/i.test(modelId)
+      : /(?:^|\/)anthropic-|^claude-/i.test(modelId)
         ? "anthropic"
-        : /^gemini-/i.test(modelId)
+        : /(?:^|\/)google-|^gemini-/i.test(modelId)
           ? "google"
           : "openrouter"
     : providerId;
@@ -49,7 +49,7 @@ export function providerReasoningOptions(providerId: string, modelId: string, ef
   }
   if (effectiveProviderId === "openai") return { openai: { reasoningEffort: effort } };
   if (effectiveProviderId === "anthropic") {
-    if (effort === "none" || effort === "minimal" || effort === "xhigh") return undefined;
+    if (effort === "none" || effort === "minimal") return undefined;
     const modern = /claude-(?:sonnet|opus)-4-[6-9]|claude-(?:sonnet|opus|fable)-5/i.test(modelId);
     const budgets: Record<string, number> = { low: 2048, medium: 8192, high: 16384, max: 24576 };
     return modern

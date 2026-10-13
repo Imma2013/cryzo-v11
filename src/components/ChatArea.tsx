@@ -732,6 +732,7 @@ export function ChatArea({
               onChatModeChange={handleChatModeChange}
               modelSelection={modelSelection}
               onModelSelectionChange={handleModelSelectionChange}
+              conversationId={conversationId}
               variant="hero"
             />
           </div>
@@ -921,6 +922,7 @@ export function ChatArea({
             onChatModeChange={handleChatModeChange}
             modelSelection={modelSelection}
             onModelSelectionChange={handleModelSelectionChange}
+            conversationId={conversationId}
           />
         </>
       )}

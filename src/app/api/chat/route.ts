@@ -14,7 +14,7 @@ import { ConvexHttpClient } from "convex/browser";
 import { after } from "next/server";
 import { checkpointGenerationStream } from "@/lib/server/background-generation";
 import { planWebsiteDesign, auditWebsiteDraft } from "@/lib/server/design-quality";
-import { planDatabaseBeforeFrontend, verifiedBackendContext } from "@/lib/server/database-first";
+import { planDatabaseBeforeFrontend, projectNeedsDatabase, verifiedBackendContext } from "@/lib/server/database-first";
 import { isBookOrPublishingRequest, isAutomotiveRequest, mustProvisionCatalog, lockedUserDomainPrompt, offDomainGeneratedPaths } from "@/lib/server/project-intent";
 import type { CryzoCloudResources } from "@/lib/ai/cryzo-cloud-resources";
 import { CANONICAL_DESIGN_LIBRARY_PATH, getDesignReferenceLibrary, routeDesignReferences } from "@/lib/server/design-reference-library";
@@ -196,6 +196,11 @@ export async function POST(req: Request) {
       }, { status: 422 });
     }
     const backendRequirements = backendRequirementsFromPrompt(lastUserText);
+    const databaseRequired = mode === "build" && (
+      backendRequirements.database ||
+      mustProvisionCatalog(projectIntent) ||
+      projectNeedsDatabase(projectIntent)
+    );
     const resolved = await resolveServerModel({
       providerId: modelProvider,
       modelId,
@@ -322,18 +327,20 @@ export async function POST(req: Request) {
         // An earlier frontend attempt must not prevent database recovery.
         // Infer catalogs even when the request never literally says "database".
         const missingRequiredCatalog = !overview.entities.length &&
-          (mustProvisionCatalog(projectIntent) ||
+          (databaseRequired ||
+            mustProvisionCatalog(projectIntent) ||
             (isBookOrPublishingRequest(currentProjectContext) && !isAutomotiveRequest(projectIntent)) ||
             /\b(create or repair|create database tables|create.*database first)\b/i.test(lastUserText));
         if ((!overview.entities.length && !currentProjectContext.trim()) || missingRequiredCatalog || modifyingBackend) {
           const existing = overview.entities.map((entity) => ({ name: entity.name, fields: entity.fields, access: entity.access }));
           const planned = await planDatabaseBeforeFrontend({
             model: resolved.model,
+            requireEntities: databaseRequired && !overview.entities.length,
             prompt: existing.length
               ? `${projectIntent}\nExisting entities (preserve existing unrelated data): ${JSON.stringify(existing)}`
               : `${projectIntent}\n${isBookOrPublishingRequest(currentProjectContext) ? "Existing project is a BOOKSTORE. Create a Books catalog with realistic seed records, and any other needed publishing/shop tables. Do not create Vehicles, cars, or showroom collections." : ""}`,
           });
-          if ((backendRequirements.database || missingRequiredCatalog) && !planned.entities.length && !overview.entities.length) {
+          if ((databaseRequired || missingRequiredCatalog) && !planned.entities.length && !overview.entities.length) {
             throw new Error("The selected model did not define a valid database schema");
           }
           if (planned.entities.length) {
@@ -382,7 +389,7 @@ export async function POST(req: Request) {
         console.error("[Cryzo Cloud] database-first provisioning failed", error);
         return Response.json({ error: "backend_setup_failed", message: error instanceof Error ? error.message : "Database setup failed" }, { status: 422 });
       }
-    } else if (mode === "build" && (backendRequirements.database || mustProvisionCatalog(projectIntent)) &&
+    } else if (mode === "build" && databaseRequired &&
       (!authenticatedConvex || !cryzoCloudAppId)) {
       return Response.json({
         error: authenticatedConvex ? "backend_unavailable" : "authentication_required",
@@ -391,6 +398,12 @@ export async function POST(req: Request) {
           : "Sign in to create the app database",
       }, { status: authenticatedConvex ? 503 : 401 });
     }
+
+    const databasePrelude = mode !== "build" ? "" : hasVerifiedBackendEntities
+      ? `✓ Cryzo Cloud database ready: ${confirmedBackendResources.entities.map((entity) => entity.name).join(", ")}. Building the application against the verified schema.\n\n`
+      : databaseRequired
+        ? "✓ Cryzo Cloud database verified. Building the application against the backend now.\n\n"
+        : "✓ No database required for this static build. Building the application now.\n\n";
 
     const syncGeneratedCloudResources = async (text: string) => {
       const resources = parseCryzoCloudResources(text);
@@ -513,7 +526,7 @@ export async function POST(req: Request) {
     }
 
     const mcpBundle = resolved.supportsTools
-      ? await buildProjectMcpTools({ authToken, userId }).catch((error) => {
+      ? await buildProjectMcpTools({ authToken, userId, conversationId }).catch((error) => {
           console.warn("Unable to load MCP tools", error);
           return { tools: {} as Record<string, any>, servers: [] as any[] };
         })
@@ -552,6 +565,9 @@ export async function POST(req: Request) {
       currentProjectContext +
       layoutPlan +
       mcpPrompt +
+      ((useComposioTools || hasMcpTools) && databasePrelude
+        ? `\n\n## REQUIRED FIRST VISIBLE LINE\nBegin the visible response with this exact line before any explanation or cryzoArtifact: ${databasePrelude.trim()}\nDo not put any generated file action before that line.\n`
+        : "") +
       lockedUserDomainPrompt(projectIntent);
 
     let responseSessionId = composioSessionId;
@@ -609,8 +625,8 @@ export async function POST(req: Request) {
         },
         execute: async ({ writer }) => {
           writer.write({ type: "text-start", id: textId });
-          if (hasVerifiedBackendEntities) {
-            writer.write({ type: "text-delta", id: textId, delta: `✓ Cryzo Cloud database ready: ${confirmedBackendResources.entities.map((entity) => entity.name).join(", ")}. Building the application against the verified schema.\n\n` });
+          if (databasePrelude) {
+            writer.write({ type: "text-delta", id: textId, delta: databasePrelude });
           }
 
           let continuationMessages: any[] = [...modelMessages];

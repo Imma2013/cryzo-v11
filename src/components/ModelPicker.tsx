@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useAuthToken } from "@convex-dev/auth/react";
 import {
+  Check,
   CheckCircle2,
   ChevronDown,
   ExternalLink,
@@ -34,6 +35,7 @@ import {
   getManagedModel,
 } from "@/lib/ai/managed-models";
 import { ModelLogo, ProviderLogo } from "@/components/ProviderLogo";
+import type { ReasoningEffort } from "@/lib/ai/reasoning-config";
 
 export type CatalogModel = {
   id: string;
@@ -137,6 +139,7 @@ export function ModelPicker({
   const [feedback, setFeedback] = useState<Feedback>({ type: "idle" });
   const [busy, setBusy] = useState(false);
   const [discoveredModels, setDiscoveredModels] = useState<CatalogModel[]>([]);
+  const [modelReasoningEffort, setModelReasoningEffort] = useState(selection.reasoningEffort || "default");
 
   const provider = getProvider(providerId);
   const selectedProvider = getProvider(selection.providerId);
@@ -163,6 +166,7 @@ export function ModelPicker({
         : selection.modelId || DEFAULT_MODEL_SELECTION.modelId,
     );
     setCredentialMode(selection.credentialMode || "cryzo");
+    setModelReasoningEffort(selection.reasoningEffort || "default");
     setSearch("");
     setFeedback({ type: "idle" });
   }, [open, selection]);
@@ -252,6 +256,18 @@ export function ModelPicker({
         model.id.toLowerCase().includes(query),
     );
   }, [catalog.providers, discoveredModels, provider.id, search]);
+
+  const selectedCatalogModel = providerModels.find((model) => model.id === modelId);
+  const selectedReasoningEfforts = (selectedCatalogModel?.reasoningEfforts || [])
+    .filter((effort) => effort !== "default") as ReasoningEffort[];
+  const reasoningLabel = (effort: string) => effort === "xhigh" ? "Extra High" : effort.charAt(0).toUpperCase() + effort.slice(1);
+
+  useEffect(() => {
+    if (!selectedReasoningEfforts.length) return;
+    if (!selectedReasoningEfforts.includes(modelReasoningEffort)) {
+      setModelReasoningEffort(selectedReasoningEfforts.includes("medium") ? "medium" : selectedReasoningEfforts[0]);
+    }
+  }, [modelId, providerId, selectedReasoningEfforts.join("|")]);
 
   const saveAccountCredential = async () => {
     if (!authToken) throw new Error("Your Cryzo session is still loading");
@@ -425,6 +441,7 @@ export function ModelPicker({
           providerId: "cryzo",
           modelId: normalizeManagedModelId(modelId),
           credentialMode: "cryzo",
+          ...(selectedReasoningEfforts.length ? { reasoningEffort: modelReasoningEffort as any } : {}),
         });
         setOpen(false);
         return;
@@ -765,6 +782,24 @@ export function ModelPicker({
                   )}
                 </section>
 
+                {provider.id === "cryzo" && selectedReasoningEfforts.length > 0 && (
+                  <section className="mt-5 rounded-2xl border border-zinc-800 bg-zinc-950 p-4">
+                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">Thinking</p>
+                    <div className="mt-3 grid gap-1">
+                      {selectedReasoningEfforts.map((effort) => (
+                        <button
+                          key={effort}
+                          type="button"
+                          onClick={() => setModelReasoningEffort(effort)}
+                          className={`flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left text-sm font-medium transition ${modelReasoningEffort === effort ? "bg-zinc-800 text-white" : "text-zinc-300 hover:bg-zinc-900"}`}
+                        >
+                          <span>{reasoningLabel(effort)}</span>
+                          {modelReasoningEffort === effort && <Check size={16} />}
+                        </button>
+                      ))}
+                    </div>
+                  </section>
+                )}
 
               </main>
             </div>

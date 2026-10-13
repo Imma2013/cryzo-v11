@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useMutation, useQuery } from "convex/react";
 import { useAuthToken } from "@convex-dev/auth/react";
@@ -25,7 +25,11 @@ type McpServer = {
   name: string;
   url: string;
   transport: "http";
-  authType: "none";
+  authType: "none" | "api_key" | "oauth";
+  defaultEnabledForNewProjects?: boolean;
+  tools?: Array<{ name: string }>;
+  lastConnectedAt?: number;
+  lastError?: string;
   enabled: boolean;
   createdAt: number;
   updatedAt: number;
@@ -40,9 +44,10 @@ type SecretMeta = {
 const mcpApi = (api as unknown as {
   mcpServers: {
     list: FunctionReference<"query", "public", Record<string, never>, McpServer[]>;
-    add: FunctionReference<"mutation", "public", { name: string; url: string }, Id<"mcpServers">>;
+    add: FunctionReference<"mutation", "public", { name: string; url: string; authType?: "none" | "api_key" | "oauth"; defaultEnabledForNewProjects?: boolean }, Id<"mcpServers">>;
     remove: FunctionReference<"mutation", "public", { serverId: Id<"mcpServers"> }, null>;
     setEnabled: FunctionReference<"mutation", "public", { serverId: Id<"mcpServers">; enabled: boolean }, boolean>;
+    setDefaultEnabled: FunctionReference<"mutation", "public", { serverId: Id<"mcpServers">; enabled: boolean }, boolean>;
   };
 }).mcpServers;
 
@@ -53,10 +58,12 @@ export default function McpConnectorsPage() {
   const addServer = useMutation(mcpApi.add);
   const removeServer = useMutation(mcpApi.remove);
   const setEnabled = useMutation(mcpApi.setEnabled);
+  const setDefaultEnabled = useMutation(mcpApi.setDefaultEnabled);
   const [name, setName] = useState("");
   const [url, setUrl] = useState("");
-  const [authType, setAuthType] = useState<"none" | "api_key">("none");
+  const [authType, setAuthType] = useState<"none" | "api_key" | "oauth">("none");
   const [apiKey, setApiKey] = useState("");
+  const [defaultEnabled, setDefaultEnabledLocal] = useState(true);
   const [saving, setSaving] = useState(false);
   const [testingId, setTestingId] = useState<string | null>(null);
   const [error, setError] = useState("");
@@ -105,22 +112,60 @@ export default function McpConnectorsPage() {
     }
   }
 
+  async function startOAuth(serverId: string) {
+    if (!authToken) throw new Error("Your Cryzo session is still loading.");
+    const response = await fetch("/api/mcp/oauth/start", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${authToken}` },
+      body: JSON.stringify({ serverId }),
+    });
+    const data = await response.json();
+    if (!response.ok || !data.authorizationUrl) throw new Error(data.error || "Unable to start MCP OAuth.");
+    window.location.assign(data.authorizationUrl);
+  }
+
+  useEffect(() => {
+    if (!authToken) return;
+    const params = new URLSearchParams(window.location.search);
+    const oauth = params.get("oauth");
+    if (!oauth) return;
+    const serverId = params.get("serverId");
+    const message = params.get("message");
+    params.delete("oauth"); params.delete("message"); params.delete("serverId");
+    const query = params.toString();
+    window.history.replaceState({}, "", `${window.location.pathname}${query ? `?${query}` : ""}`);
+    if (oauth === "connected" && serverId) {
+      setNotice("MCP OAuth connected. Verifying tools…");
+      void testServer(serverId).catch((failure) => setError(failure instanceof Error ? failure.message : "MCP OAuth verification failed."));
+    } else {
+      setError(message || "MCP OAuth was not completed.");
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authToken]);
+
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     setError("");
     setNotice("");
     setSaving(true);
     try {
-      const serverId = await addServer({ name, url });
+      const serverId = await addServer({ name, url, authType, defaultEnabledForNewProjects: defaultEnabled });
+      const id = String(serverId);
       if (authType === "api_key") {
         if (!apiKey.trim()) throw new Error("Enter the API key for this MCP server.");
-        await saveSecret(String(serverId), apiKey.trim());
+        await saveSecret(id, apiKey.trim());
+        await testServer(id);
+      } else if (authType === "oauth") {
+        await startOAuth(id);
+        return;
+      } else {
+        await testServer(id);
       }
       setName("");
       setUrl("");
       setApiKey("");
       setAuthType("none");
-      await testServer(String(serverId));
+      setDefaultEnabledLocal(true);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Unable to add MCP server.");
     } finally {
@@ -175,10 +220,10 @@ export default function McpConnectorsPage() {
               </label>
               <label className="grid gap-2 text-sm text-zinc-300">
                 Authentication
-                <select value={authType} onChange={(event) => setAuthType(event.target.value as "none" | "api_key")} className="rounded-xl border border-zinc-800 bg-black px-4 py-3 text-sm text-white outline-none">
+                <select value={authType} onChange={(event) => setAuthType(event.target.value as "none" | "api_key" | "oauth")} className="rounded-xl border border-zinc-800 bg-black px-4 py-3 text-sm text-white outline-none">
                   <option value="none">None</option>
                   <option value="api_key">API Key</option>
-                  <option value="oauth" disabled>MCP OAuth (provider support required)</option>
+                  <option value="oauth">MCP OAuth</option>
                 </select>
               </label>
             </div>
@@ -192,10 +237,11 @@ export default function McpConnectorsPage() {
                 <span className="text-xs text-zinc-600">Sent as an Authorization bearer credential. Stored encrypted with CRYZO_SECRETS_KEY.</span>
               </label>
             )}
-            <div className="rounded-xl border border-zinc-800 bg-black px-4 py-3">
-              <p className="text-xs text-zinc-500">Automatically enable for projects</p>
-              <p className="mt-1 text-sm text-zinc-300">New connectors are enabled by default. You can disable them from this page or the chat + menu.</p>
-            </div>
+            {authType === "oauth" && <p className="rounded-xl border border-zinc-800 bg-black px-4 py-3 text-xs leading-5 text-zinc-400">After adding, Cryzo discovers the server&apos;s MCP OAuth metadata, performs PKCE authorization, stores refresh credentials encrypted, and verifies its tools.</p>}
+            <button type="button" onClick={() => setDefaultEnabledLocal((value) => !value)} className="flex items-center justify-between rounded-xl border border-zinc-800 bg-black px-4 py-3 text-left">
+              <span><span className="block text-sm text-zinc-200">Automatically enable for new projects</span><span className="mt-1 block text-xs text-zinc-600">Each project gets its own connector switch after creation.</span></span>
+              <span className={`relative h-6 w-11 rounded-full ${defaultEnabled ? "bg-blue-600" : "bg-zinc-700"}`}><span className={`absolute top-1 h-4 w-4 rounded-full bg-white transition ${defaultEnabled ? "left-6" : "left-1"}`} /></span>
+            </button>
             {error && <p className="text-sm text-red-400">{error}</p>}
             {notice && <p className="text-sm text-emerald-400">{notice}</p>}
             <button type="submit" disabled={saving} className="inline-flex h-11 w-fit items-center justify-center gap-2 rounded-xl bg-white px-5 text-sm font-semibold text-black hover:bg-zinc-200 disabled:opacity-50">
@@ -233,14 +279,15 @@ export default function McpConnectorsPage() {
                         <div className="flex flex-wrap items-center gap-2">
                           <h3 className="truncate text-sm font-semibold">{server.name}</h3>
                           <span className="inline-flex items-center gap-1 text-[11px] text-emerald-400"><CheckCircle2 size={11} /> {server.enabled ? "Enabled" : "Disabled"}</span>
-                          {hasSecret && <span className="text-[11px] text-zinc-500">API key</span>}
-                          {toolCounts[String(server._id)] !== undefined && <span className="text-[11px] text-zinc-500">{toolCounts[String(server._id)]} tools</span>}
+                          <span className="text-[11px] text-zinc-500">{server.authType === "oauth" ? "OAuth" : hasSecret ? "API key" : "No auth"}</span>
+                          {(toolCounts[String(server._id)] ?? server.tools?.length) !== undefined && <span className="text-[11px] text-zinc-500">{toolCounts[String(server._id)] ?? server.tools?.length} tools</span>}
                         </div>
                         <p className="mt-1 truncate text-xs text-zinc-500">{server.url}</p>
                       </div>
                       <button type="button" onClick={() => void setEnabled({ serverId: server._id, enabled: !server.enabled })} className={`relative h-6 w-11 rounded-full transition ${server.enabled ? "bg-blue-600" : "bg-zinc-700"}`} aria-label={`${server.enabled ? "Disable" : "Enable"} ${server.name}`}>
                         <span className={`absolute top-1 h-4 w-4 rounded-full bg-white transition ${server.enabled ? "left-6" : "left-1"}`} />
                       </button>
+                      <button type="button" onClick={() => void setDefaultEnabled({ serverId: server._id, enabled: !(server.defaultEnabledForNewProjects ?? true) })} className="rounded-lg px-2 py-1 text-[10px] text-zinc-500 hover:bg-zinc-900 hover:text-white" title="Default for new projects">{server.defaultEnabledForNewProjects ?? true ? "Default on" : "Default off"}</button>
                       <button type="button" disabled={testingId === String(server._id)} onClick={() => void testServer(String(server._id)).catch((testError) => setError(testError instanceof Error ? testError.message : "MCP connection failed."))} className="rounded-lg p-2 text-zinc-500 hover:bg-zinc-900 hover:text-white disabled:opacity-40" aria-label={`Test ${server.name}`}>
                         <RefreshCw size={16} className={testingId === String(server._id) ? "animate-spin" : ""} />
                       </button>

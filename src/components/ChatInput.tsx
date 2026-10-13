@@ -117,6 +117,7 @@ export function ChatInput({
   onChatModeChange,
   modelSelection = DEFAULT_MODEL_SELECTION,
   onModelSelectionChange = () => {},
+  conversationId,
   variant = "dock",
 }: {
   value: string;
@@ -129,6 +130,7 @@ export function ChatInput({
   onChatModeChange: (mode: ChatMode) => void;
   modelSelection?: ModelSelection;
   onModelSelectionChange?: (selection: ModelSelection) => void;
+  conversationId?: string;
   projectPlatforms?: ProjectPlatform[];
   onProjectPlatformsChange?: (platforms: ProjectPlatform[]) => void;
   variant?: "dock" | "hero";
@@ -431,7 +433,7 @@ export function ChatInput({
                   <ImagePlus size={16} className="text-zinc-400" />
                   Upload image
                 </button>
-                <McpQuickMenu />
+                <McpQuickMenu conversationId={conversationId} />
               </div>
             )}
           </div>
