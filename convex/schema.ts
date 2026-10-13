@@ -208,11 +208,32 @@ export default defineSchema({
     name: v.string(),
     url: v.string(),
     transport: v.literal("http"),
-    authType: v.literal("none"),
+    authType: v.union(v.literal("none"), v.literal("api_key"), v.literal("oauth")),
     enabled: v.boolean(),
+    defaultEnabledForNewProjects: v.optional(v.boolean()),
+    tools: v.optional(v.array(v.object({
+      name: v.string(),
+      description: v.optional(v.string()),
+      inputSchema: v.optional(v.any()),
+      enabled: v.optional(v.boolean()),
+    }))),
+    lastConnectedAt: v.optional(v.number()),
+    lastError: v.optional(v.string()),
     createdAt: v.number(),
     updatedAt: v.number(),
   }).index("by_user", ["userId", "updatedAt"]),
+
+  mcpProjectServers: defineTable({
+    userId: v.id("users"),
+    conversationId: v.id("conversations"),
+    serverId: v.id("mcpServers"),
+    enabled: v.boolean(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_user_conversation", ["userId", "conversationId"])
+    .index("by_project_server", ["conversationId", "serverId"])
+    .index("by_server", ["serverId"]),
 
   providerSecrets: defineTable({
     userId: v.id("users"),
