@@ -61,7 +61,9 @@ async function projectRows(ctx: any, userId: any, conversationId: any) {
       q.eq("userId", userId).eq("conversationId", conversationId),
     )
     .collect();
-  const byServer = new Map(bindings.map((row: any) => [String(row.serverId), row]));
+  const byServer = new Map<string, any>(
+    bindings.map((row: any) => [String(row.serverId), row] as [string, any]),
+  );
   return servers.map((server: any) => ({
     ...server,
     projectEnabled:
