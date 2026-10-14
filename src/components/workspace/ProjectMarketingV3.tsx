@@ -30,6 +30,11 @@ const NAV = [
   { id: "analytics", label: "Analytics", icon: BarChart3 },
 ] as const;
 
+const CONTENT_TABS = [
+  { id: "calendar", label: "Calendar" },
+  { id: "analytics", label: "Analytics" },
+] as const;
+
 export default function ProjectMarketingV3() {
   const [accessNow] = useState(() => Date.now());
   const access = useQuery(api.social.getAccess, { now: accessNow });
@@ -79,16 +84,11 @@ export default function ProjectMarketingV3() {
           <p className="mt-1 text-xs text-zinc-600">Plan, publish, and measure.</p>
         </div>
 
-        <nav className="space-y-1 p-3">
-          {NAV.map((item) => {
-            const Icon = item.icon;
-            return (
-              <button key={item.id} type="button" onClick={() => setSurface(item.id)} className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-medium transition ${surface === item.id ? "bg-zinc-900 text-white" : "text-zinc-500 hover:bg-zinc-950 hover:text-zinc-300"}`}>
-                <Icon size={16} />
-                {item.label}
-              </button>
-            );
-          })}
+        <nav className="p-3">
+          <button type="button" onClick={() => setSurface("ai")} className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-medium transition ${surface === "ai" ? "bg-zinc-900 text-white" : "text-zinc-500 hover:bg-zinc-950 hover:text-zinc-300"}`}>
+            <Bot size={16} />
+            AI
+          </button>
         </nav>
 
         <div className="mx-4 border-t border-zinc-800" />
@@ -121,6 +121,22 @@ export default function ProjectMarketingV3() {
           })}
           <button type="button" onClick={() => setManageAccounts(true)} className="ml-auto rounded-xl border border-zinc-800 p-2 text-zinc-400"><Settings2 size={15} /></button>
         </div>
+
+        {surface !== "ai" && (
+          <div className="hidden items-center gap-7 border-b border-zinc-800 bg-[#0b0b0b] px-5 md:flex">
+            {CONTENT_TABS.map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setSurface(tab.id)}
+                className={`relative py-4 text-sm font-semibold transition ${surface === tab.id ? "text-white" : "text-zinc-500 hover:text-zinc-300"}`}
+              >
+                {tab.label}
+                {surface === tab.id && <span className="absolute inset-x-0 bottom-0 h-0.5 bg-white" />}
+              </button>
+            ))}
+          </div>
+        )}
 
         <div className="min-h-0 flex-1">
           {surface === "ai" ? (
