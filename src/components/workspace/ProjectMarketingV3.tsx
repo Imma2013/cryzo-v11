@@ -44,7 +44,7 @@ export default function ProjectMarketingV3() {
   const removePost = useMutation(api.social.removePost);
 
   const [surface, setSurface] = useState<(typeof NAV)[number]["id"]>("calendar");
-  const [selectedChannel, setSelectedChannel] = useState<string | null>(null);
+  const [selectedChannel, setSelectedChannel] = useState<SocialNetwork | null>(null);
   const [manageAccounts, setManageAccounts] = useState(false);
   const [composerOpen, setComposerOpen] = useState(false);
   const [composerDate, setComposerDate] = useState(() => new Date());

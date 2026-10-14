@@ -87,7 +87,7 @@ export default function MarketingCalendar({
   onReschedule,
 }: {
   posts: MarketingPost[];
-  selectedChannel?: string | null;
+  selectedChannel?: SocialNetwork | null;
   onCreate: (date: Date) => void;
   onOpenPost: (post: MarketingPost) => void;
   onReschedule: (postId: string, date: Date) => Promise<void> | void;
