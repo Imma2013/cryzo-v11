@@ -1,6 +1,6 @@
 import { Composio } from "@composio/core";
 import { fetchMutation, fetchQuery } from "convex/nextjs";
-import { api } from "../../../../../../convex/_generated/api";
+import { api } from "../../../../../convex/_generated/api";
 import { composioSocialSessionOptions, type SocialToolkit } from "@/lib/server/composio-social";
 
 export const dynamic = "force-dynamic";

@@ -55,7 +55,7 @@ export default function MarketingAIChat({
     setInput("");
     setLoading(true);
     setError("");
-    setMessages((current) => [...current, { role: "user", content: prompt }]);
+    setMessages((current) => [...current, { role: "user" as const, content: prompt }]);
     try {
       const media: Array<{ url: string; name: string; contentType: string }> = [];
       for (const file of files) {
@@ -107,7 +107,7 @@ export default function MarketingAIChat({
         throw new Error(data.message || data.error || "Marketing chat failed.");
       }
       const text = String(data.text || "Done.");
-      setMessages((current) => [...current, { role: "assistant", content: text }].slice(-40));
+      setMessages((current) => [...current, { role: "assistant" as const, content: text }].slice(-40));
       if (data.actionExecuted) onCalendarChanged?.();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Marketing chat failed.");
