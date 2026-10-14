@@ -37,7 +37,9 @@ export async function planDatabaseBeforeFrontend({
     "Access: private for personal data, public-read for public catalogs, public only if anonymous writes are explicitly needed.",
     "Never invent real private personal data, passwords, tokens, medical records, or credential tables.",
     "For bookstores, book websites, online libraries, shops, catalogs, and inventories ALWAYS create a real Books or Products catalog plus 2-4 realistic public seed rows.",
-    "Create other entities when requested. Only use 0 entities for genuinely static content-only pages.",
+    requireEntities
+      ? "This build is database-first. Return at least one useful entity. If the site has no obvious application data, create a small SiteContent or ContentBlocks entity with safe seed content so the frontend is still backed by real data."
+      : "Create other entities when requested. Zero entities are allowed only when the caller explicitly does not require a database.",
     "Up to 8 entities and 6 records per entity. Prefer schema simplicity and no unnecessary relationship fields.",
     "Keep sample content safe and truthful. Auth is managed by Cryzo Cloud. Do not output code or markdown.",
   ].join(" ");

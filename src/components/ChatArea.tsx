@@ -626,6 +626,10 @@ export function ChatArea({
             modelApiKey,
             authToken:
               selection.credentialMode === "account" ? authToken : undefined,
+            // Convex authentication is independent from the selected AI provider.
+            // Always send the session token so Cryzo Cloud provisioning cannot
+            // incorrectly report authentication_required for managed models.
+            convexAuthToken: authToken || undefined,
           },
         },
       );

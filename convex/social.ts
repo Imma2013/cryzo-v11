@@ -297,6 +297,71 @@ export const listPosts = query({
   },
 });
 
+export const getAnalyticsSnapshot = query({
+  args: {
+    connectedAccountId: v.string(),
+    days: v.number(),
+  },
+  returns: v.union(v.null(), v.any()),
+  handler: async (ctx, args) => {
+    const userId = await getAuthUserId(ctx);
+    if (!userId) return null;
+    return await ctx.db
+      .query("socialAnalyticsSnapshots")
+      .withIndex("by_user_account_range", (q) =>
+        q
+          .eq("userId", userId)
+          .eq("connectedAccountId", args.connectedAccountId)
+          .eq("rangeDays", args.days),
+      )
+      .unique();
+  },
+});
+
+export const saveAnalyticsSnapshot = mutation({
+  args: {
+    connectedAccountId: v.string(),
+    channel: v.string(),
+    days: v.number(),
+    data: v.any(),
+  },
+  returns: v.id("socialAnalyticsSnapshots"),
+  handler: async (ctx, args) => {
+    const userId = await currentUserId(ctx);
+    const account = (await userAccounts(ctx, userId)).find(
+      (item) => item.connectedAccountId === args.connectedAccountId,
+    );
+    if (!account) throw new Error("Social account not found.");
+    const existing = await ctx.db
+      .query("socialAnalyticsSnapshots")
+      .withIndex("by_user_account_range", (q) =>
+        q
+          .eq("userId", userId)
+          .eq("connectedAccountId", args.connectedAccountId)
+          .eq("rangeDays", args.days),
+      )
+      .unique();
+    const now = Date.now();
+    if (existing) {
+      await ctx.db.patch(existing._id, {
+        channel: args.channel,
+        data: args.data,
+        updatedAt: now,
+      });
+      return existing._id;
+    }
+    return await ctx.db.insert("socialAnalyticsSnapshots", {
+      userId,
+      connectedAccountId: args.connectedAccountId,
+      channel: args.channel,
+      rangeDays: args.days,
+      data: args.data,
+      createdAt: now,
+      updatedAt: now,
+    });
+  },
+});
+
 export const generateUploadUrl = mutation({
   args: {},
   returns: v.string(),
@@ -394,6 +459,37 @@ export const createPost = mutation({
       );
     }
     return id;
+  },
+});
+
+export const reschedulePost = mutation({
+  args: {
+    postId: v.id("socialPosts"),
+    scheduledFor: v.number(),
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const userId = await currentUserId(ctx);
+    const post = await ctx.db.get(args.postId);
+    if (!post || post.userId !== userId) throw new Error("Post not found.");
+    if (!Number.isFinite(args.scheduledFor)) throw new Error("Choose a valid date.");
+    if (["publishing", "published"].includes(post.status)) {
+      throw new Error("Published posts cannot be rescheduled.");
+    }
+    const access = await socialAccess(ctx, userId, Date.now());
+    if (post.status === "scheduled" && !access.paid) {
+      throw new Error("Scheduling requires an active Starter plan.");
+    }
+    const scheduledFor = Math.max(args.scheduledFor, Date.now() + 1000);
+    await ctx.db.patch(post._id, { scheduledFor, updatedAt: Date.now() });
+    if (post.status === "scheduled") {
+      await ctx.scheduler.runAt(
+        scheduledFor,
+        internal.socialWorker.publishPost,
+        { postId: post._id },
+      );
+    }
+    return null;
   },
 });
 

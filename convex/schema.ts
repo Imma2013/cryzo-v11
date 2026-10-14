@@ -376,6 +376,19 @@ export default defineSchema({
   socialUsage: defineTable({
     userId: v.id("users"), period: v.string(), reserved: v.number(),
   }).index("by_user_period", ["userId", "period"]),
+
+  socialAnalyticsSnapshots: defineTable({
+    userId: v.id("users"),
+    connectedAccountId: v.string(),
+    channel: v.string(),
+    rangeDays: v.number(),
+    data: v.any(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_user_account_range", ["userId", "connectedAccountId", "rangeDays"])
+    .index("by_user_updated", ["userId", "updatedAt"]),
+
   socialMedia: defineTable({
     userId: v.id("users"),
     conversationId: v.optional(v.id("conversations")),

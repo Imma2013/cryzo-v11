@@ -119,6 +119,9 @@ export function ChatInput({
   onModelSelectionChange = () => {},
   conversationId,
   variant = "dock",
+  showModeMenu = true,
+  placeholder,
+
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -134,6 +137,8 @@ export function ChatInput({
   projectPlatforms?: ProjectPlatform[];
   onProjectPlatformsChange?: (platforms: ProjectPlatform[]) => void;
   variant?: "dock" | "hero";
+  showModeMenu?: boolean;
+  placeholder?: string;
 }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -364,11 +369,12 @@ export function ChatInput({
             }
           }}
           placeholder={
-            chatMode === "plan"
+            placeholder ??
+            (chatMode === "plan"
               ? "Ask a question or plan your next change..."
               : isHero
                 ? "Describe what you want to build..."
-                : "What would you like to build?"
+                : "What would you like to build?")
           }
           disabled={disabled}
           rows={1}
@@ -410,7 +416,7 @@ export function ChatInput({
                   isHero ? "left-0 top-full mt-2" : "bottom-full left-0 mb-2",
                 )}
               >
-                {MODES.map((mode) => {
+                {showModeMenu && MODES.map((mode) => {
                   const Icon = mode.icon;
                   return <button key={mode.id} type="button" role="menuitemradio" aria-checked={mode.id === chatMode}
                     onClick={() => { onChatModeChange(mode.id); setPlusOpen(false); }}
@@ -420,7 +426,7 @@ export function ChatInput({
                     {chatMode === mode.id && <Check size={15} className="text-white" />}
                   </button>;
                 })}
-                <div className="my-1 border-t border-zinc-800" />
+                {showModeMenu && <div className="my-1 border-t border-zinc-800" />}
                 <button
                   type="button"
                   onClick={() => {

@@ -14,7 +14,8 @@ import { ConvexHttpClient } from "convex/browser";
 import { after } from "next/server";
 import { checkpointGenerationStream } from "@/lib/server/background-generation";
 import { planWebsiteDesign, auditWebsiteDraft } from "@/lib/server/design-quality";
-import { planDatabaseBeforeFrontend, projectNeedsDatabase, verifiedBackendContext } from "@/lib/server/database-first";
+import { planDatabaseBeforeFrontend, verifiedBackendContext } from "@/lib/server/database-first";
+import { shouldMutateProject, shouldProvisionDatabase } from "@/lib/server/build-routing";
 import { isBookOrPublishingRequest, isAutomotiveRequest, mustProvisionCatalog, lockedUserDomainPrompt, offDomainGeneratedPaths } from "@/lib/server/project-intent";
 import type { CryzoCloudResources } from "@/lib/ai/cryzo-cloud-resources";
 import { CANONICAL_DESIGN_LIBRARY_PATH, getDesignReferenceLibrary, routeDesignReferences } from "@/lib/server/design-reference-library";
@@ -172,7 +173,7 @@ export async function POST(req: Request) {
       convexAuthToken?: string;
     };
 
-    const mode = chatMode === "plan" ? "plan" : "build";
+    const requestedMode = chatMode === "plan" ? "plan" : "build";
     const lastUserMsg = messages
       .filter((message) => message.role === "user")
       .pop();
@@ -188,6 +189,12 @@ export async function POST(req: Request) {
     const projectIntent = isAutomaticRepair && earlierUserRequests.length
       ? earlierUserRequests[earlierUserRequests.length - 1]
       : lastUserText;
+    // Build mode is a capability, not an instruction. Greetings, questions, and
+    // ordinary discussion must never enter the artifact/database pipeline.
+    const mode: "build" | "plan" =
+      requestedMode === "build" && shouldMutateProject(lastUserText, isAutomaticRepair)
+        ? "build"
+        : "plan";
     if (mode === "build" && requestedNativeLanguage(projectIntent) &&
       /\b(build|create|make|develop|implement|generate)\b/i.test(projectIntent)) {
       return Response.json({
@@ -196,11 +203,6 @@ export async function POST(req: Request) {
       }, { status: 422 });
     }
     const backendRequirements = backendRequirementsFromPrompt(lastUserText);
-    const databaseRequired = mode === "build" && (
-      backendRequirements.database ||
-      mustProvisionCatalog(projectIntent) ||
-      projectNeedsDatabase(projectIntent)
-    );
     const resolved = await resolveServerModel({
       providerId: modelProvider,
       modelId,
@@ -270,6 +272,13 @@ export async function POST(req: Request) {
       : projectPlatforms?.length ? normalizeProjectPlatforms(projectPlatforms)
       : storedProjectPlatforms?.length ? normalizeProjectPlatforms(storedProjectPlatforms)
       : inferProjectPlatforms(lastUserText, ["web"], false);
+    // Product rule: every web build is database-first. Mobile builds stay local
+    // unless the user explicitly requests backend/account/sync behavior.
+    const databaseRequired = shouldProvisionDatabase({
+      mode,
+      platforms: resolvedProjectPlatforms,
+      prompt: projectIntent,
+    });
 
     let cryzoCloudAppId: string | undefined;
     let currentProjectContext = "";
@@ -299,7 +308,7 @@ export async function POST(req: Request) {
       }
     }
 
-    if (mode === "build" && conversationId && authenticatedConvex) {
+    if (mode === "build" && databaseRequired && conversationId && authenticatedConvex) {
       try {
         const cloudApp = await authenticatedConvex.mutation(
           api.cloudAdmin.ensureForConversation,
@@ -399,11 +408,11 @@ export async function POST(req: Request) {
       }, { status: authenticatedConvex ? 503 : 401 });
     }
 
-    const databasePrelude = mode !== "build" ? "" : hasVerifiedBackendEntities
-      ? `✓ Cryzo Cloud database ready: ${confirmedBackendResources.entities.map((entity) => entity.name).join(", ")}. Building the application against the verified schema.\n\n`
-      : databaseRequired
-        ? "✓ Cryzo Cloud database verified. Building the application against the backend now.\n\n"
-        : "✓ No database required for this static build. Building the application now.\n\n";
+    const databasePrelude = mode === "build" && databaseRequired
+      ? hasVerifiedBackendEntities
+        ? `✓ Cryzo Cloud database ready: ${confirmedBackendResources.entities.map((entity) => entity.name).join(", ")}. Building the application against the verified schema.\n\n`
+        : "✓ Cryzo Cloud database verified. Building the application against the backend now.\n\n"
+      : "";
 
     const syncGeneratedCloudResources = async (text: string) => {
       const resources = parseCryzoCloudResources(text);
