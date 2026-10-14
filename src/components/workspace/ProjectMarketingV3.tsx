@@ -5,7 +5,7 @@ import { useMutation, useQuery } from "convex/react";
 import { BarChart3, Bot, CalendarDays, Plus, Settings2, Trash2, X } from "lucide-react";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
-import { SocialNetworkLogo } from "@/components/SocialNetworkLogo";
+import { SocialNetworkLogo, type SocialNetwork } from "@/components/SocialNetworkLogo";
 import ProjectSocialAccounts from "./ProjectSocialAccounts";
 import MarketingAIChat from "./MarketingAIChat";
 import MarketingAnalytics from "./MarketingAnalytics";
@@ -14,7 +14,7 @@ import MarketingComposer from "./MarketingComposer";
 
 type SocialAccount = {
   _id: Id<"socialAccounts">;
-  channel: string;
+  channel: SocialNetwork;
   connectedAccountId: string;
   name: string;
 };

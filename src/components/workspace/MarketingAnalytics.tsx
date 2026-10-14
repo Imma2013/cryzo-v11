@@ -3,12 +3,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { BarChart3, Loader2, RefreshCw, TrendingUp } from "lucide-react";
 import { useAuth } from "@/providers/AuthProvider";
-import { SocialNetworkLogo } from "@/components/SocialNetworkLogo";
+import { SocialNetworkLogo, type SocialNetwork } from "@/components/SocialNetworkLogo";
 
 type Metric = { key: string; label: string; value: number };
 type Series = { key: string; label: string; points: Array<{ date: string; value: number }> };
 type AnalyticsItem = {
-  channel: string;
+  channel: SocialNetwork;
   accountId: string;
   accountName: string;
   metrics: Metric[];

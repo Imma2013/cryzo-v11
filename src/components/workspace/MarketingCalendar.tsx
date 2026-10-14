@@ -2,12 +2,12 @@
 
 import { useMemo, useState } from "react";
 import { CalendarDays, ChevronLeft, ChevronRight, Plus } from "lucide-react";
-import { SocialNetworkLogo } from "@/components/SocialNetworkLogo";
+import { SocialNetworkLogo, type SocialNetwork } from "@/components/SocialNetworkLogo";
 
 export type MarketingPost = {
   _id: string;
   content: string;
-  channels: string[];
+  channels: SocialNetwork[];
   scheduledFor: number;
   status: string;
   mediaUrls?: string[];
