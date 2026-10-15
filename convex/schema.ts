@@ -21,7 +21,9 @@ export default defineSchema({
     title: v.string(),
     chatMode: v.optional(v.union(v.literal("build"), v.literal("plan"))),
     projectPlatforms: v.optional(
-      v.array(v.union(v.literal("web"), v.literal("ios"), v.literal("android"))),
+      v.array(
+        v.union(v.literal("web"), v.literal("ios"), v.literal("android")),
+      ),
     ),
     composioSessionId: v.union(v.string(), v.null()),
     modelProvider: v.optional(v.string()),
@@ -37,19 +39,66 @@ export default defineSchema({
 
   messages: defineTable({
     conversationId: v.id("conversations"),
+    clientMessageId: v.optional(v.string()),
     role: v.union(v.literal("user"), v.literal("assistant")),
     content: v.string(),
     parts: v.optional(v.any()),
+    partsJson: v.optional(v.string()),
     toolCalls: v.optional(v.any()),
     createdAt: v.number(),
-  }).index("by_conversation", ["conversationId", "createdAt"]),
+  })
+    .index("by_conversation", ["conversationId", "createdAt"])
+    .index("by_conversation_client", ["conversationId", "clientMessageId"]),
 
   generationJobs: defineTable({
-    conversationId: v.id("conversations"), userId: v.id("users"), promptId: v.string(),
-    status: v.union(v.literal("running"), v.literal("complete"), v.literal("failed"), v.literal("cancelled")),
-    text: v.string(), error: v.optional(v.string()), createdAt: v.number(), updatedAt: v.number(),
-  }).index("by_conversation_prompt", ["conversationId", "promptId"])
+    conversationId: v.id("conversations"),
+    userId: v.id("users"),
+    promptId: v.string(),
+    status: v.union(
+      v.literal("running"),
+      v.literal("complete"),
+      v.literal("failed"),
+      v.literal("cancelled"),
+    ),
+    taskId: v.optional(v.id("durableTasks")),
+    sequence: v.optional(v.number()),
+    partsJson: v.optional(v.string()),
+    text: v.string(),
+    error: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_conversation_prompt", ["conversationId", "promptId"])
     .index("by_conversation_created", ["conversationId", "createdAt"]),
+
+  durableTasks: defineTable({
+    conversationId: v.id("conversations"),
+    userId: v.id("users"),
+    kind: v.union(v.literal("generation"), v.literal("expo")),
+    key: v.string(),
+    status: v.union(
+      v.literal("queued"),
+      v.literal("running"),
+      v.literal("complete"),
+      v.literal("failed"),
+      v.literal("cancelled"),
+    ),
+    phase: v.string(),
+    ciphertext: v.optional(v.string()),
+    iv: v.optional(v.string()),
+    tag: v.optional(v.string()),
+    resultJson: v.optional(v.string()),
+    error: v.optional(v.string()),
+    runId: v.optional(v.string()),
+    attempt: v.optional(v.string()),
+    generationJobId: v.optional(v.id("generationJobs")),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+    expiresAt: v.number(),
+  })
+    .index("by_conversation_kind_key", ["conversationId", "kind", "key"])
+    .index("by_conversation_kind_status", ["conversationId", "kind", "status"])
+    .index("by_expiresAt", ["expiresAt"]),
 
   artifacts: defineTable({
     conversationId: v.id("conversations"),
@@ -64,12 +113,16 @@ export default defineSchema({
           v.literal("supabase"),
         ),
         filePath: v.optional(v.string()),
-        operation: v.optional(v.union(v.literal("migration"), v.literal("query"))),
+        operation: v.optional(
+          v.union(v.literal("migration"), v.literal("query")),
+        ),
         content: v.string(),
       }),
     ),
     createdAt: v.number(),
-  }).index("by_conversation", ["conversationId", "createdAt"]),
+  })
+    .index("by_conversation", ["conversationId", "createdAt"])
+    .index("by_conversation_artifact", ["conversationId", "artifactId"]),
 
   publishTargets: defineTable({
     userId: v.id("users"),
@@ -137,13 +190,19 @@ export default defineSchema({
     role: v.union(v.literal("user"), v.literal("admin")),
     passwordHash: v.optional(v.string()),
     passwordSalt: v.optional(v.string()),
-    authProvider: v.optional(v.union(v.literal("password"), v.literal("google"))),
+    authProvider: v.optional(
+      v.union(v.literal("password"), v.literal("google")),
+    ),
     providerSubject: v.optional(v.string()),
     createdAt: v.number(),
     updatedAt: v.number(),
   })
     .index("by_app_email", ["appId", "email"])
-    .index("by_app_provider_subject", ["appId", "authProvider", "providerSubject"])
+    .index("by_app_provider_subject", [
+      "appId",
+      "authProvider",
+      "providerSubject",
+    ])
     .index("by_app", ["appId", "createdAt"]),
 
   cloudSessions: defineTable({
@@ -165,7 +224,12 @@ export default defineSchema({
     updatedAt: v.number(),
   })
     .index("by_app_entity", ["appId", "entityName", "createdAt"])
-    .index("by_app_entity_owner", ["appId", "entityName", "ownerAppUserId", "createdAt"]),
+    .index("by_app_entity_owner", [
+      "appId",
+      "entityName",
+      "ownerAppUserId",
+      "createdAt",
+    ]),
 
   cloudUsageEvents: defineTable({
     appId: v.id("cloudApps"),
@@ -208,20 +272,47 @@ export default defineSchema({
     name: v.string(),
     url: v.string(),
     transport: v.union(v.literal("http"), v.literal("sse")),
-    authType: v.union(v.literal("none"), v.literal("api_key"), v.literal("oauth")),
+    authType: v.union(
+      v.literal("none"),
+      v.literal("api_key"),
+      v.literal("oauth"),
+    ),
     enabled: v.boolean(),
     defaultEnabledForNewProjects: v.optional(v.boolean()),
-    tools: v.optional(v.array(v.object({
-      name: v.string(),
-      description: v.optional(v.string()),
-      inputSchema: v.optional(v.any()),
-      enabled: v.optional(v.boolean()),
-    }))),
+    tools: v.optional(
+      v.array(
+        v.object({
+          name: v.string(),
+          description: v.optional(v.string()),
+          inputSchema: v.optional(v.any()),
+          enabled: v.optional(v.boolean()),
+        }),
+      ),
+    ),
+    catalogVersion: v.optional(v.string()),
+    toolCount: v.optional(v.number()),
     lastConnectedAt: v.optional(v.number()),
     lastError: v.optional(v.string()),
     createdAt: v.number(),
     updatedAt: v.number(),
   }).index("by_user", ["userId", "updatedAt"]),
+
+  mcpCatalogVersions: defineTable({
+    serverId: v.id("mcpServers"),
+    version: v.string(),
+    count: v.number(),
+  }).index("by_server_version", ["serverId", "version"]),
+
+  mcpTools: defineTable({
+    serverId: v.id("mcpServers"),
+    version: v.string(),
+    name: v.string(),
+    description: v.optional(v.string()),
+    inputSchemaJson: v.string(),
+    enabled: v.optional(v.boolean()),
+  })
+    .index("by_server_version", ["serverId", "version"])
+    .index("by_server_version_name", ["serverId", "version", "name"]),
 
   mcpProjectServers: defineTable({
     userId: v.id("users"),
@@ -376,7 +467,9 @@ export default defineSchema({
     .index("by_user_and_channel", ["userId", "channel"])
     .index("by_user_and_connected", ["userId", "connectedAccountId"]),
   socialUsage: defineTable({
-    userId: v.id("users"), period: v.string(), reserved: v.number(),
+    userId: v.id("users"),
+    period: v.string(),
+    reserved: v.number(),
   }).index("by_user_period", ["userId", "period"]),
 
   socialAnalyticsSnapshots: defineTable({
@@ -389,8 +482,17 @@ export default defineSchema({
     createdAt: v.number(),
     updatedAt: v.number(),
   })
-    .index("by_user_account_range", ["userId", "connectedAccountId", "rangeDays"])
-    .index("by_user_account_range_target", ["userId", "connectedAccountId", "rangeDays", "targetId"])
+    .index("by_user_account_range", [
+      "userId",
+      "connectedAccountId",
+      "rangeDays",
+    ])
+    .index("by_user_account_range_target", [
+      "userId",
+      "connectedAccountId",
+      "rangeDays",
+      "targetId",
+    ])
     .index("by_user_updated", ["userId", "updatedAt"]),
 
   socialMedia: defineTable({
@@ -415,7 +517,9 @@ export default defineSchema({
       v.literal("pro_plus"),
       v.literal("business"),
     ),
-    billingCycle: v.optional(v.union(v.literal("monthly"), v.literal("yearly"))),
+    billingCycle: v.optional(
+      v.union(v.literal("monthly"), v.literal("yearly")),
+    ),
     stripeCustomerId: v.optional(v.string()),
     stripeSubscriptionId: v.optional(v.string()),
     status: v.union(
@@ -452,7 +556,9 @@ export default defineSchema({
 
   creditLedger: defineTable({
     userId: v.id("users"),
-    creditType: v.optional(v.union(v.literal("message"), v.literal("integration"))),
+    creditType: v.optional(
+      v.union(v.literal("message"), v.literal("integration")),
+    ),
     amount: v.number(),
     balance: v.number(),
     reason: v.string(),
@@ -480,24 +586,40 @@ export default defineSchema({
   }).index("by_event", ["eventId"]),
 
   aiUsageMeters: defineTable({
-    userId: v.id("users"), period: v.string(),
-    spentMicros: v.number(), reservedMicros: v.number(),
+    userId: v.id("users"),
+    period: v.string(),
+    spentMicros: v.number(),
+    reservedMicros: v.number(),
     topUpSpentMicros: v.optional(v.number()),
-    freeRuns: v.number(), reservedRuns: v.number(),
-    day: v.string(), dailyRuns: v.number(),
+    freeRuns: v.number(),
+    reservedRuns: v.number(),
+    day: v.string(),
+    dailyRuns: v.number(),
   }).index("by_user_period", ["userId", "period"]),
 
   aiRuns: defineTable({
     pendingCost: v.optional(v.boolean()),
     generationIds: v.optional(v.array(v.string())),
-    userId: v.id("users"), conversationId: v.id("conversations"),
-    requestKey: v.string(), period: v.string(), day: v.string(),
-    requestedModel: v.string(), actualModel: v.optional(v.string()),
-    status: v.union(v.literal("running"), v.literal("completed"), v.literal("failed")),
-    reservedMicros: v.number(), costMicros: v.optional(v.number()),
-    free: v.boolean(), expiresAt: v.number(), createdAt: v.number(),
-    generationId: v.optional(v.string()), telemetry: v.optional(v.any()),
-  }).index("by_user_request", ["userId", "requestKey"])
+    userId: v.id("users"),
+    conversationId: v.id("conversations"),
+    requestKey: v.string(),
+    period: v.string(),
+    day: v.string(),
+    requestedModel: v.string(),
+    actualModel: v.optional(v.string()),
+    status: v.union(
+      v.literal("running"),
+      v.literal("completed"),
+      v.literal("failed"),
+    ),
+    reservedMicros: v.number(),
+    costMicros: v.optional(v.number()),
+    free: v.boolean(),
+    expiresAt: v.number(),
+    createdAt: v.number(),
+    generationId: v.optional(v.string()),
+    telemetry: v.optional(v.any()),
+  })
+    .index("by_user_request", ["userId", "requestKey"])
     .index("by_user_status", ["userId", "status"]),
 });
-

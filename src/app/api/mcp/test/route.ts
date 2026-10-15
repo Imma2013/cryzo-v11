@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+import { encodeMcpTool, mcpConnectionError } from "@/lib/server/mcp-schema";
 import { fetchMutation, fetchQuery } from "convex/nextjs";
 import { api } from "../../../../../convex/_generated/api";
 import {
@@ -34,19 +36,40 @@ export async function POST(req: Request) {
       { token },
     )) as McpServerRecord | null;
     if (!server) {
-      return Response.json(
-        { error: "MCP server not found." },
-        { status: 404 },
-      );
+      return Response.json({ error: "MCP server not found." }, { status: 404 });
     }
 
     await assertPublicMcpUrl(server.url);
     const tools = await listRemoteMcpTools(server, token);
+    const version = randomUUID();
+    // One tool per record; stage all pages before switching the active catalog.
+    let batch: ReturnType<typeof encodeMcpTool>[] = [];
+    let bytes = 0;
+    const stage = async () => {
+      if (batch.length)
+        await fetchMutation(
+          api.mcpCatalog.stage,
+          { serverId: serverId as any, version, tools: batch },
+          { token },
+        );
+      batch = [];
+      bytes = 0;
+    };
+    for (const tool of tools) {
+      const encoded = encodeMcpTool(tool),
+        size = new TextEncoder().encode(JSON.stringify(encoded)).length;
+      if (batch.length >= 20 || bytes + size > 2_000_000) await stage();
+      batch.push(encoded);
+      bytes += size;
+    }
+    await stage();
     await fetchMutation(
-      (api as any).mcpServers.updateHealth,
+      api.mcpCatalog.activate,
       {
         serverId: serverId as any,
-        tools,
+        version,
+        count: tools.length,
+        expectedUpdatedAt: server.updatedAt,
       },
       { token },
     );
@@ -63,8 +86,8 @@ export async function POST(req: Request) {
       })),
     });
   } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "MCP connection failed.";
+    const failure = mcpConnectionError(error);
+    const message = failure.message;
     if (token && serverId) {
       await fetchMutation(
         (api as any).mcpServers.updateHealth,
@@ -75,6 +98,13 @@ export async function POST(req: Request) {
         { token },
       ).catch(() => {});
     }
-    return Response.json({ error: message }, { status: 400 });
+    return Response.json(
+      {
+        error: message,
+        detail: failure.detail,
+        authorizationRequired: failure.authorizationRequired,
+      },
+      { status: 400 },
+    );
   }
 }

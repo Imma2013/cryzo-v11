@@ -1,14 +1,19 @@
+import {
+  conversationUser,
+  jobAccessValidator,
+  type JobAccess,
+} from "./jobAccess";
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
-import { getAuthUserId } from "@convex-dev/auth/server";
 import type { QueryCtx, MutationCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 
 async function getOwnedConversation(
   ctx: QueryCtx | MutationCtx,
   conversationId: Id<"conversations">,
+  jobAccess?: JobAccess,
 ) {
-  const authUserId = await getAuthUserId(ctx);
+  const authUserId = await conversationUser(ctx, conversationId, jobAccess);
   const conversation = await ctx.db.get(conversationId);
   if (!authUserId || !conversation || conversation.userId !== authUserId) {
     return null;
@@ -69,12 +74,15 @@ function cloudResourcesFromActions(actions: ArtifactActionInput[]) {
 
     const json = parseJsonResource(path, action.content);
     if (lower === "cryzo/cloud.json") {
-      if (typeof json.name === "string" && json.name.trim()) name = json.name.trim();
+      if (typeof json.name === "string" && json.name.trim())
+        name = json.name.trim();
       for (const provider of json.auth?.providers || []) {
-        if (provider === "password" || provider === "google") authProviders.add(provider);
+        if (provider === "password" || provider === "google")
+          authProviders.add(provider);
       }
       for (const entity of json.entities || []) {
-        if (!entity || typeof entity.name !== "string" || !entity.name.trim()) continue;
+        if (!entity || typeof entity.name !== "string" || !entity.name.trim())
+          continue;
         const entityName = entity.name.trim();
         entities.set(entityName, {
           name: entityName,
@@ -87,12 +95,16 @@ function cloudResourcesFromActions(actions: ArtifactActionInput[]) {
 
     if (lower === "cryzo/auth/config.json") {
       for (const provider of json.providers || []) {
-        if (provider === "password" || provider === "google") authProviders.add(provider);
+        if (provider === "password" || provider === "google")
+          authProviders.add(provider);
       }
       continue;
     }
 
-    const fallbackName = path.split("/").pop()!.replace(/\.json$/i, "");
+    const fallbackName = path
+      .split("/")
+      .pop()!
+      .replace(/\.json$/i, "");
     const entityName =
       typeof json.name === "string" && json.name.trim()
         ? json.name.trim()
@@ -104,22 +116,37 @@ function cloudResourcesFromActions(actions: ArtifactActionInput[]) {
     });
   }
 
-  return { name, entities: [...entities.values()], authProviders: [...authProviders] };
+  return {
+    name,
+    entities: [...entities.values()],
+    authProviders: [...authProviders],
+  };
 }
 
 async function applyCloudResources(
   ctx: MutationCtx,
-  conversation: { _id: Id<"conversations">; userId: Id<"users">; title: string },
+  conversation: {
+    _id: Id<"conversations">;
+    userId: Id<"users">;
+    title: string;
+  },
   actions: ArtifactActionInput[],
 ) {
   const resources = cloudResourcesFromActions(actions);
-  if (!resources.entities.length && !resources.authProviders.length && !resources.name) return;
+  if (
+    !resources.entities.length &&
+    !resources.authProviders.length &&
+    !resources.name
+  )
+    return;
 
   const now = Date.now();
   let app = await ctx.db
     .query("cloudApps")
     .withIndex("by_owner_conversation", (q) =>
-      q.eq("ownerUserId", conversation.userId).eq("conversationId", conversation._id),
+      q
+        .eq("ownerUserId", conversation.userId)
+        .eq("conversationId", conversation._id),
     )
     .unique();
 
@@ -128,8 +155,13 @@ async function applyCloudResources(
     appId = await ctx.db.insert("cloudApps", {
       ownerUserId: conversation.userId,
       conversationId: conversation._id,
-      name: resources.name || conversation.title || `Cryzo app ${String(conversation._id).slice(-6)}`,
-      authProviders: resources.authProviders.length ? resources.authProviders : ["password"],
+      name:
+        resources.name ||
+        conversation.title ||
+        `Cryzo app ${String(conversation._id).slice(-6)}`,
+      authProviders: resources.authProviders.length
+        ? resources.authProviders
+        : ["password"],
       createdAt: now,
       updatedAt: now,
     });
@@ -137,7 +169,9 @@ async function applyCloudResources(
     appId = app._id;
     await ctx.db.patch(appId, {
       ...(resources.name ? { name: resources.name } : {}),
-      ...(resources.authProviders.length ? { authProviders: resources.authProviders } : {}),
+      ...(resources.authProviders.length
+        ? { authProviders: resources.authProviders }
+        : {}),
       updatedAt: now,
     });
   }
@@ -145,7 +179,9 @@ async function applyCloudResources(
   for (const entity of resources.entities) {
     const existing = await ctx.db
       .query("cloudEntitySchemas")
-      .withIndex("by_app_name", (q) => q.eq("appId", appId).eq("name", entity.name))
+      .withIndex("by_app_name", (q) =>
+        q.eq("appId", appId).eq("name", entity.name),
+      )
       .unique();
     const value = {
       appId,
@@ -155,7 +191,8 @@ async function applyCloudResources(
       updatedAt: now,
     };
     if (existing) await ctx.db.patch(existing._id, value);
-    else await ctx.db.insert("cloudEntitySchemas", { ...value, createdAt: now });
+    else
+      await ctx.db.insert("cloudEntitySchemas", { ...value, createdAt: now });
   }
 }
 
@@ -173,24 +210,35 @@ export const create = mutation({
           v.literal("supabase"),
         ),
         filePath: v.optional(v.string()),
-        operation: v.optional(v.union(v.literal("migration"), v.literal("query"))),
+        operation: v.optional(
+          v.union(v.literal("migration"), v.literal("query")),
+        ),
         content: v.string(),
       }),
     ),
   },
   handler: async (ctx, args) => {
-    const conversation = await requireOwnedConversation(ctx, args.conversationId);
+    const conversation = await requireOwnedConversation(
+      ctx,
+      args.conversationId,
+    );
 
     const existing = await ctx.db
       .query("artifacts")
-      .withIndex("by_conversation", (q) => q.eq("conversationId", args.conversationId))
+      .withIndex("by_conversation", (q) =>
+        q.eq("conversationId", args.conversationId),
+      )
       .filter((q) => q.eq(q.field("artifactId"), args.artifactId))
       .first();
 
     // Re-apply declarative Cloud resources even when the artifact was already
     // persisted by an older Cryzo version. This automatically backfills old
     // projects whose files existed but whose dashboard still showed 0 tables.
-    await applyCloudResources(ctx, conversation, args.actions as ArtifactActionInput[]);
+    await applyCloudResources(
+      ctx,
+      conversation,
+      args.actions as ArtifactActionInput[],
+    );
     if (existing) return existing._id;
 
     return await ctx.db.insert("artifacts", {
@@ -211,7 +259,10 @@ export const saveManualFile = mutation({
     content: v.string(),
   },
   handler: async (ctx, args) => {
-    const conversation = await requireOwnedConversation(ctx, args.conversationId);
+    const conversation = await requireOwnedConversation(
+      ctx,
+      args.conversationId,
+    );
     const path = args.filePath.trim();
     if (!path || path.includes("..") || path.startsWith("/")) {
       throw new Error("Invalid project file path");
@@ -224,7 +275,9 @@ export const saveManualFile = mutation({
 
     const existing = await ctx.db
       .query("artifacts")
-      .withIndex("by_conversation", (q) => q.eq("conversationId", args.conversationId))
+      .withIndex("by_conversation", (q) =>
+        q.eq("conversationId", args.conversationId),
+      )
       .filter((q) => q.eq(q.field("artifactId"), args.artifactId))
       .first();
     if (existing) return existing._id;
@@ -240,14 +293,23 @@ export const saveManualFile = mutation({
 });
 
 export const listByConversation = query({
-  args: { conversationId: v.id("conversations") },
+  args: {
+    jobAccess: v.optional(jobAccessValidator),
+    conversationId: v.id("conversations"),
+  },
   handler: async (ctx, args) => {
-    const conversation = await getOwnedConversation(ctx, args.conversationId);
+    const conversation = await getOwnedConversation(
+      ctx,
+      args.conversationId,
+      args.jobAccess,
+    );
     if (!conversation) return [];
 
     return await ctx.db
       .query("artifacts")
-      .withIndex("by_conversation", (q) => q.eq("conversationId", args.conversationId))
+      .withIndex("by_conversation", (q) =>
+        q.eq("conversationId", args.conversationId),
+      )
       .order("asc")
       .collect();
   },

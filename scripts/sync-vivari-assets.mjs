@@ -17,6 +17,7 @@
 //
 // The npm-pack.bin layout is defined by Vivari's kernel and this packer follows
 // Vivari's own scripts/vendor-npm.mjs (MIT, © Duc Trung Mai).
+import { patchPreviewServiceWorker } from "./patch-preview-service-worker.mjs";
 import { execSync } from "node:child_process";
 import {
   copyFileSync,
@@ -47,7 +48,9 @@ const log = (message) => console.log(`[vivari] ${message}`);
 const readJson = (path) => JSON.parse(readFileSync(path, "utf8"));
 
 if (!existsSync(join(dist, "index.js"))) {
-  console.error("[vivari] @vivari/core is not installed. Run `npm install` first.");
+  console.error(
+    "[vivari] @vivari/core is not installed. Run `npm install` first.",
+  );
   process.exit(1);
 }
 
@@ -59,12 +62,18 @@ function installIntoCache(spec) {
     rmSync(dir, { recursive: true, force: true });
     mkdirSync(dir, { recursive: true });
     // Its own package.json keeps npm from installing into the Cryzo project instead.
-    writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "cryzo-vivari-cache", private: true }));
+    writeFileSync(
+      join(dir, "package.json"),
+      JSON.stringify({ name: "cryzo-vivari-cache", private: true }),
+    );
     log(`downloading ${spec} …`);
-    execSync(`npm install ${spec} --no-save --no-audit --no-fund --ignore-scripts --loglevel=error`, {
-      cwd: dir,
-      stdio: ["ignore", "ignore", "inherit"],
-    });
+    execSync(
+      `npm install ${spec} --no-save --no-audit --no-fund --ignore-scripts --loglevel=error`,
+      {
+        cwd: dir,
+        stdio: ["ignore", "ignore", "inherit"],
+      },
+    );
   }
   return packageDir;
 }
@@ -77,24 +86,45 @@ function syncRuntime() {
 
   // Worker file names are content-hashed: drop the ones a previous version left behind.
   if (existsSync(manifestPath)) {
-    for (const name of readJson(manifestPath).files ?? []) rmSync(join(assetsDir, name), { force: true });
+    for (const name of readJson(manifestPath).files ?? [])
+      rmSync(join(assetsDir, name), { force: true });
   }
 
-  const files = readdirSync(join(dist, "assets")).filter((name) => name !== "sw.js");
-  for (const name of files) copyFileSync(join(dist, "assets", name), join(assetsDir, name));
-  copyFileSync(join(dist, "assets", "sw.js"), join(publicDir, "sw.js"));
+  const files = readdirSync(join(dist, "assets")).filter(
+    (name) => name !== "sw.js",
+  );
+  for (const name of files)
+    copyFileSync(join(dist, "assets", name), join(assetsDir, name));
+  writeFileSync(
+    join(publicDir, "sw.js"),
+    patchPreviewServiceWorker(
+      readFileSync(join(dist, "assets", "sw.js"), "utf8"),
+    ),
+  );
   copyFileSync(join(dist, "index.js"), join(publicDir, "vivari", "index.js"));
-  copyFileSync(join(publicDir, "inspector-script.js"), join(publicDir, "vv-devtools", "chobitsu.js"));
+  copyFileSync(
+    join(publicDir, "inspector-script.js"),
+    join(publicDir, "vv-devtools", "chobitsu.js"),
+  );
 
   const { version } = readJson(join(dist, "..", "package.json"));
-  writeFileSync(manifestPath, JSON.stringify({ version, files }, null, 2) + "\n");
-  log(`runtime @vivari/core@${version}: ${files.length} worker files, sw.js, index.js`);
+  writeFileSync(
+    manifestPath,
+    JSON.stringify({ version, files }, null, 2) + "\n",
+  );
+  log(
+    `runtime @vivari/core@${version}: ${files.length} worker files, sw.js, index.js`,
+  );
 }
 
 function packNpm() {
   const out = join(vendorDir, "npm-pack.bin");
   const marker = join(vendorDir, ".npm-pack.json");
-  if (existsSync(out) && existsSync(marker) && readJson(marker).version === NPM_VERSION) {
+  if (
+    existsSync(out) &&
+    existsSync(marker) &&
+    readJson(marker).version === NPM_VERSION
+  ) {
     log(`npm@${NPM_VERSION} pack is up to date`);
     return;
   }
@@ -124,16 +154,29 @@ function packNpm() {
     offset += file.size;
     return entry;
   });
-  const header = Buffer.from(JSON.stringify({ version: NPM_VERSION, files: index }), "utf8");
+  const header = Buffer.from(
+    JSON.stringify({ version: NPM_VERSION, files: index }),
+    "utf8",
+  );
   const headerLength = Buffer.alloc(4);
   headerLength.writeUInt32LE(header.length, 0);
-  const body = Buffer.concat(files.map((file) => readFileSync(file.abs)), totalBytes);
-  const packed = gzipSync(Buffer.concat([headerLength, header, body]), { level: 9 });
+  const body = Buffer.concat(
+    files.map((file) => readFileSync(file.abs)),
+    totalBytes,
+  );
+  const packed = gzipSync(Buffer.concat([headerLength, header, body]), {
+    level: 9,
+  });
 
   mkdirSync(vendorDir, { recursive: true });
   writeFileSync(out, packed);
-  writeFileSync(marker, JSON.stringify({ version: NPM_VERSION, files: files.length }) + "\n");
-  log(`npm@${NPM_VERSION} packed: ${files.length} files, ${(packed.length / 1e6).toFixed(1)} MB`);
+  writeFileSync(
+    marker,
+    JSON.stringify({ version: NPM_VERSION, files: files.length }) + "\n",
+  );
+  log(
+    `npm@${NPM_VERSION} packed: ${files.length} files, ${(packed.length / 1e6).toFixed(1)} MB`,
+  );
 }
 
 function syncPyodide() {
@@ -148,20 +191,34 @@ function syncPyodide() {
   rmSync(out, { recursive: true, force: true });
   mkdirSync(out, { recursive: true });
   // pyodide.asm.js was renamed pyodide.asm.mjs in 314.x; copy whichever the package ships.
-  const core = ["pyodide.mjs", "pyodide.asm.mjs", "pyodide.asm.js", "pyodide.asm.wasm", "python_stdlib.zip"];
+  const core = [
+    "pyodide.mjs",
+    "pyodide.asm.mjs",
+    "pyodide.asm.js",
+    "pyodide.asm.wasm",
+    "python_stdlib.zip",
+  ];
   const copied = core.filter((name) => existsSync(join(pyodideDir, name)));
-  for (const name of copied) copyFileSync(join(pyodideDir, name), join(out, name));
+  for (const name of copied)
+    copyFileSync(join(pyodideDir, name), join(out, name));
 
   // Only the interpreter and standard library are hosted by Cryzo. Package wheels
   // (micropip, numpy, …) resolve to Pyodide's CDN the first time a project needs them.
   const lock = readJson(join(pyodideDir, "pyodide-lock.json"));
   const cdn = `https://cdn.jsdelivr.net/pyodide/v${PYODIDE_VERSION}/full/`;
   for (const entry of Object.values(lock.packages ?? {})) {
-    if (entry.file_name && !/^https?:/.test(entry.file_name)) entry.file_name = cdn + entry.file_name;
+    if (entry.file_name && !/^https?:/.test(entry.file_name))
+      entry.file_name = cdn + entry.file_name;
   }
   writeFileSync(join(out, "pyodide-lock.json"), JSON.stringify(lock));
-  writeFileSync(marker, JSON.stringify({ version: PYODIDE_VERSION, python: lock.info?.python }) + "\n");
-  log(`pyodide@${PYODIDE_VERSION} (Python ${lock.info?.python}): ${copied.length} core files`);
+  writeFileSync(
+    marker,
+    JSON.stringify({ version: PYODIDE_VERSION, python: lock.info?.python }) +
+      "\n",
+  );
+  log(
+    `pyodide@${PYODIDE_VERSION} (Python ${lock.info?.python}): ${copied.length} core files`,
+  );
 }
 
 try {
@@ -169,6 +226,8 @@ try {
   packNpm();
   syncPyodide();
 } catch (error) {
-  console.error(`[vivari] failed to prepare runtime assets: ${error instanceof Error ? error.message : error}`);
+  console.error(
+    `[vivari] failed to prepare runtime assets: ${error instanceof Error ? error.message : error}`,
+  );
   process.exit(1);
 }

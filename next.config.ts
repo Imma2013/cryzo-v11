@@ -1,3 +1,4 @@
+import { withWorkflow } from "workflow/next";
 import type { NextConfig } from "next";
 
 // Cryzo's in-browser runtime (Vivari) needs SharedArrayBuffer, which browsers only
@@ -23,7 +24,9 @@ const runtimeResourceHeaders = [
 ];
 
 const nextConfig: NextConfig = {
-  outputFileTracingIncludes: { "/api/**/*": ["./managed-model-smoke.json", "./vendor/design-recipes/**/*"] },
+  outputFileTracingIncludes: {
+    "/api/**/*": ["./managed-model-smoke.json", "./vendor/design-recipes/**/*"],
+  },
   async headers() {
     return [
       {
@@ -46,14 +49,26 @@ const nextConfig: NextConfig = {
       },
       ...runtimeEntrySources.map((source) => ({
         source,
-        headers: [...runtimeResourceHeaders, { key: "Cache-Control", value: "no-cache, no-store, must-revalidate" }],
+        headers: [
+          ...runtimeResourceHeaders,
+          {
+            key: "Cache-Control",
+            value: "no-cache, no-store, must-revalidate",
+          },
+        ],
       })),
       ...runtimeImmutableSources.map((source) => ({
         source,
-        headers: [...runtimeResourceHeaders, { key: "Cache-Control", value: "public, max-age=31536000, immutable" }],
+        headers: [
+          ...runtimeResourceHeaders,
+          {
+            key: "Cache-Control",
+            value: "public, max-age=31536000, immutable",
+          },
+        ],
       })),
     ];
   },
 };
 
-export default nextConfig;
+export default withWorkflow(nextConfig);
