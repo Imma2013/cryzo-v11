@@ -37,11 +37,12 @@ describe("social Composio configuration", () => {
       "instagram",
       "youtube",
       "linkedin",
+      "tiktok",
     ]);
     expect(isActiveMarketingToolkit("linkedin")).toBe(true);
     expect(isActiveMarketingToolkit("twitter")).toBe(true);
     expect(isActiveMarketingToolkit("reddit")).toBe(false);
-    expect(isActiveMarketingToolkit("tiktok")).toBe(false);
+    expect(isActiveMarketingToolkit("tiktok")).toBe(true);
   });
 
   it("uses the custom LinkedIn auth config and exact connected account", () => {

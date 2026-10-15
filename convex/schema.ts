@@ -207,7 +207,7 @@ export default defineSchema({
     userId: v.id("users"),
     name: v.string(),
     url: v.string(),
-    transport: v.literal("http"),
+    transport: v.union(v.literal("http"), v.literal("sse")),
     authType: v.union(v.literal("none"), v.literal("api_key"), v.literal("oauth")),
     enabled: v.boolean(),
     defaultEnabledForNewProjects: v.optional(v.boolean()),
@@ -322,6 +322,7 @@ export default defineSchema({
     .index("by_status_and_scheduled", ["status", "scheduledFor"]),
 
   socialDeliveries: defineTable({
+    targetId: v.optional(v.string()),
     leaseExpiresAt: v.optional(v.number()),
     postId: v.id("socialPosts"),
     userId: v.id("users"),
@@ -361,6 +362,7 @@ export default defineSchema({
     .index("by_user_and_status", ["userId", "status", "updatedAt"]),
 
   socialAccounts: defineTable({
+    analyticsTargetId: v.optional(v.string()),
     userId: v.id("users"),
     conversationId: v.optional(v.id("conversations")),
     channel: v.string(),
@@ -378,6 +380,7 @@ export default defineSchema({
   }).index("by_user_period", ["userId", "period"]),
 
   socialAnalyticsSnapshots: defineTable({
+    targetId: v.optional(v.string()),
     userId: v.id("users"),
     connectedAccountId: v.string(),
     channel: v.string(),
@@ -387,6 +390,7 @@ export default defineSchema({
     updatedAt: v.number(),
   })
     .index("by_user_account_range", ["userId", "connectedAccountId", "rangeDays"])
+    .index("by_user_account_range_target", ["userId", "connectedAccountId", "rangeDays", "targetId"])
     .index("by_user_updated", ["userId", "updatedAt"]),
 
   socialMedia: defineTable({

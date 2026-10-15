@@ -4,10 +4,10 @@ export type SocialToolkit = typeof SOCIAL_TOOLKITS[number];
 // Marketing currently exposes only the networks we want to actively support.
 // The other integrations remain wired so they can be re-enabled without a
 // schema migration or reconnect flow.
-export const ACTIVE_MARKETING_TOOLKITS = ["twitter", "facebook", "instagram", "youtube", "linkedin"] as const;
+export const ACTIVE_MARKETING_TOOLKITS = ["twitter", "facebook", "instagram", "youtube", "linkedin", "tiktok"] as const;
 export type ActiveMarketingToolkit = typeof ACTIVE_MARKETING_TOOLKITS[number];
 
-export const ACTIVE_MARKETING_CHANNELS = ["x", "facebook", "instagram", "youtube", "linkedin"] as const;
+export const ACTIVE_MARKETING_CHANNELS = ["x", "facebook", "instagram", "youtube", "linkedin", "tiktok"] as const;
 
 export const MANAGED_SOCIAL_TOOLKITS = ["facebook", "instagram", "youtube", "reddit", "linkedin"] as const;
 export const CUSTOM_SOCIAL_TOOLKITS = ["twitter", "tiktok"] as const;

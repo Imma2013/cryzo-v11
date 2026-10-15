@@ -1,3 +1,7 @@
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
+import { mcpCredentialHeaders, type McpCredential } from "./mcp-config";
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 import { fetchMutation, fetchQuery } from "convex/nextjs";
@@ -21,7 +25,7 @@ export type McpServerRecord = {
   _id: string;
   name: string;
   url: string;
-  transport: "http";
+  transport: "http" | "sse";
   authType: McpAuthType;
   enabled: boolean;
   projectEnabled?: boolean;
@@ -29,18 +33,6 @@ export type McpServerRecord = {
   tools?: McpToolMeta[];
   lastConnectedAt?: number;
   lastError?: string;
-};
-
-type McpCredential = {
-  access_token?: string;
-  refresh_token?: string;
-  token_type?: string;
-  expires_at?: number;
-  token_endpoint?: string;
-  client_id?: string;
-  client_secret?: string;
-  token_endpoint_auth_method?: string;
-  resource?: string;
 };
 
 type McpIdentity = {
@@ -65,6 +57,7 @@ function isPrivateAddress(address: string) {
   return (
     normalized === "::1" ||
     normalized === "::" ||
+    normalized.startsWith("::ffff:") ||
     normalized.startsWith("fc") ||
     normalized.startsWith("fd") ||
     normalized.startsWith("fe80:")
@@ -91,7 +84,8 @@ export async function assertPublicMcpUrl(value: string) {
 function parseCredential(raw?: string | null) {
   if (!raw) return null;
   try {
-    return JSON.parse(raw) as McpCredential;
+    const parsed: unknown = JSON.parse(raw);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as McpCredential : { access_token: raw };
   } catch {
     return { access_token: raw } satisfies McpCredential;
   }
@@ -167,6 +161,7 @@ async function refreshCredentialIfNeeded(
 
   const response = await fetch(credential.token_endpoint, {
     method: "POST",
+    signal: AbortSignal.timeout(15_000),
     redirect: "error",
     headers,
     body: form,
@@ -203,6 +198,7 @@ async function resolveCredential(
   identity: McpIdentity,
   server: McpServerRecord,
 ) {
+  if (server.authType === "none") return null;
   let credential: McpCredential | null = null;
 
   if (identity.authToken) {
@@ -223,7 +219,7 @@ async function resolveCredential(
     }
   }
 
-  if (server.authType !== "none" && !credential?.access_token) {
+  if (!credential?.access_token) {
     throw new Error(
       `${server.name} requires ${
         server.authType === "oauth" ? "MCP OAuth" : "an API key"
@@ -233,173 +229,58 @@ async function resolveCredential(
   return await refreshCredentialIfNeeded(identity, server, credential);
 }
 
-function authHeaders(credential: McpCredential | null): Record<string, string> {
-  const token = credential?.access_token?.trim();
-  if (!token) return {};
-  return {
-    Authorization: `${credential?.token_type || "Bearer"} ${token}`,
+async function withMcpClient<T>(
+  server: McpServerRecord, identity: McpIdentity, operation: (client: Client) => Promise<T>,
+) {
+  const endpoint = await assertPublicMcpUrl(server.url);
+  const credential = await resolveCredential(identity, server);
+  const headers = mcpCredentialHeaders(credential);
+  // Apply authentication to SSE's initial GET as well as subsequent POSTs.
+  const guardedFetch: typeof fetch = async (input, init) => {
+    const url = input instanceof Request ? input.url : String(input);
+    const target = await assertPublicMcpUrl(url);
+    if (target.origin !== endpoint.origin) throw new Error("MCP transport redirected to a different origin.");
+    const requestHeaders = new Headers(init?.headers);
+    for (const [name, value] of Object.entries(headers)) requestHeaders.set(name, value);
+    return fetch(input, { ...init, headers: requestHeaders, redirect: "error",
+      signal: AbortSignal.any([...(init?.signal ? [init.signal] : []), AbortSignal.timeout(120_000)]) });
   };
-}
-
-function parseSseBody(text: string) {
-  const frames = text.split(/\n\n+/);
-  for (const frame of frames) {
-    const data = frame
-      .split(/\r?\n/)
-      .filter((line) => line.startsWith("data:"))
-      .map((line) => line.slice(5).trim())
-      .join("\n");
-    if (!data) continue;
-    try {
-      const parsed = JSON.parse(data);
-      if (parsed && typeof parsed === "object") return parsed;
-    } catch {
-      // Ignore keepalives and non-JSON events.
-    }
-  }
-  throw new Error("MCP server returned an unreadable SSE response.");
-}
-
-async function rpc(
-  server: McpServerRecord,
-  credential: McpCredential | null,
-  payload: Record<string, unknown>,
-  sessionId?: string | null,
-) {
-  await assertPublicMcpUrl(server.url);
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 20_000);
+  const transport = server.transport === "sse"
+    ? new SSEClientTransport(endpoint, { requestInit: { headers }, fetch: guardedFetch,
+        eventSourceInit: { fetch: guardedFetch } })
+    : new StreamableHTTPClientTransport(endpoint, { requestInit: { headers }, fetch: guardedFetch });
+  const client = new Client({ name: "Cryzo", version: "1.0.0" });
   try {
-    const response = await fetch(server.url, {
-      method: "POST",
-      signal: controller.signal,
-      redirect: "error",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json, text/event-stream",
-        ...authHeaders(credential),
-        ...(sessionId ? { "Mcp-Session-Id": sessionId } : {}),
-      },
-      body: JSON.stringify(payload),
-    });
-    const nextSessionId =
-      response.headers.get("mcp-session-id") || sessionId || null;
-    if (!response.ok) {
-      const detail = (await response.text()).slice(0, 1200);
-      throw new Error(
-        `${server.name} MCP request failed (${response.status})${
-          detail ? `: ${detail}` : ""
-        }`,
-      );
-    }
-    if (response.status === 202 || response.status === 204) {
-      return { data: null as any, sessionId: nextSessionId };
-    }
-
-    const contentType = response.headers.get("content-type") || "";
-    const body = await response.text();
-    const data = contentType.includes("text/event-stream")
-      ? parseSseBody(body)
-      : JSON.parse(body || "null");
-    if (data?.error) {
-      throw new Error(
-        data.error.message || `${server.name} returned an MCP error.`,
-      );
-    }
-    return { data, sessionId: nextSessionId };
+    await client.connect(transport, { timeout: 20_000 });
+    return await operation(client);
   } finally {
-    clearTimeout(timeout);
+    await client.close().catch(() => {});
   }
 }
 
-async function initialize(
-  server: McpServerRecord,
-  credential: McpCredential | null,
-) {
-  const init = await rpc(server, credential, {
-    jsonrpc: "2.0",
-    id: `init-${Date.now()}`,
-    method: "initialize",
-    params: {
-      protocolVersion: "2025-06-18",
-      capabilities: {},
-      clientInfo: { name: "Cryzo", version: "1.0.0" },
-    },
+export async function listRemoteMcpTools(server: McpServerRecord, authToken?: string, userId?: string) {
+  return withMcpClient(server, { authToken, userId }, async client => {
+    const tools: McpToolMeta[] = [];
+    const seen = new Set<string>();
+    let cursor: string | undefined;
+    do {
+      const page = await client.listTools(cursor ? { cursor } : {}, { timeout: 20_000 });
+      for (const item of page.tools) {
+        tools.push({ name: item.name, ...(item.description ? { description: item.description } : {}),
+          inputSchema: item.inputSchema, enabled: true });
+      }
+      cursor = page.nextCursor;
+      if (cursor && (seen.has(cursor) || tools.length >= 1000)) throw new Error("MCP tool discovery exceeded its pagination limit.");
+      if (cursor) seen.add(cursor);
+    } while (cursor);
+    return tools;
   });
-
-  await rpc(
-    server,
-    credential,
-    {
-      jsonrpc: "2.0",
-      method: "notifications/initialized",
-      params: {},
-    },
-    init.sessionId,
-  );
-  return init.sessionId;
 }
 
-export async function listRemoteMcpTools(
-  server: McpServerRecord,
-  authToken?: string,
-  userId?: string,
-) {
-  const identity = { authToken, userId };
-  const credential = await resolveCredential(identity, server);
-  const sessionId = await initialize(server, credential);
-  const response = await rpc(
-    server,
-    credential,
-    {
-      jsonrpc: "2.0",
-      id: `tools-${Date.now()}`,
-      method: "tools/list",
-      params: {},
-    },
-    sessionId,
-  );
-
-  const tools = Array.isArray(response.data?.result?.tools)
-    ? response.data.result.tools
-    : [];
-  return tools
-    .filter((item: any) => typeof item?.name === "string" && item.name.trim())
-    .map((item: any) => ({
-      name: item.name.trim(),
-      description:
-        typeof item.description === "string" ? item.description : undefined,
-      inputSchema:
-        item.inputSchema && typeof item.inputSchema === "object"
-          ? item.inputSchema
-          : { type: "object", properties: {} },
-      enabled: true,
-    })) as McpToolMeta[];
-}
-
-export async function callRemoteMcpTool(
-  server: McpServerRecord,
-  identity: McpIdentity,
-  toolName: string,
-  args: unknown,
-) {
-  const credential = await resolveCredential(identity, server);
-  const sessionId = await initialize(server, credential);
-  const response = await rpc(
-    server,
-    credential,
-    {
-      jsonrpc: "2.0",
-      id: `call-${Date.now()}`,
-      method: "tools/call",
-      params: {
-        name: toolName,
-        arguments: args ?? {},
-      },
-    },
-    sessionId,
-  );
-  return response.data?.result ?? response.data;
+export async function callRemoteMcpTool(server: McpServerRecord, identity: McpIdentity, toolName: string, args: unknown) {
+  return withMcpClient(server, identity, client => client.callTool({
+    name: toolName, arguments: (args ?? {}) as Record<string, unknown>,
+  }, undefined, { timeout: 120_000 }));
 }
 
 function safeToolName(serverName: string, toolName: string) {

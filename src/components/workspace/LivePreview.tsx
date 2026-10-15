@@ -37,6 +37,7 @@ export function LivePreview({
   mobile = false,
   refreshToken = 0,
   inspectRequest = 0,
+  networkPreview = false,
 }: {
   url: string | null;
   isBooting: boolean;
@@ -45,6 +46,7 @@ export function LivePreview({
   mobile?: boolean;
   refreshToken?: number;
   inspectRequest?: number;
+  networkPreview?: boolean;
 }) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -133,9 +135,9 @@ export function LivePreview({
   // the network, so each preview iframe has to be attached to it.
   useEffect(() => {
     const frame = iframeRef.current;
-    if (!frame || !url) return;
+    if (!frame || !url || networkPreview) return;
     return attachSandboxPreview(frame);
-  }, [url, mobile]);
+  }, [url, mobile, networkPreview]);
 
   useEffect(() => {
     if (inspectRequest <= 0 || !url) return;
