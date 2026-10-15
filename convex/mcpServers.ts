@@ -1,5 +1,5 @@
 import { mutation, query } from "./_generated/server";
-import { v } from "convex/values";
+import { ConvexError, v } from "convex/values";
 import { getAuthUserId } from "@convex-dev/auth/server";
 
 const authTypeValidator = v.union(
@@ -19,9 +19,9 @@ function validateRemoteUrl(value: string) {
   try {
     url = new URL(value);
   } catch {
-    throw new Error("Enter a valid MCP server URL.");
+    throw new ConvexError("Enter a valid MCP server URL.");
   }
-  if (url.protocol !== "https:") throw new Error("MCP servers must use HTTPS.");
+  if (url.protocol !== "https:") throw new ConvexError("MCP servers must use HTTPS.");
   if (url.username || url.password) {
     throw new Error("Credentials cannot be embedded in the MCP URL.");
   }
@@ -294,36 +294,38 @@ export const setProjectEnabled = mutation({
 
 export const add = mutation({
   args: {
-    name: v.string(),
-    url: v.string(),
+    serverId: v.optional(v.id("mcpServers")),
+    name: v.string(), url: v.string(),
+    transport: v.optional(v.union(v.literal("http"), v.literal("sse"))),
     authType: v.optional(authTypeValidator),
     defaultEnabledForNewProjects: v.optional(v.boolean()),
   },
+  returns: v.id("mcpServers"),
   handler: async (ctx, args) => {
     const userId = await getAuthUserId(ctx);
-    if (!userId) throw new Error("Sign in to add an MCP server.");
+    if (!userId) throw new ConvexError("Sign in to add an MCP server.");
     const name = args.name.trim();
-    if (!name || name.length > 80) throw new Error("Enter a server name.");
+    if (!name || name.length > 80) throw new ConvexError("Enter a server name (up to 80 characters).");
     const url = validateRemoteUrl(args.url.trim());
-    const existing = await ctx.db
-      .query("mcpServers")
-      .withIndex("by_user", (q) => q.eq("userId", userId))
-      .collect();
-    if (existing.some((server) => server.url === url)) {
-      throw new Error("This MCP server is already configured.");
-    }
+    const rows = await ctx.db.query("mcpServers").withIndex("by_user", q => q.eq("userId", userId)).take(101);
+    const existing = args.serverId ? await ctx.db.get(args.serverId) : rows.find(row => row.url === url);
+    if (args.serverId && (!existing || existing.userId !== userId)) throw new ConvexError("MCP server not found.");
+    if (rows.some(row => row.url === url && existing?._id !== row._id)) throw new ConvexError("That URL belongs to another configured server. Edit that server instead.");
     const now = Date.now();
-    return await ctx.db.insert("mcpServers", {
-      userId,
-      name,
-      url,
-      transport: "http",
-      authType: args.authType || "none",
-      enabled: true,
-      defaultEnabledForNewProjects: args.defaultEnabledForNewProjects ?? true,
-      createdAt: now,
-      updatedAt: now,
-    });
+    const value = { name, url, transport: args.transport ?? "http" as const,
+      authType: args.authType ?? "none" as const,
+      defaultEnabledForNewProjects: args.defaultEnabledForNewProjects ?? true, updatedAt: now };
+    if (existing) {
+      const changed = existing.url !== url || existing.authType !== value.authType || existing.transport !== value.transport;
+      if (changed) {
+        const secret = await ctx.db.query("providerSecrets").withIndex("by_user_provider", q => q.eq("userId", userId).eq("providerId", "mcp:" + existing._id)).unique();
+        if (secret) await ctx.db.delete(secret._id);
+      }
+      await ctx.db.patch(existing._id, { ...value, ...(changed ? { tools: [], lastConnectedAt: undefined, lastError: undefined } : {}) });
+      return existing._id;
+    }
+    if (rows.length >= 100) throw new ConvexError("A maximum of 100 MCP servers can be configured.");
+    return await ctx.db.insert("mcpServers", { ...value, userId, enabled: true, createdAt: now });
   },
 });
 

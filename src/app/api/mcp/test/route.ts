@@ -54,7 +54,7 @@ export async function POST(req: Request) {
     return Response.json({
       ok: true,
       protocol: "MCP",
-      transport: "Streamable HTTP",
+      transport: server.transport === "sse" ? "SSE" : "Streamable HTTP",
       authType: server.authType,
       toolCount: tools.length,
       tools: tools.map((item) => ({

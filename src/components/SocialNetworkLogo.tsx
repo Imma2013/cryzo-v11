@@ -1,6 +1,6 @@
 "use client";
 
-import type { SVGProps } from "react";
+import { useId, type SVGProps } from "react";
 
 export type SocialNetwork = "x" | "twitter" | "facebook" | "instagram" | "youtube" | "linkedin" | "reddit" | "tiktok";
 
@@ -9,17 +9,22 @@ export function SocialNetworkLogo({
   size = 18,
   className,
   title,
+  variant = "brand",
 }: {
   channel: SocialNetwork;
   size?: number;
   className?: string;
   title?: string;
+  variant?: "brand" | "monochrome";
 }) {
+  const gradientId = useId();
+  const colours: Record<SocialNetwork, string> = { x: "#fafafa", twitter: "#fafafa", facebook: "#1877F2", instagram: "#E4405F", youtube: "#FF0033", linkedin: "#0A66C2", reddit: "#FF4500", tiktok: "#25F4EE" };
   const common: SVGProps<SVGSVGElement> = {
     width: size,
     height: size,
     viewBox: "0 0 24 24",
     className,
+    style: variant === "brand" ? { color: colours[channel] } : undefined,
     role: title ? "img" : "presentation",
     "aria-hidden": title ? undefined : true,
   };
@@ -32,7 +37,7 @@ export function SocialNetworkLogo({
     return <svg {...common} fill="currentColor">{label}<path d="M13.5 22v-8.2h2.75l.41-3.2H13.5V8.56c0-.93.26-1.56 1.59-1.56h1.7V4.14A22.8 22.8 0 0 0 14.31 4c-2.45 0-4.13 1.5-4.13 4.25v2.35H7.4v3.2h2.78V22h3.32Z"/></svg>;
   }
   if (channel === "instagram") {
-    return <svg {...common} fill="none" stroke="currentColor" strokeWidth="2">{label}<rect x="3" y="3" width="18" height="18" rx="5"/><circle cx="12" cy="12" r="4.2"/><circle cx="17.4" cy="6.7" r="1.15" fill="currentColor" stroke="none"/></svg>;
+    return <svg {...common} fill="none" stroke={variant === "brand" ? "url(#" + gradientId + ")" : "currentColor"} strokeWidth="2">{label}<defs><linearGradient id={gradientId} x1="0" y1="1" x2="1" y2="0"><stop stopColor="#FFDC80"/><stop offset="0.5" stopColor="#F56040"/><stop offset="1" stopColor="#833AB4"/></linearGradient></defs><rect x="3" y="3" width="18" height="18" rx="5"/><circle cx="12" cy="12" r="4.2"/><circle cx="17.4" cy="6.7" r="1.15" fill="currentColor" stroke="none"/></svg>;
   }
   if (channel === "youtube") {
     return <svg {...common} fill="currentColor">{label}<path d="M23.5 6.2a3.1 3.1 0 0 0-2.18-2.2C19.4 3.5 12 3.5 12 3.5s-7.4 0-9.32.5A3.1 3.1 0 0 0 .5 6.2 32.8 32.8 0 0 0 0 12a32.8 32.8 0 0 0 .5 5.8A3.1 3.1 0 0 0 2.68 20c1.92.5 9.32.5 9.32.5s7.4 0 9.32-.5a3.1 3.1 0 0 0 2.18-2.2A32.8 32.8 0 0 0 24 12a32.8 32.8 0 0 0-.5-5.8ZM9.6 15.65v-7.3L15.82 12 9.6 15.65Z"/></svg>;

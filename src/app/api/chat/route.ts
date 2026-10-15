@@ -14,7 +14,7 @@ import { ConvexHttpClient } from "convex/browser";
 import { after } from "next/server";
 import { checkpointGenerationStream } from "@/lib/server/background-generation";
 import { planWebsiteDesign, auditWebsiteDraft } from "@/lib/server/design-quality";
-import { planDatabaseBeforeFrontend, verifiedBackendContext } from "@/lib/server/database-first";
+import { DatabasePlanProviderError, DatabasePlanValidationError, planDatabaseBeforeFrontend, verifiedBackendContext } from "@/lib/server/database-first";
 import { shouldMutateProject, shouldProvisionDatabase } from "@/lib/server/build-routing";
 import { isBookOrPublishingRequest, isAutomotiveRequest, mustProvisionCatalog, lockedUserDomainPrompt, offDomainGeneratedPaths } from "@/lib/server/project-intent";
 import type { CryzoCloudResources } from "@/lib/ai/cryzo-cloud-resources";
@@ -396,7 +396,17 @@ export async function POST(req: Request) {
         }
       } catch (error) {
         console.error("[Cryzo Cloud] database-first provisioning failed", error);
-        return Response.json({ error: "backend_setup_failed", message: error instanceof Error ? error.message : "Database setup failed" }, { status: 422 });
+        const requestId = crypto.randomUUID();
+        const invalidPlan = error instanceof DatabasePlanValidationError;
+        const providerFailure = error instanceof DatabasePlanProviderError;
+        console.error("[Cryzo Cloud:" + requestId + "]", error);
+        return Response.json({
+          error: invalidPlan ? "database_plan_invalid" : providerFailure ? "model_planning_failed" : "backend_setup_failed",
+          message: providerFailure ? "The selected model provider could not finish database planning. Check the model and API access, then retry." : invalidPlan
+            ? "The generated database plan could not be validated. Your private data remains protected. Retry the build."
+            : "Cryzo could not prepare the app database. Retry the build; existing records will be preserved.",
+          requestId, retryable: true, stage: providerFailure ? "model_provider" : invalidPlan ? "database_plan" : "backend_setup",
+        }, { status: invalidPlan ? 422 : 502 });
       }
     } else if (mode === "build" && databaseRequired &&
       (!authenticatedConvex || !cryzoCloudAppId)) {

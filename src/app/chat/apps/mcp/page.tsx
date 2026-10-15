@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useMutation, useQuery } from "convex/react";
 import { useAuthToken } from "@convex-dev/auth/react";
+import type { FunctionReference } from "convex/server";
 import {
   ArrowLeft,
   CheckCircle2,
@@ -14,7 +15,6 @@ import {
   Server,
   Trash2,
 } from "lucide-react";
-import type { FunctionReference } from "convex/server";
 import type { Id } from "../../../../../convex/_generated/dataModel";
 import { api } from "../../../../../convex/_generated/api";
 
@@ -24,7 +24,7 @@ type McpServer = {
   userId: Id<"users">;
   name: string;
   url: string;
-  transport: "http";
+  transport: "http" | "sse";
   authType: "none" | "api_key" | "oauth";
   defaultEnabledForNewProjects?: boolean;
   tools?: Array<{ name: string }>;
@@ -44,7 +44,7 @@ type SecretMeta = {
 const mcpApi = (api as unknown as {
   mcpServers: {
     list: FunctionReference<"query", "public", Record<string, never>, McpServer[]>;
-    add: FunctionReference<"mutation", "public", { name: string; url: string; authType?: "none" | "api_key" | "oauth"; defaultEnabledForNewProjects?: boolean }, Id<"mcpServers">>;
+    add: FunctionReference<"mutation", "public", { serverId?: Id<"mcpServers">; transport?: "http" | "sse"; name: string; url: string; authType?: "none" | "api_key" | "oauth"; defaultEnabledForNewProjects?: boolean }, Id<"mcpServers">>;
     remove: FunctionReference<"mutation", "public", { serverId: Id<"mcpServers"> }, null>;
     setEnabled: FunctionReference<"mutation", "public", { serverId: Id<"mcpServers">; enabled: boolean }, boolean>;
     setDefaultEnabled: FunctionReference<"mutation", "public", { serverId: Id<"mcpServers">; enabled: boolean }, boolean>;
@@ -62,6 +62,12 @@ export default function McpConnectorsPage() {
   const [name, setName] = useState("");
   const [url, setUrl] = useState("");
   const [authType, setAuthType] = useState<"none" | "api_key" | "oauth">("none");
+  const [editingId, setEditingId] = useState<Id<"mcpServers"> | null>(null);
+  const [transport, setTransport] = useState<"http" | "sse">("http");
+  const [headerName, setHeaderName] = useState("Authorization");
+  const [headerPrefix, setHeaderPrefix] = useState("Bearer");
+  const [oauthClientId, setOauthClientId] = useState("");
+  const [oauthClientSecret, setOauthClientSecret] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [defaultEnabled, setDefaultEnabledLocal] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -69,6 +75,8 @@ export default function McpConnectorsPage() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [toolCounts, setToolCounts] = useState<Record<string, number>>({});
+  const [origin, setOrigin] = useState("");
+  useEffect(() => setOrigin(window.location.origin), []);
 
   const secured = useMemo(
     () => new Set((secretRows || []).filter((row) => row.providerId.startsWith("mcp:")).map((row) => row.providerId.slice(4))),
@@ -83,7 +91,7 @@ export default function McpConnectorsPage() {
         "Content-Type": "application/json",
         Authorization: `Bearer ${authToken}`,
       },
-      body: JSON.stringify({ serverId, secret }),
+      body: JSON.stringify({ serverId, secret, headerName, headerPrefix, ...(oauthClientId.trim() ? { oauthClientId: oauthClientId.trim(), oauthClientSecret } : {}) }),
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "Unable to save MCP API key.");
@@ -143,24 +151,44 @@ export default function McpConnectorsPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authToken]);
 
+  function editServer(server: McpServer) {
+    setEditingId(server._id); setName(server.name); setUrl(server.url); setTransport(server.transport);
+    setAuthType(server.authType); setDefaultEnabledLocal(server.defaultEnabledForNewProjects ?? true);
+    setApiKey(""); setOauthClientId(""); setOauthClientSecret(""); setError(""); setNotice("");
+    document.getElementById("mcp-editor")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     setError("");
     setNotice("");
     setSaving(true);
     try {
-      const serverId = await addServer({ name, url, authType, defaultEnabledForNewProjects: defaultEnabled });
+      const parsedUrl = new URL(url.trim());
+      parsedUrl.hash = "";
+      const normalizedUrl = parsedUrl.toString();
+      const duplicate = servers?.find(server => server.url === normalizedUrl);
+      if (!editingId && duplicate) {
+        editServer(duplicate);
+        setNotice("This server is already configured. Update its authentication below, then save.");
+        return;
+      }
+      const previous = servers?.find(server => server._id === editingId);
+      const needsKey = !previous || previous.url !== normalizedUrl || previous.authType !== authType || previous.transport !== transport || !secured.has(String(editingId));
+      if (authType === "api_key" && needsKey && !apiKey.trim()) throw new Error("Enter the API key for this MCP server.");
+      const serverId = await addServer({ ...(editingId ? { serverId: editingId } : {}), name, url, transport, authType, defaultEnabledForNewProjects: defaultEnabled });
       const id = String(serverId);
       if (authType === "api_key") {
-        if (!apiKey.trim()) throw new Error("Enter the API key for this MCP server.");
-        await saveSecret(id, apiKey.trim());
+        if (apiKey.trim()) await saveSecret(id, apiKey.trim());
         await testServer(id);
       } else if (authType === "oauth") {
+        if (oauthClientId.trim()) await saveSecret(id, "");
         await startOAuth(id);
         return;
       } else {
         await testServer(id);
       }
+      setEditingId(null);
       setName("");
       setUrl("");
       setApiKey("");
@@ -188,15 +216,15 @@ export default function McpConnectorsPage() {
           </p>
         </header>
 
-        <section className="mt-7 rounded-2xl border border-zinc-800 bg-zinc-950 p-5">
+        <section id="mcp-editor" className="mt-7 rounded-2xl border border-zinc-800 bg-zinc-950 p-5">
           <div className="flex items-start gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-zinc-800 bg-black">
               <Plus size={18} />
             </div>
             <div>
-              <h2 className="font-semibold">New MCP server</h2>
+              <h2 className="font-semibold">{editingId ? "Edit MCP server" : "New MCP server"}</h2>
               <p className="mt-1 text-xs leading-5 text-zinc-500">
-                Cryzo uses MCP Streamable HTTP. Legacy SSE can still be served by endpoints that return SSE frames to HTTP requests.
+                Connect with Streamable HTTP or legacy SSE, then verify the available tools.
               </p>
             </div>
           </div>
@@ -213,9 +241,9 @@ export default function McpConnectorsPage() {
             <div className="grid gap-4 sm:grid-cols-2">
               <label className="grid gap-2 text-sm text-zinc-300">
                 Transport type
-                <select className="rounded-xl border border-zinc-800 bg-black px-4 py-3 text-sm text-white outline-none" defaultValue="http">
+                <select className="rounded-xl border border-zinc-800 bg-black px-4 py-3 text-sm text-white outline-none" value={transport} onChange={event => setTransport(event.target.value as "http" | "sse")}>
                   <option value="http">HTTP</option>
-                  <option value="sse" disabled>SSE (legacy; use HTTP endpoint)</option>
+                  <option value="sse">SSE (legacy)</option>
                 </select>
               </label>
               <label className="grid gap-2 text-sm text-zinc-300">
@@ -232,12 +260,20 @@ export default function McpConnectorsPage() {
                 API key / bearer token
                 <div className="relative">
                   <KeyRound size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-600" />
-                  <input value={apiKey} onChange={(event) => setApiKey(event.target.value)} type="password" autoComplete="off" placeholder="Paste the server credential" required className="w-full rounded-xl border border-zinc-800 bg-black py-3 pl-10 pr-4 text-base text-white outline-none placeholder:text-zinc-600 focus:border-zinc-600 sm:text-sm" />
+                  <input value={apiKey} onChange={(event) => setApiKey(event.target.value)} type="password" autoComplete="off" placeholder={editingId ? "Leave blank to keep the saved credential" : "Paste the server credential"} required={!editingId} className="w-full rounded-xl border border-zinc-800 bg-black py-3 pl-10 pr-4 text-base text-white outline-none placeholder:text-zinc-600 focus:border-zinc-600 sm:text-sm" />
                 </div>
-                <span className="text-xs text-zinc-600">Sent as an Authorization bearer credential. Stored encrypted with CRYZO_SECRETS_KEY.</span>
+                <span className="grid gap-2 sm:grid-cols-2">
+                  <span>Header name<input aria-label="Authentication header name" value={headerName} onChange={event => { setHeaderName(event.target.value); setHeaderPrefix(event.target.value.toLowerCase() === "authorization" ? "Bearer" : ""); }} className="mt-1 w-full rounded-lg border border-zinc-700 bg-black p-2" /></span>
+                  <span>Prefix (optional)<input aria-label="Authentication header prefix" value={headerPrefix} onChange={event => setHeaderPrefix(event.target.value)} className="mt-1 w-full rounded-lg border border-zinc-700 bg-black p-2" /></span>
+                </span>
+                <span className="text-xs text-zinc-400">Credentials are encrypted. Use Authorization + Bearer, or a named header such as x-api-key with no prefix.</span>
               </label>
             )}
-            {authType === "oauth" && <p className="rounded-xl border border-zinc-800 bg-black px-4 py-3 text-xs leading-5 text-zinc-400">After adding, Cryzo discovers the server&apos;s MCP OAuth metadata, performs PKCE authorization, stores refresh credentials encrypted, and verifies its tools.</p>}
+            {authType === "oauth" && <div className="grid gap-3 rounded-xl border border-zinc-700 bg-black p-4">
+              <p className="text-xs text-zinc-400">Cryzo discovers OAuth automatically. If your provider requires a registered app, enter its client ID and use this callback: {origin}/api/mcp/oauth/callback</p>
+              <label className="grid gap-1 text-sm">Registered client ID (optional)<input value={oauthClientId} onChange={event => setOauthClientId(event.target.value)} className="rounded-lg border border-zinc-700 bg-black p-2" /></label>
+              <label className="grid gap-1 text-sm">Client secret (optional)<input type="password" autoComplete="off" value={oauthClientSecret} onChange={event => setOauthClientSecret(event.target.value)} className="rounded-lg border border-zinc-700 bg-black p-2" /></label>
+            </div>}
             <button type="button" onClick={() => setDefaultEnabledLocal((value) => !value)} className="flex items-center justify-between rounded-xl border border-zinc-800 bg-black px-4 py-3 text-left">
               <span><span className="block text-sm text-zinc-200">Automatically enable for new projects</span><span className="mt-1 block text-xs text-zinc-600">Each project gets its own connector switch after creation.</span></span>
               <span className={`relative h-6 w-11 rounded-full ${defaultEnabled ? "bg-blue-600" : "bg-zinc-700"}`}><span className={`absolute top-1 h-4 w-4 rounded-full bg-white transition ${defaultEnabled ? "left-6" : "left-1"}`} /></span>
@@ -246,8 +282,9 @@ export default function McpConnectorsPage() {
             {notice && <p className="text-sm text-emerald-400">{notice}</p>}
             <button type="submit" disabled={saving} className="inline-flex h-11 w-fit items-center justify-center gap-2 rounded-xl bg-white px-5 text-sm font-semibold text-black hover:bg-zinc-200 disabled:opacity-50">
               {saving ? <Loader2 size={15} className="animate-spin" /> : <Plus size={15} />}
-              Add MCP server
+              {editingId ? "Save and connect" : "Add MCP server"}
             </button>
+            {editingId && <button type="button" onClick={() => { setEditingId(null); setName(""); setUrl(""); setApiKey(""); setOauthClientId(""); setOauthClientSecret(""); setAuthType("none"); }} className="w-fit text-sm text-zinc-400">Cancel editing</button>}
           </form>
         </section>
 
@@ -269,6 +306,7 @@ export default function McpConnectorsPage() {
             <div className="mt-4 grid gap-3">
               {servers.map((server) => {
                 const hasSecret = secured.has(String(server._id));
+                const connectionStatus = testingId === String(server._id) ? "Connecting" : server.lastError ? "Connection failed" : server.lastConnectedAt ? "Connected" : server.authType !== "none" ? "Authorization required" : "Configured";
                 return (
                   <article key={server._id} className="rounded-2xl border border-zinc-800 bg-zinc-950 p-4">
                     <div className="flex items-center gap-4">
@@ -278,12 +316,14 @@ export default function McpConnectorsPage() {
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-2">
                           <h3 className="truncate text-sm font-semibold">{server.name}</h3>
-                          <span className="inline-flex items-center gap-1 text-[11px] text-emerald-400"><CheckCircle2 size={11} /> {server.enabled ? "Enabled" : "Disabled"}</span>
-                          <span className="text-[11px] text-zinc-500">{server.authType === "oauth" ? "OAuth" : hasSecret ? "API key" : "No auth"}</span>
+                          <span className={`inline-flex items-center gap-1 text-[11px] ${server.lastError ? "text-red-300" : server.lastConnectedAt ? "text-emerald-400" : "text-amber-300"}`}><CheckCircle2 size={11} /> {connectionStatus}</span><span className="text-[11px] text-zinc-400">{server.enabled ? "Enabled for tools" : "Disabled"}</span>
+                          <span className="text-[11px] text-zinc-500">{server.authType === "oauth" ? "OAuth" : server.authType === "api_key" ? (hasSecret ? "API key saved" : "API key needed") : "No auth"}</span>
                           {(toolCounts[String(server._id)] ?? server.tools?.length) !== undefined && <span className="text-[11px] text-zinc-500">{toolCounts[String(server._id)] ?? server.tools?.length} tools</span>}
                         </div>
                         <p className="mt-1 truncate text-xs text-zinc-500">{server.url}</p>
                       </div>
+                      <button type="button" onClick={() => editServer(server)} className="rounded-lg px-2 py-1 text-xs text-blue-300">Edit</button>
+                      {server.authType === "oauth" && <button type="button" onClick={() => void startOAuth(String(server._id)).catch(reason => setError(reason instanceof Error ? reason.message : "Reconnect failed."))} className="rounded-lg px-2 py-1 text-xs text-blue-300">Reconnect</button>}
                       <button type="button" onClick={() => void setEnabled({ serverId: server._id, enabled: !server.enabled })} className={`relative h-6 w-11 rounded-full transition ${server.enabled ? "bg-blue-600" : "bg-zinc-700"}`} aria-label={`${server.enabled ? "Disable" : "Enable"} ${server.name}`}>
                         <span className={`absolute top-1 h-4 w-4 rounded-full bg-white transition ${server.enabled ? "left-6" : "left-1"}`} />
                       </button>
@@ -295,6 +335,8 @@ export default function McpConnectorsPage() {
                         <Trash2 size={16} />
                       </button>
                     </div>
+                    {server.lastError && <p role="alert" className="mt-3 text-xs text-red-300">{server.lastError}</p>}
+                    {!!server.tools?.length && <details className="mt-3 text-xs text-zinc-400"><summary>Discovered tools ({server.tools.length})</summary><ul className="mt-2 space-y-1">{server.tools.map(tool => <li key={tool.name}>{tool.name}</li>)}</ul></details>}
                   </article>
                 );
               })}

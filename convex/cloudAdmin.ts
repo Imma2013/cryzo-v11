@@ -19,6 +19,7 @@ async function requireOwnedConversation(ctx: any, conversationId: any) {
 }
 
 export const configureFromPublish = mutation({
+  returns: v.object({ appId: v.id("cloudApps"), name: v.string(), authProviders: v.array(authProviderValidator), entitiesConfigured: v.number(), seededRecords: v.number() }),
   args: {
     conversationId: v.id("conversations"),
     name: v.string(),
@@ -87,7 +88,7 @@ export const configureFromPublish = mutation({
       // schema. Subsequent edits/retries must NEVER duplicate or erase records.
       if (entity.seed?.length) {
         if (entity.seed.length > 6) throw new Error(`Too many sample records for ${name}`);
-        if (entity.access === "private") throw new Error(`Cannot seed private ${name} records without an owner`);
+        if ((existing?.access ?? entity.access ?? "private") === "private") throw new Error(`Cannot seed private ${name} records without an owner`);
         const prior = await ctx.db.query("cloudRecords")
           .withIndex("by_app_entity", (q) => q.eq("appId", appId).eq("entityName", name))
           .take(1);

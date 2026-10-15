@@ -1,21 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BarChart3, Loader2, RefreshCw, TrendingUp } from "lucide-react";
+import { useMutation } from "convex/react";
+import { api } from "../../../convex/_generated/api";
+import type { AccountAnalytics } from "@/lib/server/social-analytics";
 import { useAuth } from "@/providers/AuthProvider";
 import { SocialNetworkLogo, type SocialNetwork } from "@/components/SocialNetworkLogo";
 
-type Metric = { key: string; label: string; value: number };
-type Series = { key: string; label: string; points: Array<{ date: string; value: number }> };
-type AnalyticsItem = {
-  channel: SocialNetwork;
-  accountId: string;
-  accountName: string;
-  metrics: Metric[];
-  series: Series[];
-  note?: string;
-  updatedAt: number;
-};
+type AnalyticsItem = AccountAnalytics & { channel: SocialNetwork };
 
 function compact(value: number) {
   return new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 1 }).format(value);
@@ -52,9 +45,15 @@ export default function MarketingAnalytics({
   const [items, setItems] = useState<AnalyticsItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const saveTarget = useMutation((api as any).social.setAnalyticsTarget);
+  const activeRequest = useRef<AbortController | null>(null);
+  const requestVersion = useRef(0);
 
-  async function load(refresh = false) {
+  const load = useCallback(async (refresh = false) => {
     if (!authToken || !unlocked) return;
+    activeRequest.current?.abort();
+    const controller = new AbortController(); activeRequest.current = controller;
+    const version = ++requestVersion.current;
     setLoading(true);
     setError("");
     try {
@@ -62,27 +61,29 @@ export default function MarketingAnalytics({
       if (channel) params.set("channel", channel);
       if (refresh) params.set("refresh", "1");
       const response = await fetch(`/api/social/analytics?${params}`, {
+        signal: controller.signal,
         headers: { Authorization: `Bearer ${authToken}` },
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.message || data.error || "Unable to load analytics.");
-      setItems(Array.isArray(data.items) ? data.items : []);
+      if (version === requestVersion.current) setItems(Array.isArray(data.items) ? data.items : []);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Unable to load analytics.");
+      if (version === requestVersion.current && !controller.signal.aborted) setError(reason instanceof Error ? reason.message : "Unable to load analytics.");
     } finally {
-      setLoading(false);
+      if (version === requestVersion.current) setLoading(false);
     }
-  }
+  }, [authToken, unlocked, days, channel]);
 
   useEffect(() => {
     void load(false);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authToken, unlocked, days, channel]);
+    return () => { activeRequest.current?.abort(); ++requestVersion.current; };
+  }, [load]);
 
   const totalMetrics = useMemo(() => {
     const totals = new Map<string, { label: string; value: number }>();
     for (const item of items) {
       for (const metric of item.metrics) {
+        if (metric.window !== "period" || metric.aggregation === "latest" || metric.aggregation === "weighted-average" || metric.unit !== "count") continue;
         const key = metric.key.toLowerCase();
         const current = totals.get(key);
         totals.set(key, { label: metric.label, value: (current?.value || 0) + metric.value });
@@ -116,7 +117,7 @@ export default function MarketingAnalytics({
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="text-lg font-semibold text-white">Analytics</h2>
-            <p className="mt-1 text-xs text-zinc-500">Connected-network insights cached for 15 minutes.</p>
+            <p className="mt-1 text-xs text-zinc-400">UTC reporting periods. Provider data can be delayed; current and lifetime counters are labelled separately.</p>
           </div>
           <div className="flex items-center gap-2">
             {[7, 30, 90].map((value) => (
@@ -130,6 +131,7 @@ export default function MarketingAnalytics({
           </div>
         </div>
 
+        {error && items.length > 0 && <p role="alert" className="mt-4 text-sm text-red-300">{error} Showing the last loaded results.</p>}
         {totalMetrics.length > 0 && (
           <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
             {totalMetrics.map(([key, metric]) => (
@@ -143,7 +145,7 @@ export default function MarketingAnalytics({
 
         {loading && items.length === 0 ? (
           <div className="flex items-center justify-center py-24 text-sm text-zinc-500"><Loader2 size={18} className="mr-2 animate-spin" />Loading provider analytics…</div>
-        ) : error ? (
+        ) : error && !items.length ? (
           <div className="mt-6 rounded-2xl border border-red-500/20 bg-red-500/5 p-4 text-sm text-red-300">{error}</div>
         ) : items.length === 0 ? (
           <div className="mt-6 rounded-2xl border border-dashed border-zinc-800 py-20 text-center">
@@ -163,6 +165,16 @@ export default function MarketingAnalytics({
                   <TrendingUp size={16} className="text-zinc-600" />
                 </div>
 
+                <p className="mt-3 text-xs text-zinc-400">{item.status.replace(/_/g, " ")} · Last successful data: {item.metrics.length ? new Date(item.updatedAt).toLocaleString() : "Not yet available"}</p>
+                {item.targets && <label className="mt-3 grid gap-2 text-xs text-zinc-300">Reporting Page / organization
+                  <select value={item.targetId || ""} disabled={loading} onChange={event => {
+                    const targetId = event.target.value;
+                    void saveTarget({ connectedAccountId: item.accountId, targetId }).then(() => load(true)).catch(reason => setError(reason instanceof Error ? reason.message : "Could not select reporting target."));
+                  }} className="rounded-lg border border-zinc-600 bg-black p-2 text-sm text-white">
+                    <option value="">Choose a target</option>{item.targets.map(target => <option key={target.id} value={target.id}>{target.name}</option>)}
+                  </select>
+                </label>}
+                {["permission_required", "error", "rate_limited", "stale"].includes(item.status) && <a href="/chat/apps" className="mt-3 inline-block text-xs text-blue-300 underline">Manage connections</a>}
                 {item.note && <p className="mt-4 rounded-xl border border-zinc-800 bg-black/40 p-3 text-xs leading-5 text-zinc-400">{item.note}</p>}
 
                 {item.metrics.length > 0 && (
@@ -170,7 +182,7 @@ export default function MarketingAnalytics({
                     {item.metrics.slice(0, 9).map((metric) => (
                       <div key={metric.key} className="rounded-xl border border-zinc-800 bg-black/30 p-3">
                         <p className="truncate text-[10px] text-zinc-600">{metric.label}</p>
-                        <p className="mt-1 text-lg font-semibold text-zinc-100">{compact(metric.value)}</p>
+                        <p className="mt-1 text-lg font-semibold text-zinc-100">{compact(metric.value)}{metric.unit === "seconds" ? " s" : metric.unit === "minutes" ? " min" : ""}</p><p className="mt-1 text-[10px] text-zinc-400">{metric.window === "snapshot" ? "Current" : metric.window === "lifetime" ? "Lifetime" : metric.aggregation === "weighted-average" ? "Period average" : "Selected period"}</p>
                       </div>
                     ))}
                   </div>

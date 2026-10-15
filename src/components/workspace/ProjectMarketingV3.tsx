@@ -52,7 +52,7 @@ export default function ProjectMarketingV3() {
   const [actionError, setActionError] = useState("");
 
   const activeAccounts = useMemo(
-    () => (accounts || []).filter((account) => ["x", "facebook", "instagram", "youtube", "linkedin"].includes(account.channel)),
+    () => (accounts || []).filter((account) => ["x", "facebook", "instagram", "youtube", "linkedin", "tiktok"].includes(account.channel)),
     [accounts],
   );
   const defaultChannels = selectedChannel ? [selectedChannel] : activeAccounts.length ? [activeAccounts[0].channel] : ["x"];

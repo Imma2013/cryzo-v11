@@ -8,7 +8,7 @@ import { SocialNetworkLogo } from "@/components/SocialNetworkLogo";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 
-const CHANNELS = ["x", "facebook", "instagram", "youtube", "linkedin"] as const;
+const CHANNELS = ["x", "facebook", "instagram", "youtube", "linkedin", "tiktok"] as const;
 type Channel = typeof CHANNELS[number];
 type Account = { _id: Id<"socialAccounts">; channel: string; connectedAccountId: string; name: string };
 type Upload = { storageId: string; url: string; name: string; contentType: string };

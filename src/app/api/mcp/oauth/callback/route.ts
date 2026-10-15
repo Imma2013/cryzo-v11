@@ -1,3 +1,4 @@
+import { NextResponse } from "next/server";
 import { fetchMutation } from "convex/nextjs";
 import { api } from "../../../../../../convex/_generated/api";
 import { encryptProviderSecret } from "@/lib/server/provider-secrets";
@@ -12,26 +13,26 @@ function redirectResult(req: Request, status: "connected" | "error", message?: s
   url.searchParams.set("oauth", status);
   if (message) url.searchParams.set("message", message.slice(0, 180));
   if (serverId) url.searchParams.set("serverId", serverId);
-  return Response.redirect(url, 302);
+  const response = NextResponse.redirect(url, 302);
+  response.cookies.set("__Host-cryzo_mcp_oauth", "", { httpOnly: true, secure: true, sameSite: "lax", path: "/", maxAge: 0 });
+  return response;
 }
 
 export async function GET(req: Request) {
   const requestUrl = new URL(req.url);
-  const oauthError = requestUrl.searchParams.get("error");
-  if (oauthError) {
-    return redirectResult(
-      req,
-      "error",
-      requestUrl.searchParams.get("error_description") || oauthError,
-    );
-  }
-
   try {
     const code = requestUrl.searchParams.get("code")?.trim();
-    const stateValue = requestUrl.searchParams.get("state")?.trim();
-    if (!code || !stateValue) throw new Error("Missing OAuth code or state.");
-
-    const state = decodeMcpOauthState(stateValue);
+    const nonce = requestUrl.searchParams.get("state")?.trim();
+    const raw = req.headers.get("cookie")?.split(";").map(value => value.trim()).find(value => value.startsWith("__Host-cryzo_mcp_oauth="))?.split("=").slice(1).join("=");
+    const binding = raw ? JSON.parse(decodeURIComponent(raw)) : null;
+    if (!nonce || !binding?.nonce || nonce !== binding.nonce) throw new Error("OAuth session did not match. Reconnect from the same browser.");
+    const state = decodeMcpOauthState(binding.state);
+    if (new URL(state.redirectUri).origin !== requestUrl.origin) throw new Error("OAuth callback origin did not match.");
+    const issuer = requestUrl.searchParams.get("iss");
+    if ((state.issuerRequired && !issuer) || (issuer && issuer !== state.issuer)) throw new Error("OAuth authorization issuer did not match.");
+    const oauthError = requestUrl.searchParams.get("error");
+    if (oauthError) throw new Error(oauthError === "access_denied" ? "Authorization was cancelled. You can reconnect." : "The provider rejected authorization.");
+    if (!code) throw new Error("Missing OAuth authorization code.");
     await assertPublicMcpUrl(state.tokenEndpoint);
 
     const form = new URLSearchParams({
@@ -57,6 +58,7 @@ export async function GET(req: Request) {
 
     const response = await fetch(state.tokenEndpoint, {
       method: "POST",
+      signal: AbortSignal.timeout(15_000),
       redirect: "error",
       headers,
       body: form,

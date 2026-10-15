@@ -171,6 +171,7 @@ async function ensureDeliveries(ctx: MutationCtx, post: Doc<"socialPosts">) {
       conversationId: post.conversationId,
       connectedAccountId: account?.connectedAccountId,
       channel,
+      targetId: channel === "facebook" ? post.platformOptions?.facebookPageId : channel === "linkedin" ? post.platformOptions?.linkedinAuthorUrn : undefined,
       status: post.status === "draft" ? "draft" : "pending",
       idempotencyKey: `${post._id}:${channel}`,
       attempts: 0,
@@ -301,6 +302,7 @@ export const getAnalyticsSnapshot = query({
   args: {
     connectedAccountId: v.string(),
     days: v.number(),
+    targetId: v.optional(v.string()),
   },
   returns: v.union(v.null(), v.any()),
   handler: async (ctx, args) => {
@@ -308,11 +310,12 @@ export const getAnalyticsSnapshot = query({
     if (!userId) return null;
     return await ctx.db
       .query("socialAnalyticsSnapshots")
-      .withIndex("by_user_account_range", (q) =>
+      .withIndex("by_user_account_range_target", (q) =>
         q
           .eq("userId", userId)
           .eq("connectedAccountId", args.connectedAccountId)
-          .eq("rangeDays", args.days),
+          .eq("rangeDays", args.days)
+          .eq("targetId", args.targetId || ""),
       )
       .unique();
   },
@@ -323,22 +326,25 @@ export const saveAnalyticsSnapshot = mutation({
     connectedAccountId: v.string(),
     channel: v.string(),
     days: v.number(),
+    targetId: v.optional(v.string()),
     data: v.any(),
   },
   returns: v.id("socialAnalyticsSnapshots"),
   handler: async (ctx, args) => {
     const userId = await currentUserId(ctx);
+    if (![7, 30, 90].includes(args.days)) throw new Error("Invalid analytics range.");
     const account = (await userAccounts(ctx, userId)).find(
       (item) => item.connectedAccountId === args.connectedAccountId,
     );
     if (!account) throw new Error("Social account not found.");
     const existing = await ctx.db
       .query("socialAnalyticsSnapshots")
-      .withIndex("by_user_account_range", (q) =>
+      .withIndex("by_user_account_range_target", (q) =>
         q
           .eq("userId", userId)
           .eq("connectedAccountId", args.connectedAccountId)
-          .eq("rangeDays", args.days),
+          .eq("rangeDays", args.days)
+          .eq("targetId", args.targetId || ""),
       )
       .unique();
     const now = Date.now();
@@ -354,11 +360,27 @@ export const saveAnalyticsSnapshot = mutation({
       userId,
       connectedAccountId: args.connectedAccountId,
       channel: args.channel,
+      targetId: args.targetId || "",
       rangeDays: args.days,
       data: args.data,
       createdAt: now,
       updatedAt: now,
     });
+  },
+});
+
+export const setAnalyticsTarget = mutation({
+  args: { connectedAccountId: v.string(), targetId: v.string() },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const userId = await currentUserId(ctx);
+    const rows = await ctx.db.query("socialAccounts").withIndex("by_user_and_connected", q => q.eq("userId", userId).eq("connectedAccountId", args.connectedAccountId)).take(100);
+    if (!rows.length) throw new Error("Social account not found.");
+    const valid = args.targetId === "" || (rows[0].channel === "facebook" ? /^\d+$/.test(args.targetId) : rows[0].channel === "linkedin" && /^urn:li:organization:\d+$/.test(args.targetId));
+    if (!valid) throw new Error("Choose a valid publishing target.");
+    for (const row of rows) await ctx.db.patch(row._id, { analyticsTargetId: args.targetId, updatedAt: Date.now() });
+    // The reporting API revalidates membership against the provider before use.
+    return null;
   },
 });
 

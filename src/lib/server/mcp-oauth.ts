@@ -16,6 +16,9 @@ export type McpOauthState = {
   clientSecret?: string;
   tokenEndpointAuthMethod?: string;
   resource?: string;
+  issuer?: string;
+  issuerRequired?: boolean;
+  scope?: string;
   createdAt: number;
 };
 
@@ -30,6 +33,8 @@ type AuthorizationServerMetadata = {
   token_endpoint?: string;
   registration_endpoint?: string;
   code_challenge_methods_supported?: string[];
+  client_id_metadata_document_supported?: boolean;
+  authorization_response_iss_parameter_supported?: boolean;
 };
 
 type RegisteredClient = {
@@ -114,6 +119,7 @@ async function discoverProtectedResource(serverUrl: string) {
   try {
     const probe = await fetch(serverUrl, {
       method: "POST",
+      signal: AbortSignal.timeout(15_000),
       redirect: "error",
       headers: {
         "Content-Type": "application/json",
@@ -158,6 +164,7 @@ async function discoverAuthorizationServer(issuer: string) {
     try {
       const metadata = (await safeJson(candidate)) as AuthorizationServerMetadata | null;
       if (metadata?.authorization_endpoint && metadata?.token_endpoint) {
+        if (metadata.issuer && metadata.issuer.replace(/\/$/, "") !== issuer.replace(/\/$/, "")) throw new Error("OAuth issuer metadata did not match.");
         await assertPublicMcpUrl(metadata.authorization_endpoint);
         await assertPublicMcpUrl(metadata.token_endpoint);
         if (metadata.registration_endpoint) {
@@ -191,23 +198,30 @@ async function registerClient(registrationEndpoint: string, redirectUri: string)
   return data;
 }
 
-export async function beginMcpOAuth(serverUrl: string, redirectUri: string) {
+export async function beginMcpOAuth(serverUrl: string, redirectUri: string, configured?: { client_id?: string; client_secret?: string; token_endpoint_auth_method?: string; scope?: string }) {
   const resourceMetadata = await discoverProtectedResource(serverUrl);
   const issuer = resourceMetadata.authorization_servers?.[0];
   if (!issuer) throw new Error("The MCP server did not provide an authorization server.");
   await assertPublicMcpUrl(issuer);
   const metadata = await discoverAuthorizationServer(issuer);
-  if (!metadata.registration_endpoint) {
-    throw new Error(
-      "This MCP OAuth provider does not support dynamic client registration yet.",
-    );
+  if (metadata.code_challenge_methods_supported && !metadata.code_challenge_methods_supported.includes("S256")) {
+    throw new Error("This OAuth server must support PKCE S256.");
   }
+  const client: RegisteredClient = configured?.client_id
+    ? configured
+    : metadata.client_id_metadata_document_supported
+      ? { client_id: new URL("/api/mcp/oauth/client-metadata", redirectUri).toString(), token_endpoint_auth_method: "none" }
+      : metadata.registration_endpoint
+        ? await registerClient(metadata.registration_endpoint, redirectUri)
+        : {};
+  if (!client.client_id) throw new Error("This provider requires a registered OAuth client. Edit the server and supply its client ID, then reconnect.");
 
-  const client = await registerClient(metadata.registration_endpoint, redirectUri);
   const verifier = base64Url(randomBytes(48));
   const challenge = base64Url(createHash("sha256").update(verifier).digest());
 
   return {
+    issuer, issuerRequired: metadata.authorization_response_iss_parameter_supported === true,
+    scope: configured?.scope,
     authorizationEndpoint: metadata.authorization_endpoint!,
     tokenEndpoint: metadata.token_endpoint!,
     clientId: client.client_id!,

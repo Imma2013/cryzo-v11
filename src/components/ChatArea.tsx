@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
+import { builderError } from "@/lib/builder-error";
 import { useChat } from "@ai-sdk/react";
 import { useAuthToken } from "@convex-dev/auth/react";
 import {
@@ -138,7 +139,7 @@ export function ChatArea({
   const repairAttemptsRef = useRef({ conversationId, count: 0 });
   const [pendingProjectRepair, setPendingProjectRepair] = useState<string | null>(null);
 
-  const { messages, setMessages, sendMessage, stop, status, error } = useChat({
+  const { messages, setMessages, sendMessage, regenerate, stop, status, error } = useChat({
     id: conversationId,
     transport: new DefaultChatTransport({
       api: "/api/chat",
@@ -591,6 +592,19 @@ export function ChatArea({
     ],
   );
 
+  const requestBody = useCallback((mode: ChatMode) => {
+    const selection = modelSelection;
+    return {
+      chatMode: mode, modelProvider: selection.providerId, modelId: selection.modelId,
+      modelCredentialMode: selection.credentialMode, reasoningEffort: selection.reasoningEffort || "default",
+      modelBaseUrl: readRuntimeProviderBaseURL(selection.providerId) || selection.baseURL,
+      modelApiKey: selection.credentialMode === "device" ? readRuntimeProviderKey(selection.providerId) : undefined,
+      authToken: selection.credentialMode === "account" ? authToken : undefined,
+      convexAuthToken: authToken || undefined,
+    };
+  }, [modelSelection, authToken]);
+  const errorInfo = builderError(localError || error?.message || "");
+
   const sendPreparedMessage = useCallback(
     async (
       text: string,
@@ -606,35 +620,14 @@ export function ChatArea({
         return;
       }
 
-      const modelApiKey =
-        selection.credentialMode === "device"
-          ? readRuntimeProviderKey(selection.providerId)
-          : undefined;
-      const modelBaseUrl =
-        readRuntimeProviderBaseURL(selection.providerId) || selection.baseURL;
-
       await sendMessage(
         fileParts.length > 0 ? { text, files: fileParts } : { text },
         {
-          body: {
-            chatMode: mode,
-            modelProvider: selection.providerId,
-            modelId: selection.modelId,
-            modelCredentialMode: selection.credentialMode,
-            reasoningEffort: selection.reasoningEffort || "default",
-            modelBaseUrl,
-            modelApiKey,
-            authToken:
-              selection.credentialMode === "account" ? authToken : undefined,
-            // Convex authentication is independent from the selected AI provider.
-            // Always send the session token so Cryzo Cloud provisioning cannot
-            // incorrectly report authentication_required for managed models.
-            convexAuthToken: authToken || undefined,
-          },
+          body: requestBody(mode),
         },
       );
     },
-    [authToken, chatMode, modelSelection, runLocalModel, sendMessage],
+    [chatMode, modelSelection, requestBody, runLocalModel, sendMessage],
   );
 
   // Errors from generated code are not requests to continue blindly. Give the
@@ -884,7 +877,12 @@ export function ChatArea({
                   </div>
                 ) : (
                   <div className="rounded-xl border border-red-800 bg-red-900/20 px-4 py-3 text-sm text-red-400">
-                    Error: {localError || error?.message}
+                    <p>{errorInfo.message}</p>
+                    {errorInfo.requestId && <details className="mt-2 text-xs text-red-300"><summary>Details</summary>Request ID: {errorInfo.requestId}</details>}
+                    {errorInfo.retryable && <button type="button" disabled={isLoading} onClick={() => {
+                      setLocalError("");
+                      void regenerate({ body: requestBody(chatMode) }).catch(reason => setLocalError(reason instanceof Error ? reason.message : "Retry failed."));
+                    }} className="mt-3 rounded-lg border border-red-600 px-3 py-1.5 text-xs text-white disabled:opacity-40">Retry request</button>}
                   </div>
                 ))}
 
