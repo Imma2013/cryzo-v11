@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useCallback, useEffect, useState } from "react";
+import { use, useCallback, useEffect, useState, useRef } from "react";
 import { Panel, Group, Separator } from "react-resizable-panels";
 import { useQuery } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
@@ -8,6 +8,7 @@ import { ChatArea } from "@/components/ChatArea";
 import {
   WorkspacePanel,
   type WorkspaceStatus,
+  type WorkspacePreviewControls,
 } from "@/components/workspace/WorkspacePanel";
 import { MobileBuilderHeader } from "@/components/MobileBuilderHeader";
 import type { ElementInfo } from "@/components/workspace/LivePreview";
@@ -25,9 +26,16 @@ export default function ConversationPage({
   const { authToken, isAuthenticated, isLoading: authLoading } = useAuth();
   const id = conversationId as Id<"conversations">;
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
+  const previewControlRef = useRef<WorkspacePreviewControls>(null);
   const [mobileView, setMobileView] = useState<"chat" | "preview">("chat");
+  const openPreview = () => {
+    previewControlRef.current?.showPreview();
+    setMobileView("preview");
+  };
   const [isMobile, setIsMobile] = useState<boolean | null>(null);
-  const [selectedElement, setSelectedElement] = useState<ElementInfo | null>(null);
+  const [selectedElement, setSelectedElement] = useState<ElementInfo | null>(
+    null,
+  );
   const [workspaceStatus, setWorkspaceStatus] = useState<WorkspaceStatus>({
     isBooting: false,
     progress: null,
@@ -43,10 +51,19 @@ export default function ConversationPage({
   const workspaceStarted = workspaceOpen || hasArtifacts;
 
   useEffect(() => {
-    if (authLoading || !isAuthenticated || !authToken || !conversation || artifacts === undefined) return;
+    if (
+      authLoading ||
+      !isAuthenticated ||
+      !authToken ||
+      !conversation ||
+      artifacts === undefined
+    )
+      return;
     // Wait for project metadata/files before choosing a kernel; native apps never boot Vivari.
-    const native = conversation.projectPlatforms?.some((p) => p === "ios" || p === "android") ||
-      artifacts.some(a => nativeTargetFromActions(a.actions));
+    const native =
+      conversation.projectPlatforms?.some(
+        (p) => p === "ios" || p === "android",
+      ) || artifacts.some((a) => nativeTargetFromActions(a.actions));
     void prebootStreamingRuntime(String(id), Boolean(native)).catch(() => {
       // Workspace state will surface an actionable error if startup fails.
     });
@@ -119,7 +136,7 @@ export default function ConversationPage({
             canPreview={workspaceStarted}
             isBuilding={isBuilding}
             conversationId={conversationId}
-            onPreview={() => setMobileView("preview")}
+            onPreview={openPreview}
             onBackToChat={() => setMobileView("chat")}
           />
         )}
@@ -149,6 +166,8 @@ export default function ConversationPage({
               }`}
             >
               <WorkspacePanel
+                key={id}
+                previewControlRef={previewControlRef}
                 conversationId={id}
                 onElementSelected={handleElementSelected}
                 onStatusChange={handleWorkspaceStatus}
@@ -178,6 +197,8 @@ export default function ConversationPage({
           <Panel defaultSize={65} minSize={30}>
             <div className="h-full p-1">
               <WorkspacePanel
+                key={id}
+                previewControlRef={previewControlRef}
                 conversationId={id}
                 onElementSelected={handleElementSelected}
                 onStatusChange={handleWorkspaceStatus}

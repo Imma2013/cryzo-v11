@@ -1,6 +1,14 @@
 import type { ArtifactAction, FileMap } from "./types";
-import { missingReactViteScaffold, projectReadinessIssues } from "./project-scaffold";
-import { expoStarterFiles, isExpoProject, isViteOnlyMobileArtifact, reconcileExpoPackage } from "./expo-starter";
+import {
+  missingReactViteScaffold,
+  projectReadinessIssues,
+} from "./project-scaffold";
+import {
+  expoStarterFiles,
+  isExpoProject,
+  isViteOnlyMobileArtifact,
+  reconcileExpoPackage,
+} from "./expo-starter";
 import { inferProjectPlatforms } from "@/lib/project-platform";
 import { nativeTargetFromActions, shouldUseVivari } from "./native-target";
 import { canReuseLivePreview } from "./preview-lifecycle";
@@ -61,7 +69,10 @@ export function setStreamingRuntimeAuthToken(token: string | null) {
 }
 
 /** Conversation metadata is authoritative. Framework stays pinned through reloads/recovery. */
-export function configureStreamingRuntimeTarget(conversationId: string, nativeTarget: boolean) {
+export function configureStreamingRuntimeTarget(
+  conversationId: string,
+  nativeTarget: boolean,
+) {
   const state = getState(conversationId);
   if (nativeTarget && !state.nativeTarget) {
     state.nativeTarget = true;
@@ -73,7 +84,6 @@ export function configureStreamingRuntimeTarget(conversationId: string, nativeTa
     emit(state);
   }
 }
-
 
 async function waitForSandboxAuthToken() {
   for (let attempt = 0; attempt < 100; attempt++) {
@@ -152,12 +162,21 @@ function setError(state: RuntimeState, error: unknown, requestRepair = false) {
   emit(state);
   // Restoration and explicit restarts must use the same bounded model repair
   // path as streamed actions. Infrastructure/auth failures need no code edits.
-  if (requestRepair || /project preflight failed|generated (?:file|project) validation failed|generated dependency installation failed|generated project failed|typescript project check failed|does not export|cannot resolve local import|missing npm dependency|invalid json in|postcss|npm run build exited/i.test(message)) {
-    const conversationId = [...runtimes].find(([, runtime]) => runtime === state)?.[0];
+  if (
+    requestRepair ||
+    /project preflight failed|generated (?:file|project) validation failed|generated dependency installation failed|generated project failed|typescript project check failed|does not export|cannot resolve local import|missing npm dependency|invalid json in|postcss|npm run build exited/i.test(
+      message,
+    )
+  ) {
+    const conversationId = [...runtimes].find(
+      ([, runtime]) => runtime === state,
+    )?.[0];
     if (conversationId && typeof window !== "undefined") {
-      window.dispatchEvent(new CustomEvent("cryzo:project-repair-needed", {
-        detail: { conversationId, message: message.slice(0, 6000) },
-      }));
+      window.dispatchEvent(
+        new CustomEvent("cryzo:project-repair-needed", {
+          detail: { conversationId, message: message.slice(0, 6000) },
+        }),
+      );
     }
   }
 }
@@ -190,9 +209,13 @@ function fileMapFromActions(actions: ArtifactAction[]) {
 }
 
 function parseActionAttributes(raw: string) {
-  const type = raw.match(/type="([^"]+)"/)?.[1] as ArtifactAction["type"] | undefined;
+  const type = raw.match(/type="([^"]+)"/)?.[1] as
+    | ArtifactAction["type"]
+    | undefined;
   const filePath = raw.match(/filePath="([^"]+)"/)?.[1];
-  const operation = raw.match(/operation="([^"]+)"/)?.[1] as ArtifactAction["operation"] | undefined;
+  const operation = raw.match(/operation="([^"]+)"/)?.[1] as
+    | ArtifactAction["operation"]
+    | undefined;
   return { type, filePath, operation };
 }
 
@@ -227,7 +250,10 @@ type GuardResponse = {
   error?: string;
 };
 
-async function authenticatedPost<T>(url: string, body: Record<string, unknown>): Promise<T> {
+async function authenticatedPost<T>(
+  url: string,
+  body: Record<string, unknown>,
+): Promise<T> {
   const authToken = await waitForSandboxAuthToken();
   const response = await fetch(url, {
     method: "POST",
@@ -245,7 +271,9 @@ async function authenticatedPost<T>(url: string, body: Record<string, unknown>):
   return data;
 }
 
-async function callGuard(body: Record<string, unknown>): Promise<GuardResponse> {
+async function callGuard(
+  body: Record<string, unknown>,
+): Promise<GuardResponse> {
   return await authenticatedPost<GuardResponse>("/api/sandbox/validate", body);
 }
 
@@ -308,9 +336,12 @@ async function ensureContainer(conversationId: string, state: RuntimeState) {
         const diagnostic = String(message.message || "Mobile layout issue");
         appendOutput(state, `\nResponsive layout audit: ${diagnostic}\n`);
         emit(state);
-        if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("cryzo:project-repair-needed", {
-          detail: { conversationId, message: diagnostic },
-        }));
+        if (typeof window !== "undefined")
+          window.dispatchEvent(
+            new CustomEvent("cryzo:project-repair-needed", {
+              detail: { conversationId, message: diagnostic },
+            }),
+          );
         return;
       }
       if (
@@ -361,55 +392,99 @@ function packageJsonContent(state: RuntimeState) {
 async function ensureExpoStarter(conversationId: string, state: RuntimeState) {
   if (!state.nativeTarget && !isExpoProject(state.files)) return;
   state.nativeTarget = true;
-  const missing = expoStarterFiles().filter((file) => state.files[file.path]?.type !== "file");
+  const missing = expoStarterFiles().filter(
+    (file) => state.files[file.path]?.type !== "file",
+  );
   if (!missing.length) return;
-  const actions: ArtifactAction[] = missing.map(({ path, content }) => ({ type: "file", filePath: path, content }));
+  const actions: ArtifactAction[] = missing.map(({ path, content }) => ({
+    type: "file",
+    filePath: path,
+    content,
+  }));
   // Expo source lives in the conversation file map. Metro runs in Cryzo cloud;
   // never boot Vivari merely to initialize a native project.
 
   for (const action of actions) updateFileMap(state, action);
   state.installedPackageJson = null;
-  appendOutput(state, `\nInitialized ${missing.length} verified Expo SDK 57 starter files (native Metro, no Vite).\n`);
+  appendOutput(
+    state,
+    `\nInitialized ${missing.length} verified Expo SDK 57 starter files (native Metro, no Vite).\n`,
+  );
   emit(state);
 }
 
-async function ensureProjectScaffold(conversationId: string, state: RuntimeState) {
-  if (state.nativeTarget || isExpoProject(state.files)) { await ensureExpoStarter(conversationId, state); return; }
+async function ensureProjectScaffold(
+  conversationId: string,
+  state: RuntimeState,
+) {
+  if (state.nativeTarget || isExpoProject(state.files)) {
+    await ensureExpoStarter(conversationId, state);
+    return;
+  }
   const missing = missingReactViteScaffold(state.files);
   if (!missing.length) return;
   const wc = await ensureContainer(conversationId, state);
   const actions: ArtifactAction[] = missing.map(({ path, content }) => ({
-    type: "file", filePath: path, content,
+    type: "file",
+    filePath: path,
+    content,
   }));
   await writeFiles(wc, actions);
   for (const action of actions) updateFileMap(state, action);
   state.installedPackageJson = null;
-  appendOutput(state, `\nRestored ${missing.length} missing React/Vite starter files without overwriting generated code.\n`);
+  appendOutput(
+    state,
+    `\nRestored ${missing.length} missing React/Vite starter files without overwriting generated code.\n`,
+  );
   emit(state);
 }
 
-async function assertRunnableProject(conversationId: string, state: RuntimeState, command?: string) {
+async function assertRunnableProject(
+  conversationId: string,
+  state: RuntimeState,
+  command?: string,
+) {
   const issues = projectReadinessIssues(state.files, command);
   if (issues.length) throw new Error(issues.join(" "));
-  if (packageJsonContent(state) && shouldUseVivari(state.nativeTarget, state.files)) {
+  if (
+    packageJsonContent(state) &&
+    shouldUseVivari(state.nativeTarget, state.files)
+  ) {
     const wc = await ensureContainer(conversationId, state);
     if (!(await wc.fs.exists("package.json"))) {
-      throw new Error("The Vivari project directory is missing package.json. Restore project files before running npm.");
+      throw new Error(
+        "The Vivari project directory is missing package.json. Restore project files before running npm.",
+      );
     }
   }
 }
 
-async function validateCurrentProject(conversationId: string, state: RuntimeState, command?: string) {
+async function validateCurrentProject(
+  conversationId: string,
+  state: RuntimeState,
+  command?: string,
+) {
   await assertRunnableProject(conversationId, state, command);
   const projectFiles = Object.entries(state.files)
     .filter(([, value]) => value.type === "file")
     .map(([path, value]) => ({ path, content: value.content || "" }));
   try {
-    return await callGuard({ operation: "project", conversationId, projectFiles, command, projectIntent: state.projectIntent });
+    return await callGuard({
+      operation: "project",
+      conversationId,
+      projectFiles,
+      command,
+      projectIntent: state.projectIntent,
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     // Keep authentication and transport errors separate from generated code.
-    if (/unauthorized|authentication|failed to fetch|request failed with (?:401|403|5\d\d)/i.test(message)) throw error;
+    if (
+      /unauthorized|authentication|failed to fetch|request failed with (?:401|403|5\d\d)/i.test(
+        message,
+      )
+    )
+      throw error;
     throw new Error(`Generated project validation failed:\n${message}`);
   }
 }
@@ -429,17 +504,26 @@ function detectStartCommand(state: RuntimeState) {
 }
 
 function fileContent(state: RuntimeState, path: string) {
-  return state.files[path]?.type === "file" ? state.files[path]?.content || "" : "";
+  return state.files[path]?.type === "file"
+    ? state.files[path]?.content || ""
+    : "";
 }
 
 function usesBun(state: RuntimeState) {
-  return state.files["bun.lock"]?.type === "file" || state.files["bun.lockb"]?.type === "file";
+  return (
+    state.files["bun.lock"]?.type === "file" ||
+    state.files["bun.lockb"]?.type === "file"
+  );
 }
 
 // Python projects (run on Vivari's CPython) declare dependencies in requirements.txt.
-async function ensurePythonDependencies(conversationId: string, state: RuntimeState) {
+async function ensurePythonDependencies(
+  conversationId: string,
+  state: RuntimeState,
+) {
   const requirements = fileContent(state, "requirements.txt");
-  if (!requirements.trim() || state.installedRequirements === requirements) return;
+  if (!requirements.trim() || state.installedRequirements === requirements)
+    return;
 
   const wc = await ensureContainer(conversationId, state);
   state.progress = "installing";
@@ -447,10 +531,14 @@ async function ensurePythonDependencies(conversationId: string, state: RuntimeSt
   appendOutput(state, "\nInstalling Python packages in the Cryzo runtime...\n");
   emit(state);
 
-  const exitCode = await runCommand(wc, "pip install -r requirements.txt", (data) => {
-    appendOutput(state, data);
-    emit(state);
-  });
+  const exitCode = await runCommand(
+    wc,
+    "pip install -r requirements.txt",
+    (data) => {
+      appendOutput(state, data);
+      emit(state);
+    },
+  );
   if (exitCode !== 0) {
     throw new Error(`pip install exited with code ${exitCode}`);
   }
@@ -458,21 +546,37 @@ async function ensurePythonDependencies(conversationId: string, state: RuntimeSt
 }
 
 /** Reconcile known packages before npm runs; surface every remaining unresolved import. */
-async function ensureProjectIntegrity(conversationId: string, state: RuntimeState) {
+async function ensureProjectIntegrity(
+  conversationId: string,
+  state: RuntimeState,
+) {
   const analysis = analyzeProject(state.files, true);
   if (analysis.repairedFiles.length) {
     const wc = await ensureContainer(conversationId, state);
-    const actions: ArtifactAction[] = analysis.repairedFiles.map(({ path, content }) => ({
-      type: "file", filePath: path, content,
-    }));
+    const actions: ArtifactAction[] = analysis.repairedFiles.map(
+      ({ path, content }) => ({
+        type: "file",
+        filePath: path,
+        content,
+      }),
+    );
     await writeFiles(wc, actions);
     for (const action of actions) updateFileMap(state, action);
     state.installedPackageJson = null;
-    appendOutput(state, `\nReconciled ${actions.length} dependency/config file(s).\n`);
+    appendOutput(
+      state,
+      `\nReconciled ${actions.length} dependency/config file(s).\n`,
+    );
     emit(state);
   }
   const remaining = analyzeProject(state.files).diagnostics;
-  if (remaining.length) throw new Error(`Project preflight failed:\n${remaining.slice(0, 12).map((d) => `- ${d.message}`).join("\n")}`);
+  if (remaining.length)
+    throw new Error(
+      `Project preflight failed:\n${remaining
+        .slice(0, 12)
+        .map((d) => `- ${d.message}`)
+        .join("\n")}`,
+    );
 }
 
 /** Compile a Vite web app before claiming its dev-server preview is healthy. */
@@ -482,17 +586,36 @@ async function verifyWebBuild(conversationId: string, state: RuntimeState) {
   if (!json) return;
   const pkg = JSON.parse(json) as { scripts?: Record<string, string> };
   const build = pkg.scripts?.build?.trim();
-  if (!build || !/^(?:vite build|tsc(?:\s+[^&]+)?\s*&&\s*vite build)(?:\s|$)/.test(build)) return;
-  const fingerprint = JSON.stringify(Object.entries(state.files).filter(([, f]) => f.type === "file"));
+  if (
+    !build ||
+    !/^(?:vite build|tsc(?:\s+[^&]+)?\s*&&\s*vite build)(?:\s|$)/.test(build)
+  )
+    return;
+  const fingerprint = JSON.stringify(
+    Object.entries(state.files).filter(([, f]) => f.type === "file"),
+  );
   if (state.verifiedBuild === fingerprint) return;
   const wc = await ensureContainer(conversationId, state);
   state.progress = "starting";
-  appendOutput(state, "\nChecking Vite production compilation before preview...\n");
+  appendOutput(
+    state,
+    "\nChecking Vite production compilation before preview...\n",
+  );
   emit(state);
-  if (/^vite build(?:\s|$)/.test(build) &&
-      !!(pkg as { devDependencies?: Record<string, string>; dependencies?: Record<string, string> }).devDependencies?.typescript &&
-      state.files["tsconfig.json"]?.type === "file") {
-    const project = state.files["tsconfig.app.json"]?.type === "file" ? " -p tsconfig.app.json" : "";
+  if (
+    /^vite build(?:\s|$)/.test(build) &&
+    !!(
+      pkg as {
+        devDependencies?: Record<string, string>;
+        dependencies?: Record<string, string>;
+      }
+    ).devDependencies?.typescript &&
+    state.files["tsconfig.json"]?.type === "file"
+  ) {
+    const project =
+      state.files["tsconfig.app.json"]?.type === "file"
+        ? " -p tsconfig.app.json"
+        : "";
     const command = `node_modules/.bin/tsc${project} --noEmit --noUnusedLocals false --noUnusedParameters false`;
     let details = "";
     const status = await runCommand(wc, command, (data) => {
@@ -500,7 +623,10 @@ async function verifyWebBuild(conversationId: string, state: RuntimeState) {
       appendOutput(state, data);
       emit(state);
     });
-    if (status !== 0) throw new Error(`TypeScript project check failed (${status}).\n${details.slice(-4000)}`);
+    if (status !== 0)
+      throw new Error(
+        `TypeScript project check failed (${status}).\n${details.slice(-4000)}`,
+      );
   }
   let output = "";
   const code = await runCommand(wc, "npm run build", (data) => {
@@ -509,7 +635,9 @@ async function verifyWebBuild(conversationId: string, state: RuntimeState) {
     emit(state);
   });
   if (code !== 0) {
-    throw new Error(`Generated project failed its Vite build (${code}).\n${output.slice(-4500)}`);
+    throw new Error(
+      `Generated project failed its Vite build (${code}).\n${output.slice(-4500)}`,
+    );
   }
   state.verifiedBuild = fingerprint;
 }
@@ -538,7 +666,9 @@ async function ensureDependencies(conversationId: string, state: RuntimeState) {
   );
   emit(state);
 
-  const installCommand = usesBun(state) ? "bun install" : "npm install --no-audit --no-fund";
+  const installCommand = usesBun(state)
+    ? "bun install"
+    : "npm install --no-audit --no-fund";
   let installOutput = "";
   const exitCode = await runCommand(wc, installCommand, (data) => {
     installOutput = (installOutput + data).slice(-6000);
@@ -546,7 +676,9 @@ async function ensureDependencies(conversationId: string, state: RuntimeState) {
     emit(state);
   });
   if (exitCode !== 0) {
-    throw new Error(`Generated dependency installation failed: ${installCommand.split(" --")[0]} exited with code ${exitCode}.\n${installOutput}`);
+    throw new Error(
+      `Generated dependency installation failed: ${installCommand.split(" --")[0]} exited with code ${exitCode}.\n${installOutput}`,
+    );
   }
   state.installedPackageJson = packageJson;
 }
@@ -675,7 +807,10 @@ async function executeSandboxAction(
     state.nativeTarget = true;
     await ensureExpoStarter(conversationId, state);
     if (action.type === "shell") {
-      appendOutput(state, "Native dependencies will be installed by Expo cloud preview.\n");
+      appendOutput(
+        state,
+        "Native dependencies will be installed by Expo cloud preview.\n",
+      );
       emit(state);
       return;
     }
@@ -685,13 +820,19 @@ async function executeSandboxAction(
       await applyRepairedFiles(conversationId, state, check.repairedFiles);
       state.progress = "ready";
       state.error = null;
-      appendOutput(state, "Expo source ready. Open Device Preview to start Metro.\n");
+      appendOutput(
+        state,
+        "Expo source ready. Open Device Preview to start Metro.\n",
+      );
       emit(state);
       return;
     }
     if (action.type === "file" && action.filePath) {
       const path = action.filePath.replace(/^\.\//, "");
-      if (isViteOnlyMobileArtifact(path) || /^(?:src\/index\.css|src\/App\.(?:jsx?|tsx?))$/.test(path)) {
+      if (
+        isViteOnlyMobileArtifact(path) ||
+        /^(?:src\/index\.css|src\/App\.(?:jsx?|tsx?))$/.test(path)
+      ) {
         appendOutput(state, `Ignored web-only ${path} in Expo project.\n`);
         emit(state);
         return;
@@ -701,10 +842,21 @@ async function executeSandboxAction(
         emit(state);
         return;
       }
-      const safe = path === "package.json"
-        ? { ...action, content: reconcileExpoPackage(action.content, fileContent(state, "package.json")) }
-        : action;
-      const validation = await callGuard({ operation: "file", conversationId, action: safe });
+      const safe =
+        path === "package.json"
+          ? {
+              ...action,
+              content: reconcileExpoPackage(
+                action.content,
+                fileContent(state, "package.json"),
+              ),
+            }
+          : action;
+      const validation = await callGuard({
+        operation: "file",
+        conversationId,
+        action: safe,
+      });
       if (!validation.action) throw new Error(`Invalid native file ${path}`);
       updateFileMap(state, validation.action);
       if (validation.output) appendOutput(state, validation.output);
@@ -721,11 +873,21 @@ async function executeSandboxAction(
   if (state.nativeTarget && action.type === "file" && action.filePath) {
     const path = action.filePath.replace(/^\.\//, "");
     if (isViteOnlyMobileArtifact(path)) {
-      appendOutput(state, `Skipped incompatible web/Vite file ${path} in native Expo app.\n`);
+      appendOutput(
+        state,
+        `Skipped incompatible web/Vite file ${path} in native Expo app.\n`,
+      );
       emit(state);
       return;
     }
-    if (path === "package.json") safeAction = { ...action, content: reconcileExpoPackage(action.content, fileContent(state, "package.json")) };
+    if (path === "package.json")
+      safeAction = {
+        ...action,
+        content: reconcileExpoPackage(
+          action.content,
+          fileContent(state, "package.json"),
+        ),
+      };
     else if (["app.json", "tsconfig.json", "index.ts"].includes(path)) {
       // Do not let generated syntax or config drift break the verified SDK foundation.
       appendOutput(state, `Preserved verified Expo starter config ${path}.\n`);
@@ -750,8 +912,10 @@ async function executeSandboxAction(
 
     await writeFiles(wc, [safeAction]);
     updateFileMap(state, safeAction);
-    if (safeAction.filePath === "package.json") state.installedPackageJson = null;
-    if (safeAction.filePath === "requirements.txt") state.installedRequirements = null;
+    if (safeAction.filePath === "package.json")
+      state.installedPackageJson = null;
+    if (safeAction.filePath === "requirements.txt")
+      state.installedRequirements = null;
     state.progress = state.previewUrl ? "ready" : "writing";
     state.error = null;
     appendOutput(state, `Wrote ${safeAction.filePath}\n`);
@@ -760,7 +924,10 @@ async function executeSandboxAction(
   }
 
   if (state.nativeTarget && action.type === "shell") {
-    appendOutput(state, `Deferred native command to Expo cloud preview: ${action.content.trim().slice(0, 110)}\n`);
+    appendOutput(
+      state,
+      `Deferred native command to Expo cloud preview: ${action.content.trim().slice(0, 110)}\n`,
+    );
     emit(state);
     return;
   }
@@ -770,7 +937,10 @@ async function executeSandboxAction(
     await applyRepairedFiles(conversationId, state, check.repairedFiles);
     state.progress = "ready";
     state.error = null;
-    appendOutput(state, "Expo source ready. Open Device Preview to start Metro and connect Expo Go.\n");
+    appendOutput(
+      state,
+      "Expo source ready. Open Device Preview to start Metro and connect Expo Go.\n",
+    );
     emit(state);
     return;
   }
@@ -781,7 +951,11 @@ async function executeSandboxAction(
       await ensureProjectIntegrity(conversationId, state);
     }
     await assertRunnableProject(conversationId, state, action.content);
-    state.progress = isInstallAction(action) ? "installing" : state.previewUrl ? "ready" : "writing";
+    state.progress = isInstallAction(action)
+      ? "installing"
+      : state.previewUrl
+        ? "ready"
+        : "writing";
     state.error = null;
     appendOutput(state, `\n$ ${action.content}\n`);
     emit(state);
@@ -790,12 +964,17 @@ async function executeSandboxAction(
       appendOutput(state, data);
       emit(state);
     });
-    if (exitCode !== 0) throw new Error(`Command exited with code ${exitCode}: ${action.content}`);
+    if (exitCode !== 0)
+      throw new Error(
+        `Command exited with code ${exitCode}: ${action.content}`,
+      );
 
     if (isInstallAction(action)) {
-      state.installedPackageJson = packageJsonContent(state) || state.installedPackageJson;
+      state.installedPackageJson =
+        packageJsonContent(state) || state.installedPackageJson;
       if (/\bpip3?\b/.test(action.content)) {
-        state.installedRequirements = fileContent(state, "requirements.txt") || state.installedRequirements;
+        state.installedRequirements =
+          fileContent(state, "requirements.txt") || state.installedRequirements;
       }
       const validation = await validateCurrentProject(conversationId, state);
       if (validation.output) appendOutput(state, validation.output);
@@ -807,7 +986,11 @@ async function executeSandboxAction(
   }
 
   await ensureDependencies(conversationId, state);
-  const preflight = await validateCurrentProject(conversationId, state, action.content);
+  const preflight = await validateCurrentProject(
+    conversationId,
+    state,
+    action.content,
+  );
   if (preflight.output) appendOutput(state, preflight.output);
   await applyRepairedFiles(conversationId, state, preflight.repairedFiles);
   await verifyWebBuild(conversationId, state);
@@ -833,16 +1016,31 @@ export async function saveStreamingRuntimeFile(
     conversationId,
     action: requested,
   });
-  if (!validation.action || validation.action.type !== "file" || !validation.action.filePath) {
-    throw new Error(`File validation returned no writable action for ${filePath}`);
+  if (
+    !validation.action ||
+    validation.action.type !== "file" ||
+    !validation.action.filePath
+  ) {
+    throw new Error(
+      `File validation returned no writable action for ${filePath}`,
+    );
   }
 
   const safeAction = validation.action as ArtifactAction & { filePath: string };
   if (!shouldUseVivari(state.nativeTarget, state.files)) {
-    if (["app.json", "tsconfig.json", "index.ts"].includes(safeAction.filePath) || isViteOnlyMobileArtifact(safeAction.filePath)) {
-      throw new Error("Native framework configuration is managed by Cryzo. Edit app screens instead.");
+    if (
+      ["app.json", "tsconfig.json", "index.ts"].includes(safeAction.filePath) ||
+      isViteOnlyMobileArtifact(safeAction.filePath)
+    ) {
+      throw new Error(
+        "Native framework configuration is managed by Cryzo. Edit app screens instead.",
+      );
     }
-    if (safeAction.filePath === "package.json") safeAction.content = reconcileExpoPackage(safeAction.content, fileContent(state, "package.json"));
+    if (safeAction.filePath === "package.json")
+      safeAction.content = reconcileExpoPackage(
+        safeAction.content,
+        fileContent(state, "package.json"),
+      );
     updateFileMap(state, safeAction);
     state.progress = "ready";
     appendOutput(state, `Saved native source ${safeAction.filePath}.\n`);
@@ -893,9 +1091,15 @@ export function processStreamingArtifactText(
   if (!text.includes("<cryzoArtifact")) return false;
 
   const state = getState(conversationId);
-  if (userIntent?.trim() && !/automatic project repair|generated project failed|fix the underlying cause by inspecting/i.test(userIntent)) {
+  if (
+    userIntent?.trim() &&
+    !/automatic project repair|generated project failed|fix the underlying cause by inspecting/i.test(
+      userIntent,
+    )
+  ) {
     state.projectIntent = userIntent.slice(0, 3000);
-    if (!Object.keys(state.files).length) state.nativeTarget = !inferProjectPlatforms(userIntent).includes("web");
+    if (!Object.keys(state.files).length)
+      state.nativeTarget = !inferProjectPlatforms(userIntent).includes("web");
   }
   if (state.blockedMessageId === messageId) return true;
   if (!state.active) state.active = true;
@@ -908,10 +1112,15 @@ export function processStreamingArtifactText(
       state.progress = "writing";
       emit(state);
     }
-    return true;
   }
 
-  const actions = parseCompletedActions(text);
+  const parsedActions = parseCompletedActions(text);
+  const openArtifact = hasUnclosedArtifact(text);
+  const firstCommand = openArtifact
+    ? parsedActions.findIndex((a) => a.type !== "file")
+    : -1;
+  const actions =
+    firstCommand >= 0 ? parsedActions.slice(0, firstCommand) : parsedActions;
   const processed = state.processedActionsByMessage.get(messageId) ?? 0;
   if (actions.length <= processed) return true;
 
@@ -936,7 +1145,10 @@ export function processStreamingArtifactText(
   return true;
 }
 
-export async function prebootStreamingRuntime(conversationId: string, nativeTarget = false) {
+export async function prebootStreamingRuntime(
+  conversationId: string,
+  nativeTarget = false,
+) {
   const state = getState(conversationId);
   if (nativeTarget || !shouldUseVivari(state.nativeTarget, state.files)) {
     state.nativeTarget = true;
@@ -972,88 +1184,130 @@ export async function restoreStreamingRuntime(
   nativeTarget = false,
 ) {
   const state = getState(conversationId);
-  state.nativeTarget = nativeTarget || state.nativeTarget || nativeTargetFromActions(actions);
-  if (state.restoreQueued || Object.keys(state.files).length > 0 || actions.length === 0) return;
+  state.nativeTarget =
+    nativeTarget || state.nativeTarget || nativeTargetFromActions(actions);
+  if (
+    state.restoreQueued ||
+    Object.keys(state.files).length > 0 ||
+    actions.length === 0
+  )
+    return;
   state.restoreQueued = true;
   // Restoration and live AI file/shell actions share one queue. Nothing starts
   // before persisted project files have been written to Vivari.
   const restoreTask = state.queue.then(async () => {
-  state.active = true;
-  state.progress = "restoring";
-  state.error = null;
-  appendOutput(state, "Restoring project in the Cryzo runtime...\n");
-  emit(state);
-
-  try {
-    const nonSupabase = actions.filter((action) => action.type !== "supabase");
-    const guarded = await callGuard({
-      operation: "actions",
-      conversationId,
-      actions: nonSupabase,
-    });
-    const safeNonSupabase = guarded.actions || nonSupabase;
-    const safeActions = [
-      ...safeNonSupabase,
-      ...actions.filter((action) => action.type === "supabase"),
-    ];
-    if (guarded.output) appendOutput(state, guarded.output);
-    state.nativeTarget = state.nativeTarget || nativeTargetFromActions(safeActions);
-    const fileActions = safeNonSupabase.filter((action) => action.type === "file" &&
-      (!state.nativeTarget || (!isViteOnlyMobileArtifact(action.filePath || "") &&
-        !/^(?:src\/index\.css|src\/App\.(?:jsx?|tsx?))$/.test(action.filePath || "") &&
-        !["package.json", "app.json", "tsconfig.json", "index.ts"].includes(action.filePath || ""))));
-    state.files = fileMapFromActions(fileActions);
+    state.active = true;
+    state.progress = "restoring";
+    state.error = null;
+    appendOutput(state, "Restoring project in the Cryzo runtime...\n");
     emit(state);
-    if (state.nativeTarget) {
-      await ensureExpoStarter(conversationId, state);
-      // Restore extra dependency declarations without replacing tested SDK versions.
-      const previousManifest = [...safeNonSupabase].reverse().find(a => a.type === "file" && a.filePath === "package.json");
-      if (previousManifest) {
-        try { updateFileMap(state, { ...previousManifest, content: reconcileExpoPackage(previousManifest.content, fileContent(state, "package.json")) }); }
-        catch { appendOutput(state, "Preserved valid Expo manifest after malformed generated package.json.\n"); }
+
+    try {
+      const nonSupabase = actions.filter(
+        (action) => action.type !== "supabase",
+      );
+      const guarded = await callGuard({
+        operation: "actions",
+        conversationId,
+        actions: nonSupabase,
+      });
+      const safeNonSupabase = guarded.actions || nonSupabase;
+      const safeActions = [
+        ...safeNonSupabase,
+        ...actions.filter((action) => action.type === "supabase"),
+      ];
+      if (guarded.output) appendOutput(state, guarded.output);
+      state.nativeTarget =
+        state.nativeTarget || nativeTargetFromActions(safeActions);
+      const fileActions = safeNonSupabase.filter(
+        (action) =>
+          action.type === "file" &&
+          (!state.nativeTarget ||
+            (!isViteOnlyMobileArtifact(action.filePath || "") &&
+              !/^(?:src\/index\.css|src\/App\.(?:jsx?|tsx?))$/.test(
+                action.filePath || "",
+              ) &&
+              ![
+                "package.json",
+                "app.json",
+                "tsconfig.json",
+                "index.ts",
+              ].includes(action.filePath || ""))),
+      );
+      state.files = fileMapFromActions(fileActions);
+      emit(state);
+      if (state.nativeTarget) {
+        await ensureExpoStarter(conversationId, state);
+        // Restore extra dependency declarations without replacing tested SDK versions.
+        const previousManifest = [...safeNonSupabase]
+          .reverse()
+          .find((a) => a.type === "file" && a.filePath === "package.json");
+        if (previousManifest) {
+          try {
+            updateFileMap(state, {
+              ...previousManifest,
+              content: reconcileExpoPackage(
+                previousManifest.content,
+                fileContent(state, "package.json"),
+              ),
+            });
+          } catch {
+            appendOutput(
+              state,
+              "Preserved valid Expo manifest after malformed generated package.json.\n",
+            );
+          }
+        }
+        state.progress = "ready";
+        state.error = null;
+        appendOutput(
+          state,
+          `Restored ${fileActions.length} native app files; Expo Metro is available from Device Preview.\n`,
+        );
+        emit(state);
+        return;
       }
-      state.progress = "ready";
-      state.error = null;
-      appendOutput(state, `Restored ${fileActions.length} native app files; Expo Metro is available from Device Preview.\n`);
-      emit(state);
-      return;
-    }
-    const wc = await ensureContainer(conversationId, state);
-    await writeFiles(wc, fileActions);
-    appendOutput(state, `Restored ${fileActions.length} project files.\n`);
-    await ensureProjectScaffold(conversationId, state);
-    await syncSupabaseRuntime(conversationId).catch(() => false);
+      const wc = await ensureContainer(conversationId, state);
+      await writeFiles(wc, fileActions);
+      appendOutput(state, `Restored ${fileActions.length} project files.\n`);
+      await ensureProjectScaffold(conversationId, state);
+      await syncSupabaseRuntime(conversationId).catch(() => false);
 
-    if (
-      safeNonSupabase.some(isInstallAction) ||
-      packageJsonContent(state) ||
-      fileContent(state, "requirements.txt")
-    ) {
-      await ensureDependencies(conversationId, state);
-    }
+      if (
+        safeNonSupabase.some(isInstallAction) ||
+        packageJsonContent(state) ||
+        fileContent(state, "requirements.txt")
+      ) {
+        await ensureDependencies(conversationId, state);
+      }
 
-    const validation = await validateCurrentProject(conversationId, state);
-    if (validation.output) appendOutput(state, validation.output);
-    await applyRepairedFiles(conversationId, state, validation.repairedFiles);
+      const validation = await validateCurrentProject(conversationId, state);
+      if (validation.output) appendOutput(state, validation.output);
+      await applyRepairedFiles(conversationId, state, validation.repairedFiles);
 
-    const startActions = safeNonSupabase.filter((action) => action.type === "start");
-    const explicitStart = startActions.length
-      ? startActions[startActions.length - 1].content
-      : null;
-    const startCommand = explicitStart || detectStartCommand(state);
-    if (startCommand) {
-      await verifyWebBuild(conversationId, state);
-      await startDevServer(conversationId, state, startCommand);
-    } else {
-      state.progress = "idle";
-      appendOutput(state, "No dev/start script found; project files are available in the editor.\n");
-      emit(state);
+      const startActions = safeNonSupabase.filter(
+        (action) => action.type === "start",
+      );
+      const explicitStart = startActions.length
+        ? startActions[startActions.length - 1].content
+        : null;
+      const startCommand = explicitStart || detectStartCommand(state);
+      if (startCommand) {
+        await verifyWebBuild(conversationId, state);
+        await startDevServer(conversationId, state, startCommand);
+      } else {
+        state.progress = "idle";
+        appendOutput(
+          state,
+          "No dev/start script found; project files are available in the editor.\n",
+        );
+        emit(state);
+      }
+    } catch (error) {
+      state.active = false;
+      state.restoreQueued = false;
+      setError(state, error);
     }
-  } catch (error) {
-    state.active = false;
-    state.restoreQueued = false;
-    setError(state, error);
-  }
   });
   state.queue = restoreTask;
   await restoreTask;
@@ -1062,12 +1316,22 @@ export async function restoreStreamingRuntime(
 const recoveringConversations = new Set<string>();
 
 /** Return from Safari background: revive the dev process, or restore persisted files. */
-export async function recoverStreamingRuntime(conversationId: string, savedActions: ArtifactAction[], forceTransportRecovery = false, nativeTarget = false) {
+export async function recoverStreamingRuntime(
+  conversationId: string,
+  savedActions: ArtifactAction[],
+  forceTransportRecovery = false,
+  nativeTarget = false,
+) {
   if (recoveringConversations.has(conversationId)) return;
   const state = getState(conversationId);
-  if (nativeTarget || state.nativeTarget || nativeTargetFromActions(savedActions)) {
+  if (
+    nativeTarget ||
+    state.nativeTarget ||
+    nativeTargetFromActions(savedActions)
+  ) {
     state.nativeTarget = true;
-    if (!Object.keys(state.files).length) await restoreStreamingRuntime(conversationId, savedActions, true);
+    if (!Object.keys(state.files).length)
+      await restoreStreamingRuntime(conversationId, savedActions, true);
     return; // Native apps have no browser preview transport to recover.
   }
   // A failed compile is not fixed by tab focus or repeated browser-worker restarts.
@@ -1076,7 +1340,12 @@ export async function recoverStreamingRuntime(conversationId: string, savedActio
   recoveringConversations.add(conversationId);
   try {
     if (!Object.keys(state.files).length) {
-      if (savedActions.length) await restoreStreamingRuntime(conversationId, savedActions, state.nativeTarget);
+      if (savedActions.length)
+        await restoreStreamingRuntime(
+          conversationId,
+          savedActions,
+          state.nativeTarget,
+        );
       return;
     }
     if (!state.previewUrl) return;
@@ -1085,27 +1354,47 @@ export async function recoverStreamingRuntime(conversationId: string, savedActio
       // A stale Vivari filesystem can hang after iOS suspends a background tab.
       const wc = await Promise.race([
         getSandbox(),
-        new Promise<never>((_, reject) => setTimeout(() => reject(new Error("Vivari did not respond after Safari resumed")), 7000)),
+        new Promise<never>((_, reject) =>
+          setTimeout(
+            () =>
+              reject(new Error("Vivari did not respond after Safari resumed")),
+            7000,
+          ),
+        ),
       ]);
       const hasManifest = await Promise.race([
         wc.fs.exists("package.json"),
-        new Promise<never>((_, reject) => setTimeout(() => reject(new Error("Vivari filesystem did not respond")), 7000)),
+        new Promise<never>((_, reject) =>
+          setTimeout(
+            () => reject(new Error("Vivari filesystem did not respond")),
+            7000,
+          ),
+        ),
       ]);
-      if (!hasManifest && state.files["package.json"]?.type === "file") throw new Error("Vivari project storage was lost");
+      if (!hasManifest && state.files["package.json"]?.type === "file")
+        throw new Error("Vivari project storage was lost");
       // Bolt-style stable preview: a responsive filesystem and an existing
       // running dev-server process are NOT grounds for a restart. Keep the
       // iframe URL, JavaScript state, scroll position, and HMR connection.
-      if (forceTransportRecovery) throw new Error("Preview Service Worker transport failed");
-      if (canReuseLivePreview({
-        previewUrl: state.previewUrl,
-        hasProcess: !!state.devProcess,
-        filesystemHealthy: !!hasManifest || state.files["package.json"]?.type !== "file",
-      })) return;
+      if (forceTransportRecovery)
+        throw new Error("Preview Service Worker transport failed");
+      if (
+        canReuseLivePreview({
+          previewUrl: state.previewUrl,
+          hasProcess: !!state.devProcess,
+          filesystemHealthy:
+            !!hasManifest || state.files["package.json"]?.type !== "file",
+        })
+      )
+        return;
       // Only a missing server (or a genuinely lost preview URL) needs a new
       // process. The process was not restarted merely because Safari focused.
       await restartStreamingRuntime(conversationId);
     } catch (error) {
-      appendOutput(state, `\nPreview transport failed; restoring saved project: ${String(error)}\n`);
+      appendOutput(
+        state,
+        `\nPreview transport failed; restoring saved project: ${String(error)}\n`,
+      );
       stopDevProcess(state);
       await rebootSandboxRuntime();
       activeConversationId = null;
@@ -1118,10 +1407,20 @@ export async function recoverStreamingRuntime(conversationId: string, savedActio
       state.processedActionsByMessage.clear();
       state.progress = "restoring";
       emit(state);
-      if (savedActions.length) await restoreStreamingRuntime(conversationId, savedActions, state.nativeTarget);
-      else throw new Error("No saved project files are available for preview restoration");
+      if (savedActions.length)
+        await restoreStreamingRuntime(
+          conversationId,
+          savedActions,
+          state.nativeTarget,
+        );
+      else
+        throw new Error(
+          "No saved project files are available for preview restoration",
+        );
     }
-  } finally { recoveringConversations.delete(conversationId); }
+  } finally {
+    recoveringConversations.delete(conversationId);
+  }
 }
 
 export async function restartStreamingRuntime(conversationId: string) {
@@ -1132,7 +1431,10 @@ export async function restartStreamingRuntime(conversationId: string) {
     await ensureExpoStarter(conversationId, state);
     state.progress = "ready";
     state.error = null;
-    appendOutput(state, "Expo source ready. Use Device Preview to reconnect to Metro.\n");
+    appendOutput(
+      state,
+      "Expo source ready. Use Device Preview to reconnect to Metro.\n",
+    );
     emit(state);
     return;
   }
@@ -1153,7 +1455,8 @@ export async function restartStreamingRuntime(conversationId: string) {
     await verifyWebBuild(conversationId, state);
 
     const startCommand = state.startCommand || detectStartCommand(state);
-    if (!startCommand) throw new Error("No dev/start script found in package.json");
+    if (!startCommand)
+      throw new Error("No dev/start script found in package.json");
     await startDevServer(conversationId, state, startCommand);
   } catch (error) {
     setError(state, error);
@@ -1164,7 +1467,9 @@ export async function restartStreamingRuntime(conversationId: string) {
 export async function refreshStreamingRuntimeLogs(conversationId: string) {
   const state = getState(conversationId);
   const diagnostics = [
-    state.nativeTarget ? "--- Expo cloud preview diagnostics ---" : "--- Cryzo runtime diagnostics (Vivari) ---",
+    state.nativeTarget
+      ? "--- Expo cloud preview diagnostics ---"
+      : "--- Cryzo runtime diagnostics (Vivari) ---",
     `Conversation: ${conversationId}`,
     `Cross-origin isolated: ${typeof window !== "undefined" ? window.crossOriginIsolated : "unknown"}`,
     `Preview URL: ${state.previewUrl || "not ready"}`,
@@ -1179,7 +1484,9 @@ export async function buildStreamingRuntime(conversationId: string) {
   const state = getState(conversationId);
   await state.queue;
   if (!shouldUseVivari(state.nativeTarget, state.files))
-    throw new Error("Native Expo apps are built by Expo/EAS, not the web Vite build. Open Device Preview or Mobile Publish.");
+    throw new Error(
+      "Native Expo apps are built by Expo/EAS, not the web Vite build. Open Device Preview or Mobile Publish.",
+    );
   const wc = await ensureContainer(conversationId, state);
   await syncSupabaseRuntime(conversationId).catch(() => false);
   await ensureDependencies(conversationId, state);
@@ -1193,7 +1500,8 @@ export async function buildStreamingRuntime(conversationId: string) {
     const pkg = JSON.parse(packageJson) as { scripts?: Record<string, string> };
     if (!pkg.scripts?.build) throw new Error("Project has no npm build script");
   } catch (error) {
-    if (error instanceof SyntaxError) throw new Error("Project package.json is invalid");
+    if (error instanceof SyntaxError)
+      throw new Error("Project package.json is invalid");
     throw error;
   }
 
@@ -1205,7 +1513,8 @@ export async function buildStreamingRuntime(conversationId: string) {
     appendOutput(state, data);
     emit(state);
   });
-  if (exitCode !== 0) throw new Error(`npm run build exited with code ${exitCode}`);
+  if (exitCode !== 0)
+    throw new Error(`npm run build exited with code ${exitCode}`);
 
   let outputDir: string | null = null;
   for (const candidate of ["dist", "build", "out"]) {
@@ -1215,14 +1524,17 @@ export async function buildStreamingRuntime(conversationId: string) {
     }
   }
   if (!outputDir) {
-    throw new Error("Build completed but no dist, build, or out directory was found");
+    throw new Error(
+      "Build completed but no dist, build, or out directory was found",
+    );
   }
 
   const files = await collectDirectoryFiles(wc, outputDir, {
     maxFiles: 500,
     maxBytes: 15_000_000,
   });
-  if (files.length === 0) throw new Error("The build produced no publishable files");
+  if (files.length === 0)
+    throw new Error("The build produced no publishable files");
   return { files, output: buildOutput };
 }
 

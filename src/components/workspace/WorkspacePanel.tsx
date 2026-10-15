@@ -1,6 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import {
+  useEffect,
+  useState,
+  useCallback,
+  useImperativeHandle,
+  type Ref,
+} from "react";
 import { useQuery } from "convex/react";
 import { api } from "../../../convex/_generated/api";
 import { Panel, Group, Separator } from "react-resizable-panels";
@@ -29,7 +35,11 @@ import { LivePreview, type ElementInfo } from "./LivePreview";
 import { WorkspaceTerminal } from "./WorkspaceTerminal";
 import { PublishControls } from "./PublishControls";
 import { WorkspaceDashboard } from "./WorkspaceDashboard";
-import { ExpoDevicePreview, NativeExpoPreview, useExpoPreview } from "./ExpoDevicePreview";
+import {
+  ExpoDevicePreview,
+  NativeExpoPreview,
+  useExpoPreview,
+} from "./ExpoDevicePreview";
 import { hasNativeSource } from "@/lib/workspace/native-target";
 import { Id } from "../../../convex/_generated/dataModel";
 
@@ -42,11 +52,14 @@ export type WorkspaceStatus = {
   previewUrl: string | null | undefined;
 };
 
+export type WorkspacePreviewControls = { showPreview: () => void };
+
 export function WorkspacePanel({
   conversationId,
   onElementSelected,
   onStatusChange,
   onBackToChat,
+  previewControlRef,
   mobile = false,
 }: {
   conversationId: Id<"conversations">;
@@ -54,10 +67,21 @@ export function WorkspacePanel({
   onStatusChange?: (status: WorkspaceStatus) => void;
   onBackToChat?: () => void;
   mobile?: boolean;
+  previewControlRef?: Ref<WorkspacePreviewControls>;
 }) {
   const conversation = useQuery(api.conversations.get, { id: conversationId });
   const [viewMode, setViewMode] = useState<ViewMode>("preview");
   const [mobilePanel, setMobilePanel] = useState<MobilePanel>("preview");
+  const backToPreview = useCallback(() => {
+    setViewMode("preview");
+    setMobilePanel("preview");
+  }, []);
+  useImperativeHandle(
+    previewControlRef,
+    () => ({ showPreview: backToPreview }),
+    [backToPreview],
+  );
+
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [refreshToken, setRefreshToken] = useState(0);
   const [showErrorLogs, setShowErrorLogs] = useState(false);
@@ -77,8 +101,18 @@ export function WorkspacePanel({
     setSelectedFile,
     saveFile,
   } = useWorkspace(conversationId);
-  const nativeProject = Boolean(conversation?.projectPlatforms?.some((platform) => platform === "ios" || platform === "android")) || hasNativeSource(files);
-  const expoPreview = useExpoPreview(conversationId, files, progress === "ready", nativeProject);
+  const nativeProject =
+    Boolean(
+      conversation?.projectPlatforms?.some(
+        (platform) => platform === "ios" || platform === "android",
+      ),
+    ) || hasNativeSource(files);
+  const expoPreview = useExpoPreview(
+    conversationId,
+    files,
+    progress === "ready",
+    nativeProject,
+  );
 
   useEffect(() => {
     onStatusChange?.({
@@ -95,30 +129,45 @@ export function WorkspacePanel({
   useEffect(() => {
     if (!mobile) return;
     const handlePanel = (event: Event) => {
-      const requested = (event as CustomEvent<{ panel?: MobilePanel }>).detail?.panel;
-      if (requested === "preview" || requested === "code" || requested === "files" || requested === "dashboard") {
+      const requested = (event as CustomEvent<{ panel?: MobilePanel }>).detail
+        ?.panel;
+      if (
+        requested === "preview" ||
+        requested === "code" ||
+        requested === "files" ||
+        requested === "dashboard"
+      ) {
         setMobilePanel(requested);
       }
     };
     window.addEventListener("cryzo:workspace-panel", handlePanel);
-    return () => window.removeEventListener("cryzo:workspace-panel", handlePanel);
+    return () =>
+      window.removeEventListener("cryzo:workspace-panel", handlePanel);
   }, [mobile]);
 
   const requestBackend = () => {
     onBackToChat?.();
     // On phones, ChatArea may mount only after the preview closes.
-    window.setTimeout(() => {
-      window.dispatchEvent(new CustomEvent("cryzo:prefill-project-prompt", {
-        detail: {
-          conversationId: String(conversationId),
-          text: "Create or repair this app's Cryzo Cloud database FIRST. Infer its real business domain from my project and conversation, create the necessary persistent tables with appropriate access policies and realistic example records, verify the rows are available in the Data dashboard, and connect the existing UI to that actual data. Preserve my existing website and do not introduce unrelated data models.",
-        },
-      }));
-    }, onBackToChat ? 150 : 0);
+    window.setTimeout(
+      () => {
+        window.dispatchEvent(
+          new CustomEvent("cryzo:prefill-project-prompt", {
+            detail: {
+              conversationId: String(conversationId),
+              text: "Create or repair this app's Cryzo Cloud database FIRST. Infer its real business domain from my project and conversation, create the necessary persistent tables with appropriate access policies and realistic example records, verify the rows are available in the Data dashboard, and connect the existing UI to that actual data. Preserve my existing website and do not introduce unrelated data models.",
+            },
+          }),
+        );
+      },
+      onBackToChat ? 150 : 0,
+    );
   };
-  const selectedContent = selectedFile ? files[selectedFile]?.content || "" : "";
+  const selectedContent = selectedFile
+    ? files[selectedFile]?.content || ""
+    : "";
   const dirty = Boolean(selectedFile && draftContent !== selectedContent);
-  const errorSummary = error?.split("\n")[0] || "The preview server could not start.";
+  const errorSummary =
+    error?.split("\n")[0] || "The preview server could not start.";
 
   useEffect(() => {
     setDraftContent(selectedContent);
@@ -133,7 +182,11 @@ export function WorkspacePanel({
       const saved = await saveFile(selectedFile, draftContent);
       setDraftContent(saved.content);
     } catch (saveFailure) {
-      setSaveError(saveFailure instanceof Error ? saveFailure.message : "Unable to save file");
+      setSaveError(
+        saveFailure instanceof Error
+          ? saveFailure.message
+          : "Unable to save file",
+      );
     } finally {
       setSavingFile(false);
     }
@@ -171,8 +224,12 @@ export function WorkspacePanel({
       <div className="flex h-12 w-12 items-center justify-center rounded-full bg-red-500/10 text-red-400">
         <AlertCircle size={24} />
       </div>
-      <h3 className="mt-4 text-lg font-semibold">Preview couldn&apos;t start</h3>
-      <p className="mt-2 max-w-md text-sm leading-6 text-zinc-400">{errorSummary}</p>
+      <h3 className="mt-4 text-lg font-semibold">
+        Preview couldn&apos;t start
+      </h3>
+      <p className="mt-2 max-w-md text-sm leading-6 text-zinc-400">
+        {errorSummary}
+      </p>
       <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
         <button
           type="button"
@@ -228,11 +285,26 @@ export function WorkspacePanel({
       }, 120);
     };
 
+    const mobilePreviewContent = nativeProject ? (
+      <NativeExpoPreview preview={expoPreview} />
+    ) : isBooting || !previewUrl || error ? (
+      loadingContent
+    ) : (
+      <LivePreview
+        url={previewUrl}
+        isBooting={isBooting}
+        progress={progress}
+        mobile
+        refreshToken={refreshToken}
+      />
+    );
+
     const mobileWorkspaceContent =
       mobilePanel === "dashboard" ? (
         <WorkspaceDashboard
           conversationId={conversationId}
           onOpenCode={() => setMobilePanel("files")}
+          onBackToPreview={backToPreview}
           onRequestBackend={requestBackend}
         />
       ) : mobilePanel === "files" ? (
@@ -300,7 +372,11 @@ export function WorkspacePanel({
                 disabled={!dirty || savingFile}
                 className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-white px-2.5 text-xs font-semibold text-black disabled:opacity-30"
               >
-                {savingFile ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
+                {savingFile ? (
+                  <Loader2 size={13} className="animate-spin" />
+                ) : (
+                  <Save size={13} />
+                )}
                 Save
               </button>
             </div>
@@ -325,23 +401,16 @@ export function WorkspacePanel({
             )}
           </div>
         </div>
-      ) : nativeProject ? (
-        <NativeExpoPreview preview={expoPreview} />
-      ) : isBooting || !previewUrl || error ? (
-        loadingContent
-      ) : (
-        <LivePreview
-          url={previewUrl}
-          isBooting={isBooting}
-          progress={progress}
-          mobile
-          refreshToken={refreshToken}
-        />
-      );
+      ) : null;
 
     return (
       <div className="flex h-full min-h-0 flex-col overflow-hidden bg-zinc-950">
-        <div className="min-h-0 flex-1 overflow-hidden">{mobileWorkspaceContent}</div>
+        <div className="min-h-0 flex-1 overflow-hidden">
+          <div className={mobilePanel === "preview" ? "h-full" : "hidden"}>
+            {mobilePreviewContent}
+          </div>
+          {mobilePanel !== "preview" && mobileWorkspaceContent}
+        </div>
 
         <div className="relative z-40 shrink-0 border-t border-zinc-200 bg-[#fafafa] px-4 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-3 text-black">
           {mobileMenuOpen && (
@@ -428,7 +497,9 @@ export function WorkspacePanel({
               <MoreHorizontal size={23} />
             </button>
 
-            {nativeProject && <ExpoDevicePreview preview={expoPreview} compact />}
+            {nativeProject && (
+              <ExpoDevicePreview preview={expoPreview} compact />
+            )}
             <PublishControls
               files={files}
               conversationId={conversationId}
@@ -517,73 +588,95 @@ export function WorkspacePanel({
         </div>
       </div>
 
-      {viewMode === "preview" ? (
-        <div className="flex-1 overflow-hidden">{previewContent}</div>
-      ) : (
-        <WorkspaceDashboard conversationId={conversationId} onRequestBackend={requestBackend}>
-        <Group orientation="vertical" className="flex-1">
-          <Panel defaultSize={65} minSize={30}>
-            <div className="flex h-full">
-              <div className="w-48 overflow-hidden border-r border-zinc-800">
-                <FileTree
-                  files={files}
-                  selectedFile={selectedFile}
-                  onSelect={setSelectedFile}
-                />
-              </div>
-              <div className="flex-1 overflow-hidden">
-                {selectedFile ? (
-                  <div className="flex h-full flex-col">
-                    <div className="flex min-h-10 items-center gap-2 border-b border-zinc-800 px-3 text-xs text-zinc-500">
-                      <span className="min-w-0 flex-1 truncate">{selectedFile}</span>
-                      {dirty && <span className="text-amber-400">Unsaved</span>}
-                      <button
-                        type="button"
-                        onClick={discardSelectedFile}
-                        disabled={!dirty || savingFile}
-                        className="inline-flex h-7 items-center gap-1 rounded-md border border-zinc-800 px-2 text-[11px] text-zinc-300 disabled:opacity-30"
-                      >
-                        <RotateCcw size={11} /> Discard
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => void saveSelectedFile()}
-                        disabled={!dirty || savingFile}
-                        className="inline-flex h-7 items-center gap-1 rounded-md bg-white px-2 text-[11px] font-semibold text-black disabled:opacity-30"
-                      >
-                        {savingFile ? <Loader2 size={11} className="animate-spin" /> : <Save size={11} />}
-                        Save
-                      </button>
-                    </div>
-                    {saveError && (
-                      <div className="border-b border-red-950 bg-red-950/20 px-3 py-1.5 text-[11px] text-red-300">
-                        {saveError}
+      <div
+        className={viewMode === "preview" ? "flex-1 overflow-hidden" : "hidden"}
+      >
+        {previewContent}
+      </div>
+      {viewMode === "dashboard" && (
+        <WorkspaceDashboard
+          conversationId={conversationId}
+          onBackToPreview={backToPreview}
+          onRequestBackend={requestBackend}
+        >
+          <Group orientation="vertical" className="flex-1">
+            <Panel defaultSize={65} minSize={30}>
+              <div className="flex h-full">
+                <div className="w-48 overflow-hidden border-r border-zinc-800">
+                  <FileTree
+                    files={files}
+                    selectedFile={selectedFile}
+                    onSelect={setSelectedFile}
+                  />
+                </div>
+                <div className="flex-1 overflow-hidden">
+                  {selectedFile ? (
+                    <div className="flex h-full flex-col">
+                      <div className="flex min-h-10 items-center gap-2 border-b border-zinc-800 px-3 text-xs text-zinc-500">
+                        <span className="min-w-0 flex-1 truncate">
+                          {selectedFile}
+                        </span>
+                        {dirty && (
+                          <span className="text-amber-400">Unsaved</span>
+                        )}
+                        <button
+                          type="button"
+                          onClick={discardSelectedFile}
+                          disabled={!dirty || savingFile}
+                          className="inline-flex h-7 items-center gap-1 rounded-md border border-zinc-800 px-2 text-[11px] text-zinc-300 disabled:opacity-30"
+                        >
+                          <RotateCcw size={11} /> Discard
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void saveSelectedFile()}
+                          disabled={!dirty || savingFile}
+                          className="inline-flex h-7 items-center gap-1 rounded-md bg-white px-2 text-[11px] font-semibold text-black disabled:opacity-30"
+                        >
+                          {savingFile ? (
+                            <Loader2 size={11} className="animate-spin" />
+                          ) : (
+                            <Save size={11} />
+                          )}
+                          Save
+                        </button>
                       </div>
-                    )}
-                    <div className="flex-1 overflow-hidden">
-                      <CodeEditor
-                        filePath={selectedFile}
-                        content={draftContent}
-                        editable
-                        onChange={setDraftContent}
-                      />
+                      {saveError && (
+                        <div className="border-b border-red-950 bg-red-950/20 px-3 py-1.5 text-[11px] text-red-300">
+                          {saveError}
+                        </div>
+                      )}
+                      <div className="flex-1 overflow-hidden">
+                        <CodeEditor
+                          filePath={selectedFile}
+                          content={draftContent}
+                          editable
+                          onChange={setDraftContent}
+                        />
+                      </div>
                     </div>
-                  </div>
-                ) : (
-                  <div className="flex h-full items-center justify-center text-xs text-zinc-500">
-                    Select a file
-                  </div>
-                )}
+                  ) : (
+                    <div className="flex h-full items-center justify-center text-xs text-zinc-500">
+                      Select a file
+                    </div>
+                  )}
+                </div>
               </div>
-            </div>
-          </Panel>
+            </Panel>
 
-          <Separator className="h-1 cursor-row-resize bg-zinc-800 hover:bg-zinc-700" />
+            <Separator className="h-1 cursor-row-resize bg-zinc-800 hover:bg-zinc-700" />
 
-          <Panel defaultSize={35} minSize={10} collapsible>
-            <WorkspaceTerminal output={terminalOutput + (expoPreview.data?.output ? "\n[Expo]\n" + expoPreview.data.output : "")} />
-          </Panel>
-        </Group>
+            <Panel defaultSize={35} minSize={10} collapsible>
+              <WorkspaceTerminal
+                output={
+                  terminalOutput +
+                  (expoPreview.data?.output
+                    ? "\n[Expo]\n" + expoPreview.data.output
+                    : "")
+                }
+              />
+            </Panel>
+          </Group>
         </WorkspaceDashboard>
       )}
     </div>

@@ -71,7 +71,10 @@ function localMessageId(prefix: string) {
     : `${prefix}-${Date.now()}-${Math.random()}`;
 }
 
-function localBuildNeedsContinuation(text: string, finishReason?: string | null) {
+function localBuildNeedsContinuation(
+  text: string,
+  finishReason?: string | null,
+) {
   const artifactOpen = text.lastIndexOf("<cryzoArtifact");
   const artifactClose = text.lastIndexOf("</cryzoArtifact>");
   const actionOpenCount = text.match(/<cryzoAction\b/g)?.length ?? 0;
@@ -108,11 +111,15 @@ export function ChatArea({
   const [input, setInput] = useState("");
   useEffect(() => {
     const onPrefill = (event: Event) => {
-      const detail = (event as CustomEvent<{ conversationId?: string; text?: string }>).detail;
-      if (detail?.conversationId === String(conversationId) && detail.text) setInput(detail.text);
+      const detail = (
+        event as CustomEvent<{ conversationId?: string; text?: string }>
+      ).detail;
+      if (detail?.conversationId === String(conversationId) && detail.text)
+        setInput(detail.text);
     };
     window.addEventListener("cryzo:prefill-project-prompt", onPrefill);
-    return () => window.removeEventListener("cryzo:prefill-project-prompt", onPrefill);
+    return () =>
+      window.removeEventListener("cryzo:prefill-project-prompt", onPrefill);
   }, [conversationId]);
 
   const [localLoading, setLocalLoading] = useState(false);
@@ -130,16 +137,29 @@ export function ChatArea({
     useChatHistory(userId, conversationId);
   const generationJob = useQuery(api.generationJobs.latest, { conversationId });
   const createArtifact = useMutation(api.artifacts.create);
-  const updateProjectPlatforms = useMutation(api.conversations.updateProjectPlatforms);
+  const updateProjectPlatforms = useMutation(
+    api.conversations.updateProjectPlatforms,
+  );
   const updateChatMode = useMutation(api.conversations.updateChatMode);
   const updateModel = useMutation(api.conversations.updateModel);
   const savedArtifactsRef = useRef<Set<string>>(new Set());
   const liveMessageIdsRef = useRef<Set<string>>(new Set());
   const openedStreamingMessagesRef = useRef<Set<string>>(new Set());
   const repairAttemptsRef = useRef({ conversationId, count: 0 });
-  const [pendingProjectRepair, setPendingProjectRepair] = useState<string | null>(null);
+  const [pendingProjectRepair, setPendingProjectRepair] = useState<
+    string | null
+  >(null);
 
-  const { messages, setMessages, sendMessage, regenerate, stop, status, error } = useChat({
+  const {
+    messages,
+    setMessages,
+    sendMessage,
+    regenerate,
+    stop,
+    status,
+    error,
+    clearError,
+  } = useChat({
     id: conversationId,
     transport: new DefaultChatTransport({
       api: "/api/chat",
@@ -154,22 +174,38 @@ export function ChatArea({
   const chatMode =
     optimisticMode?.conversationId === conversationId
       ? optimisticMode.mode
-      : conversation?.chatMode ?? "build";
+      : (conversation?.chatMode ?? "build");
 
   // Existing chats created while project selection defaulted to web can have
   // native source yet web metadata. Repair only when their ORIGINAL request
   // unambiguously asked for a mobile app; never reinterpret ordinary websites.
   useEffect(() => {
-    if (!conversation || !loadedMessages?.length ||
-        !conversation.projectPlatforms?.includes("web")) return;
-    const firstPrompt = loadedMessages.find(m => m.role === "user");
+    if (
+      !conversation ||
+      !loadedMessages?.length ||
+      !conversation.projectPlatforms?.includes("web")
+    )
+      return;
+    const firstPrompt = loadedMessages.find((m) => m.role === "user");
     if (!firstPrompt) return;
     const text = textFromMessage(firstPrompt);
-    if (!/\b(mobile app|phone app|native app|react native|expo|ios app|android app|iphone app)\b/i.test(text)) return;
+    if (
+      !/\b(mobile app|phone app|native app|react native|expo|ios app|android app|iphone app)\b/i.test(
+        text,
+      )
+    )
+      return;
     const inferred = inferProjectPlatforms(text);
     if (inferred.includes("web")) return;
-    void updateProjectPlatforms({ id: conversationId, projectPlatforms: inferred }).catch((error) =>
-      console.warn("Could not restore the original native project target", error));
+    void updateProjectPlatforms({
+      id: conversationId,
+      projectPlatforms: inferred,
+    }).catch((error) =>
+      console.warn(
+        "Could not restore the original native project target",
+        error,
+      ),
+    );
   }, [conversation, loadedMessages, conversationId, updateProjectPlatforms]);
 
   const modelSelection: ModelSelection =
@@ -270,21 +306,56 @@ export function ChatArea({
   // Recover the most recent job by its originating user-message ID; never
   // replay another conversation's text or duplicate a completed assistant.
   useEffect(() => {
-    if (!loadedRef.current || !generationJob?.text || status === "streaming" || status === "submitted" || localLoading) return;
+    if (
+      !loadedRef.current ||
+      !generationJob?.text ||
+      (!generationJob.taskId &&
+        (status === "streaming" || status === "submitted")) ||
+      localLoading
+    )
+      return;
     const current = messagesRef.current;
     const lastUserIndex = current.findLastIndex((m) => m.role === "user");
-    if (lastUserIndex < 0 || current[lastUserIndex]?.id !== generationJob.promptId) return;
-    const existing = current.slice(lastUserIndex + 1).find((m) => m.role === "assistant");
-    if (existing && textFromMessage(existing).length >= generationJob.text.length) return;
+    if (
+      lastUserIndex < 0 ||
+      current[lastUserIndex]?.id !== generationJob.promptId
+    )
+      return;
+    const existing = current
+      .slice(lastUserIndex + 1)
+      .find((m) => m.role === "assistant");
+    if (
+      existing &&
+      (textFromMessage(existing).length > generationJob.text.length ||
+        (textFromMessage(existing).length === generationJob.text.length &&
+          JSON.stringify(existing.parts.filter((p) => p.type !== "text")) ===
+            (generationJob.partsJson || "[]")))
+    )
+      return;
     const recoveredId = existing?.id || `recovered:${generationJob._id}`;
     liveMessageIdsRef.current.add(recoveredId);
     setMessages((previous) => {
       const idx = previous.findIndex((m) => m.id === recoveredId);
-      const message: UIMessage = { id: recoveredId, role: "assistant", parts: [{ type: "text", text: generationJob.text }] };
-      if (idx >= 0) return previous.map((m, n) => n === idx ? message : m);
+      const message: UIMessage = {
+        id: recoveredId,
+        role: "assistant",
+        parts: [
+          { type: "text", text: generationJob.text },
+          ...JSON.parse(generationJob.partsJson || "[]"),
+        ],
+      };
+      if (idx >= 0) return previous.map((m, n) => (n === idx ? message : m));
       return [...previous, message];
     });
-  }, [generationJob?._id, generationJob?.text, generationJob?.promptId, status, localLoading, setMessages]);
+  }, [
+    generationJob?._id,
+    generationJob?.text,
+    generationJob?.partsJson,
+    generationJob?.promptId,
+    status,
+    localLoading,
+    setMessages,
+  ]);
 
   // Feed the currently-generated assistant message directly into the browser
   // runtime. This intentionally bypasses the Convex persistence round-trip for
@@ -301,9 +372,13 @@ export function ChatArea({
 
     if (!liveMessageIdsRef.current.has(latestAssistant.id)) return;
 
-    const currentUserIntent = [...messages].reverse().find((message) => message.role === "user")
-      ?.parts?.filter((part) => part.type === "text")
-      .map((part) => part.text).join("\n") || "";
+    const currentUserIntent =
+      [...messages]
+        .reverse()
+        .find((message) => message.role === "user")
+        ?.parts?.filter((part) => part.type === "text")
+        .map((part) => part.text)
+        .join("\n") || "";
     let hasStreamingArtifact = false;
     for (const part of latestAssistant.parts ?? []) {
       if (part.type !== "text") continue;
@@ -366,8 +441,16 @@ export function ChatArea({
     (selection: ModelSelection) => {
       // Preserve each model's own preferred effort across switches.
       const key = `${selection.providerId}:${selection.modelId}`;
-      const effort = selection.reasoningEffort ?? (conversation?.modelReasoningPreferences?.[key] as ModelSelection["reasoningEffort"]) ?? "default";
-      setOptimisticModel({ conversationId, selection: { ...selection, reasoningEffort: effort } });
+      const effort =
+        selection.reasoningEffort ??
+        (conversation?.modelReasoningPreferences?.[
+          key
+        ] as ModelSelection["reasoningEffort"]) ??
+        "default";
+      setOptimisticModel({
+        conversationId,
+        selection: { ...selection, reasoningEffort: effort },
+      });
       updateModel({
         id: conversationId,
         providerId: selection.providerId,
@@ -422,8 +505,7 @@ export function ChatArea({
 
       const history = messagesRef.current
         .filter(
-          (message) =>
-            message.role === "user" || message.role === "assistant",
+          (message) => message.role === "user" || message.role === "assistant",
         )
         .map((message) => ({
           role: message.role,
@@ -575,7 +657,9 @@ export function ChatArea({
       } catch (error) {
         if (!(error instanceof DOMException && error.name === "AbortError")) {
           setLocalError(
-            error instanceof Error ? error.message : "Local model request failed",
+            error instanceof Error
+              ? error.message
+              : "Local model request failed",
           );
         }
       } finally {
@@ -592,17 +676,42 @@ export function ChatArea({
     ],
   );
 
-  const requestBody = useCallback((mode: ChatMode) => {
-    const selection = modelSelection;
-    return {
-      chatMode: mode, modelProvider: selection.providerId, modelId: selection.modelId,
-      modelCredentialMode: selection.credentialMode, reasoningEffort: selection.reasoningEffort || "default",
-      modelBaseUrl: readRuntimeProviderBaseURL(selection.providerId) || selection.baseURL,
-      modelApiKey: selection.credentialMode === "device" ? readRuntimeProviderKey(selection.providerId) : undefined,
-      authToken: selection.credentialMode === "account" ? authToken : undefined,
-      convexAuthToken: authToken || undefined,
-    };
-  }, [modelSelection, authToken]);
+  const requestBody = useCallback(
+    (mode: ChatMode) => {
+      const selection = modelSelection;
+      return {
+        chatMode: mode,
+        modelProvider: selection.providerId,
+        modelId: selection.modelId,
+        modelCredentialMode: selection.credentialMode,
+        reasoningEffort: selection.reasoningEffort || "default",
+        modelBaseUrl:
+          readRuntimeProviderBaseURL(selection.providerId) || selection.baseURL,
+        modelApiKey:
+          selection.credentialMode === "device"
+            ? readRuntimeProviderKey(selection.providerId)
+            : undefined,
+        authToken:
+          selection.credentialMode === "account" ? authToken : undefined,
+        convexAuthToken: authToken || undefined,
+      };
+    },
+    [modelSelection, authToken],
+  );
+  const currentPromptId = [...messages]
+    .reverse()
+    .find((m) => m.role === "user")?.id;
+  const currentJob =
+    generationJob?.promptId === currentPromptId ? generationJob : null;
+  useEffect(() => {
+    if (currentJob && currentJob.status !== "running") {
+      if (status === "streaming" || status === "submitted") stop();
+      if (currentJob.status === "complete") {
+        clearError();
+        setLocalError(null);
+      }
+    }
+  }, [currentJob?.status, status, stop, clearError]);
   const errorInfo = builderError(localError || error?.message || "");
 
   const sendPreparedMessage = useCallback(
@@ -636,18 +745,30 @@ export function ChatArea({
     repairAttemptsRef.current = { conversationId, count: 0 };
     setPendingProjectRepair(null);
     const onRepair = (event: Event) => {
-      const detail = (event as CustomEvent<{ conversationId: string; message: string }>).detail;
+      const detail = (
+        event as CustomEvent<{ conversationId: string; message: string }>
+      ).detail;
       if (!detail || detail.conversationId !== String(conversationId)) return;
       if (repairAttemptsRef.current.count >= 2) return;
       setPendingProjectRepair(detail.message.slice(0, 3500));
     };
     window.addEventListener("cryzo:project-repair-needed", onRepair);
-    return () => window.removeEventListener("cryzo:project-repair-needed", onRepair);
+    return () =>
+      window.removeEventListener("cryzo:project-repair-needed", onRepair);
   }, [conversationId]);
 
   useEffect(() => {
-    if (!pendingProjectRepair || status === "streaming" || status === "submitted" || localLoading) return;
-    if (repairAttemptsRef.current.count >= 2) { setPendingProjectRepair(null); return; }
+    if (
+      !pendingProjectRepair ||
+      status === "streaming" ||
+      status === "submitted" ||
+      localLoading
+    )
+      return;
+    if (repairAttemptsRef.current.count >= 2) {
+      setPendingProjectRepair(null);
+      return;
+    }
     repairAttemptsRef.current.count += 1;
     const attempt = repairAttemptsRef.current.count;
     const diagnostic = pendingProjectRepair;
@@ -656,7 +777,9 @@ export function ChatArea({
       `Automatic project repair (attempt ${attempt} of 2). The generated application failed validation:\n\n${diagnostic}\n\nFix the underlying cause by inspecting the affected files, dependencies, and imports. Preserve existing application behavior. Emit only complete changed file actions; update package.json when needed. Do not invent package names. Finish with npm install only when dependencies change, and a correct start action.`,
       [],
       "build",
-    ).catch((reason) => setLocalError(reason instanceof Error ? reason.message : String(reason)));
+    ).catch((reason) =>
+      setLocalError(reason instanceof Error ? reason.message : String(reason)),
+    );
   }, [pendingProjectRepair, status, localLoading, sendPreparedMessage]);
 
   const handleSend = async (files: File[] = []) => {
@@ -681,14 +804,27 @@ export function ChatArea({
   };
 
   const isLoading =
-    status === "streaming" || status === "submitted" || localLoading;
+    status === "streaming" ||
+    status === "submitted" ||
+    localLoading ||
+    currentJob?.status === "running";
   const initialMessageSentRef = useRef(false);
 
   const stopAll = useCallback(() => {
     localAbortRef.current?.abort();
     setLocalLoading(false);
     stop();
-  }, [stop]);
+    if (currentJob?.taskId && authToken)
+      void fetch(`/api/tasks/${currentJob.taskId}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${authToken}` },
+      })
+        .then(async (response) => {
+          if (!response.ok)
+            throw new Error("Unable to stop the build. Please retry.");
+        })
+        .catch((reason) => setLocalError(reason.message));
+  }, [stop, currentJob?.taskId, authToken]);
 
   useEffect(() => {
     if (initialMessageSentRef.current) return;
@@ -799,18 +935,21 @@ export function ChatArea({
                                         id: "build",
                                         title:
                                           streamingTitle || "Building project",
-                                        description: "Generating your application",
+                                        description:
+                                          "Generating your application",
                                         status: "in-progress",
                                         priority: "high",
                                         level: 0,
                                         dependencies: [],
-                                        subtasks: streamingFiles.map((f, fi) => ({
-                                          id: `file-${fi}`,
-                                          title: f,
-                                          description: `Writing ${f}`,
-                                          status: "completed",
-                                          priority: "medium",
-                                        })),
+                                        subtasks: streamingFiles.map(
+                                          (f, fi) => ({
+                                            id: `file-${fi}`,
+                                            title: f,
+                                            description: `Writing ${f}`,
+                                            status: "completed",
+                                            priority: "medium",
+                                          }),
+                                        ),
                                       },
                                     ]}
                                   />
@@ -861,6 +1000,9 @@ export function ChatArea({
               )}
 
               {(error || localError) &&
+                !currentJob?.taskId &&
+                currentJob?.status !== "running" &&
+                currentJob?.status !== "complete" &&
                 (error?.message?.includes("no_credits") ||
                 error?.message?.includes("402") ? (
                   <div className="rounded-xl border border-yellow-800 bg-yellow-900/20 px-4 py-3 text-sm text-yellow-300">
@@ -878,11 +1020,33 @@ export function ChatArea({
                 ) : (
                   <div className="rounded-xl border border-red-800 bg-red-900/20 px-4 py-3 text-sm text-red-400">
                     <p>{errorInfo.message}</p>
-                    {errorInfo.requestId && <details className="mt-2 text-xs text-red-300"><summary>Details</summary>Request ID: {errorInfo.requestId}</details>}
-                    {errorInfo.retryable && <button type="button" disabled={isLoading} onClick={() => {
-                      setLocalError("");
-                      void regenerate({ body: requestBody(chatMode) }).catch(reason => setLocalError(reason instanceof Error ? reason.message : "Retry failed."));
-                    }} className="mt-3 rounded-lg border border-red-600 px-3 py-1.5 text-xs text-white disabled:opacity-40">Retry request</button>}
+                    {errorInfo.requestId && (
+                      <details className="mt-2 text-xs text-red-300">
+                        <summary>Details</summary>Request ID:{" "}
+                        {errorInfo.requestId}
+                      </details>
+                    )}
+                    {errorInfo.retryable && (
+                      <button
+                        type="button"
+                        disabled={isLoading}
+                        onClick={() => {
+                          setLocalError("");
+                          void regenerate({
+                            body: requestBody(chatMode),
+                          }).catch((reason) =>
+                            setLocalError(
+                              reason instanceof Error
+                                ? reason.message
+                                : "Retry failed.",
+                            ),
+                          );
+                        }}
+                        className="mt-3 rounded-lg border border-red-600 px-3 py-1.5 text-xs text-white disabled:opacity-40"
+                      >
+                        Retry request
+                      </button>
+                    )}
                   </div>
                 ))}
 
@@ -903,14 +1067,31 @@ export function ChatArea({
               </button>
             </div>
           )}
-          {generationJob?.status === "running" && status !== "streaming" && status !== "submitted" && (
-            <div role="status" className="mx-3 mb-2 rounded-lg bg-blue-950/40 px-3 py-2 text-xs text-blue-200">
-              AI generation is continuing on the server. Restoring progress from Cryzo Cloud…
-            </div>
-          )}
-          {generationJob?.status === "failed" && (
-            <div role="alert" className="mx-3 mb-2 rounded-lg bg-red-950/40 px-3 py-2 text-xs text-red-200">
-              Background generation stopped: {generationJob.error || "Unknown model error"}. You can retry the request.
+          {currentJob?.status === "running" &&
+            status !== "streaming" &&
+            status !== "submitted" && (
+              <div
+                role="status"
+                className="mx-3 mb-2 rounded-lg bg-blue-950/40 px-3 py-2 text-xs text-blue-200"
+              >
+                AI generation is continuing on the server. Restoring progress
+                from Cryzo Cloud…
+              </div>
+            )}
+          {currentJob?.status === "failed" && (
+            <div
+              role="alert"
+              className="mx-3 mb-2 rounded-lg bg-red-950/40 px-3 py-2 text-xs text-red-200"
+            >
+              {currentJob.error ||
+                "The build stopped. Saved files are preserved; retry to continue."}
+              <button
+                type="button"
+                onClick={() => void regenerate({ body: requestBody(chatMode) })}
+                className="ml-2 underline"
+              >
+                Retry build
+              </button>
             </div>
           )}
           <ChatInput

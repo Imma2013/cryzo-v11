@@ -19,21 +19,21 @@ function cleanConversationTitle(text: string) {
 
 export function useChatHistory(
   userId: Id<"users"> | null,
-  conversationId?: Id<"conversations">
+  conversationId?: Id<"conversations">,
 ) {
   const conversations = useQuery(
     api.conversations.list,
-    userId ? { userId } : "skip"
+    userId ? { userId } : "skip",
   );
 
   const rawMessages = useQuery(
     api.messages.list,
-    conversationId ? { conversationId } : "skip"
+    conversationId ? { conversationId } : "skip",
   );
 
   const conversation = useQuery(
     api.conversations.get,
-    conversationId ? { id: conversationId } : "skip"
+    conversationId ? { id: conversationId } : "skip",
   );
 
   const createConversation = useMutation(api.conversations.create);
@@ -42,9 +42,18 @@ export function useChatHistory(
   const saveAllMutation = useMutation(api.messages.saveAll);
 
   const loadedMessages: UIMessage[] | undefined = rawMessages?.map((doc) => {
+    if (doc.partsJson)
+      return {
+        id: doc.clientMessageId || doc._id,
+        role: doc.role,
+        parts: [
+          { type: "text", text: doc.content },
+          ...JSON.parse(doc.partsJson),
+        ],
+      } as UIMessage;
     if (doc.parts) {
       return {
-        id: doc._id,
+        id: doc.clientMessageId || doc._id,
         role: doc.role,
         parts: doc.parts,
       } as UIMessage;
@@ -56,7 +65,11 @@ export function useChatHistory(
         parts.push(tc);
       }
     }
-    return { id: doc._id, role: doc.role, parts } as UIMessage;
+    return {
+      id: doc.clientMessageId || doc._id,
+      role: doc.role,
+      parts,
+    } as UIMessage;
   });
 
   const createChat = useCallback(async () => {
@@ -68,7 +81,7 @@ export function useChatHistory(
     async (id: Id<"conversations">) => {
       await removeConversation({ id });
     },
-    [removeConversation]
+    [removeConversation],
   );
 
   const saveMessages = useCallback(
@@ -79,21 +92,24 @@ export function useChatHistory(
           const textContent =
             m.parts
               ?.filter(
-                (p): p is { type: "text"; text: string } => p.type === "text"
+                (p): p is { type: "text"; text: string } => p.type === "text",
               )
               .map((p) => p.text)
               .join("") || "";
           return {
+            clientMessageId: m.id,
             role: m.role as "user" | "assistant",
             content: textContent,
-            parts: JSON.parse(JSON.stringify(m.parts)),
+            partsJson: JSON.stringify(
+              (m.parts || []).filter((p) => p.type !== "text"),
+            ),
           };
         });
       if (storable.length > 0) {
         saveAllMutation({ conversationId: convId, messages: storable });
       }
     },
-    [saveAllMutation]
+    [saveAllMutation],
   );
 
   const generateTitle = useCallback(
@@ -102,7 +118,7 @@ export function useChatHistory(
       const title = cleaned.slice(0, 50) + (cleaned.length > 50 ? "..." : "");
       updateTitle({ id: convId, title });
     },
-    [updateTitle]
+    [updateTitle],
   );
 
   return {

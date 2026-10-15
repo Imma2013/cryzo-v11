@@ -1,16 +1,27 @@
+import {
+  conversationUser,
+  jobAccessValidator,
+  type JobAccess,
+} from "./jobAccess";
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
-import { getAuthUserId } from "@convex-dev/auth/server";
 
 const accessValidator = v.union(
   v.literal("private"),
   v.literal("public-read"),
   v.literal("public"),
 );
-const authProviderValidator = v.union(v.literal("password"), v.literal("google"));
+const authProviderValidator = v.union(
+  v.literal("password"),
+  v.literal("google"),
+);
 
-async function requireOwnedConversation(ctx: any, conversationId: any) {
-  const userId = await getAuthUserId(ctx);
+async function requireOwnedConversation(
+  ctx: any,
+  conversationId: any,
+  jobAccess?: JobAccess,
+) {
+  const userId = await conversationUser(ctx, conversationId, jobAccess);
   const conversation = await ctx.db.get(conversationId);
   if (!userId || !conversation || conversation.userId !== userId) {
     throw new Error("Conversation not found");
@@ -19,8 +30,15 @@ async function requireOwnedConversation(ctx: any, conversationId: any) {
 }
 
 export const configureFromPublish = mutation({
-  returns: v.object({ appId: v.id("cloudApps"), name: v.string(), authProviders: v.array(authProviderValidator), entitiesConfigured: v.number(), seededRecords: v.number() }),
+  returns: v.object({
+    appId: v.id("cloudApps"),
+    name: v.string(),
+    authProviders: v.array(authProviderValidator),
+    entitiesConfigured: v.number(),
+    seededRecords: v.number(),
+  }),
   args: {
+    jobAccess: v.optional(jobAccessValidator),
     conversationId: v.id("conversations"),
     name: v.string(),
     authProviders: v.optional(v.array(authProviderValidator)),
@@ -35,7 +53,11 @@ export const configureFromPublish = mutation({
     ),
   },
   handler: async (ctx, args) => {
-    const { userId } = await requireOwnedConversation(ctx, args.conversationId);
+    const { userId } = await requireOwnedConversation(
+      ctx,
+      args.conversationId,
+      args.jobAccess,
+    );
     const now = Date.now();
     let app = await ctx.db
       .query("cloudApps")
@@ -83,25 +105,47 @@ export const configureFromPublish = mutation({
         updatedAt: now,
       };
       if (existing) await ctx.db.patch(existing._id, value);
-      else await ctx.db.insert("cloudEntitySchemas", { ...value, createdAt: now });
+      else
+        await ctx.db.insert("cloudEntitySchemas", { ...value, createdAt: now });
       // Seed exactly once, in the same Convex transaction that applies the
       // schema. Subsequent edits/retries must NEVER duplicate or erase records.
       if (entity.seed?.length) {
-        if (entity.seed.length > 6) throw new Error(`Too many sample records for ${name}`);
-        if ((existing?.access ?? entity.access ?? "private") === "private") throw new Error(`Cannot seed private ${name} records without an owner`);
-        const prior = await ctx.db.query("cloudRecords")
-          .withIndex("by_app_entity", (q) => q.eq("appId", appId).eq("entityName", name))
+        if (entity.seed.length > 6)
+          throw new Error(`Too many sample records for ${name}`);
+        if ((existing?.access ?? entity.access ?? "private") === "private")
+          throw new Error(
+            `Cannot seed private ${name} records without an owner`,
+          );
+        const prior = await ctx.db
+          .query("cloudRecords")
+          .withIndex("by_app_entity", (q) =>
+            q.eq("appId", appId).eq("entityName", name),
+          )
           .take(1);
         if (prior.length === 0) {
-          const fieldNames = new Set(Object.keys(entity.fields && typeof entity.fields === "object" ? entity.fields : {}));
+          const fieldNames = new Set(
+            Object.keys(
+              entity.fields && typeof entity.fields === "object"
+                ? entity.fields
+                : {},
+            ),
+          );
           for (const record of entity.seed) {
-            if (!record || typeof record !== "object" || Array.isArray(record) ||
-                Object.keys(record).some((field) => !fieldNames.has(field)) ||
-                JSON.stringify(record).length > 5000) {
+            if (
+              !record ||
+              typeof record !== "object" ||
+              Array.isArray(record) ||
+              Object.keys(record).some((field) => !fieldNames.has(field)) ||
+              JSON.stringify(record).length > 5000
+            ) {
               throw new Error(`Invalid seed record for ${name}`);
             }
             await ctx.db.insert("cloudRecords", {
-              appId, entityName: name, data: record, createdAt: now, updatedAt: now,
+              appId,
+              entityName: name,
+              data: record,
+              createdAt: now,
+              updatedAt: now,
             });
             seededRecords++;
           }
@@ -121,11 +165,16 @@ export const configureFromPublish = mutation({
 
 export const ensureForConversation = mutation({
   args: {
+    jobAccess: v.optional(jobAccessValidator),
     conversationId: v.id("conversations"),
     name: v.string(),
   },
   handler: async (ctx, args) => {
-    const { userId } = await requireOwnedConversation(ctx, args.conversationId);
+    const { userId } = await requireOwnedConversation(
+      ctx,
+      args.conversationId,
+      args.jobAccess,
+    );
     const existing = await ctx.db
       .query("cloudApps")
       .withIndex("by_owner_conversation", (q) =>
@@ -160,9 +209,16 @@ export const getApp = query({
 });
 
 export const getOverview = query({
-  args: { conversationId: v.id("conversations") },
+  args: {
+    jobAccess: v.optional(jobAccessValidator),
+    conversationId: v.id("conversations"),
+  },
   handler: async (ctx, args) => {
-    const { userId } = await requireOwnedConversation(ctx, args.conversationId);
+    const { userId } = await requireOwnedConversation(
+      ctx,
+      args.conversationId,
+      args.jobAccess,
+    );
     const app = await ctx.db
       .query("cloudApps")
       .withIndex("by_owner_conversation", (q) =>

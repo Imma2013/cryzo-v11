@@ -1,3 +1,4 @@
+import { conversationUser, jobAccessValidator } from "./jobAccess";
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { getAuthUserId } from "@convex-dev/auth/server";
@@ -56,7 +57,10 @@ export const create = mutation({
       modelCredentialMode: args.modelCredentialMode || "cryzo",
       modelBaseUrl: args.modelBaseUrl?.trim() || undefined,
       modelReasoningPreferences: args.modelReasoningEffort
-        ? { [`${args.modelProvider || "cryzo"}:${args.modelId || "cryzo/nemotron-3.5-lightning-free"}`]: args.modelReasoningEffort }
+        ? {
+            [`${args.modelProvider || "cryzo"}:${args.modelId || "cryzo/nemotron-3.5-lightning-free"}`]:
+              args.modelReasoningEffort,
+          }
         : {},
       createdAt: now,
       updatedAt: now,
@@ -126,11 +130,15 @@ export const updateChatMode = mutation({
 
 export const updateProjectPlatforms = mutation({
   args: {
+    jobAccess: v.optional(jobAccessValidator),
     id: v.id("conversations"),
     projectPlatforms: v.array(projectPlatformValidator),
   },
   handler: async (ctx, args) => {
-    await requireOwner(ctx, args.id);
+    const userId = await conversationUser(ctx, args.id, args.jobAccess);
+    const conversation = await ctx.db.get(args.id);
+    if (!userId || conversation?.userId !== userId)
+      throw new Error("Conversation not found");
     const normalized = args.projectPlatforms.includes("web")
       ? ["web" as const]
       : args.projectPlatforms.length > 0
@@ -158,8 +166,18 @@ export const updateModel = mutation({
   },
   handler: async (ctx, args) => {
     const conversation = await requireOwner(ctx, args.id);
-    const validEffort = ["default", "none", "minimal", "low", "medium", "high", "xhigh", "max"].includes(args.reasoningEffort || "")
-      ? args.reasoningEffort : "default";
+    const validEffort = [
+      "default",
+      "none",
+      "minimal",
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max",
+    ].includes(args.reasoningEffort || "")
+      ? args.reasoningEffort
+      : "default";
     await ctx.db.patch(args.id, {
       modelReasoningPreferences: {
         ...(conversation.modelReasoningPreferences || {}),

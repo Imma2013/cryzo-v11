@@ -1,3 +1,4 @@
+import { decodeMcpTool } from "./mcp-schema";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
@@ -31,6 +32,9 @@ export type McpServerRecord = {
   projectEnabled?: boolean;
   defaultEnabledForNewProjects?: boolean;
   tools?: McpToolMeta[];
+  catalogVersion?: string;
+  toolCount?: number;
+  updatedAt?: number;
   lastConnectedAt?: number;
   lastError?: string;
 };
@@ -75,7 +79,10 @@ export async function assertPublicMcpUrl(value: string) {
     throw new Error("Private network MCP URLs are not supported.");
   }
   const resolved = await lookup(host, { all: true, verbatim: true });
-  if (!resolved.length || resolved.some((entry) => isPrivateAddress(entry.address))) {
+  if (
+    !resolved.length ||
+    resolved.some((entry) => isPrivateAddress(entry.address))
+  ) {
     throw new Error("Private or unresolved MCP hosts are not supported.");
   }
   return url;
@@ -85,7 +92,9 @@ function parseCredential(raw?: string | null) {
   if (!raw) return null;
   try {
     const parsed: unknown = JSON.parse(raw);
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as McpCredential : { access_token: raw };
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as McpCredential)
+      : { access_token: raw };
   } catch {
     return { access_token: raw } satisfies McpCredential;
   }
@@ -166,14 +175,12 @@ async function refreshCredentialIfNeeded(
     headers,
     body: form,
   });
-  const body = (await response.json().catch(() => null)) as
-    | {
-        access_token?: string;
-        refresh_token?: string;
-        token_type?: string;
-        expires_in?: number;
-      }
-    | null;
+  const body = (await response.json().catch(() => null)) as {
+    access_token?: string;
+    refresh_token?: string;
+    token_type?: string;
+    expires_in?: number;
+  } | null;
   if (!response.ok || !body?.access_token) {
     throw new Error(
       `${server.name} MCP OAuth session expired and could not be refreshed.`,
@@ -215,7 +222,9 @@ async function resolveCredential(
         providerId: `mcp:${server._id}`,
         internalSecret,
       });
-      credential = row ? parseCredential(decryptProviderSecret(row as any)) : null;
+      credential = row
+        ? parseCredential(decryptProviderSecret(row as any))
+        : null;
     }
   }
 
@@ -230,7 +239,9 @@ async function resolveCredential(
 }
 
 async function withMcpClient<T>(
-  server: McpServerRecord, identity: McpIdentity, operation: (client: Client) => Promise<T>,
+  server: McpServerRecord,
+  identity: McpIdentity,
+  operation: (client: Client) => Promise<T>,
 ) {
   const endpoint = await assertPublicMcpUrl(server.url);
   const credential = await resolveCredential(identity, server);
@@ -239,16 +250,32 @@ async function withMcpClient<T>(
   const guardedFetch: typeof fetch = async (input, init) => {
     const url = input instanceof Request ? input.url : String(input);
     const target = await assertPublicMcpUrl(url);
-    if (target.origin !== endpoint.origin) throw new Error("MCP transport redirected to a different origin.");
+    if (target.origin !== endpoint.origin)
+      throw new Error("MCP transport redirected to a different origin.");
     const requestHeaders = new Headers(init?.headers);
-    for (const [name, value] of Object.entries(headers)) requestHeaders.set(name, value);
-    return fetch(input, { ...init, headers: requestHeaders, redirect: "error",
-      signal: AbortSignal.any([...(init?.signal ? [init.signal] : []), AbortSignal.timeout(120_000)]) });
+    for (const [name, value] of Object.entries(headers))
+      requestHeaders.set(name, value);
+    return fetch(input, {
+      ...init,
+      headers: requestHeaders,
+      redirect: "error",
+      signal: AbortSignal.any([
+        ...(init?.signal ? [init.signal] : []),
+        AbortSignal.timeout(120_000),
+      ]),
+    });
   };
-  const transport = server.transport === "sse"
-    ? new SSEClientTransport(endpoint, { requestInit: { headers }, fetch: guardedFetch,
-        eventSourceInit: { fetch: guardedFetch } })
-    : new StreamableHTTPClientTransport(endpoint, { requestInit: { headers }, fetch: guardedFetch });
+  const transport =
+    server.transport === "sse"
+      ? new SSEClientTransport(endpoint, {
+          requestInit: { headers },
+          fetch: guardedFetch,
+          eventSourceInit: { fetch: guardedFetch },
+        })
+      : new StreamableHTTPClientTransport(endpoint, {
+          requestInit: { headers },
+          fetch: guardedFetch,
+        });
   const client = new Client({ name: "Cryzo", version: "1.0.0" });
   try {
     await client.connect(transport, { timeout: 20_000 });
@@ -258,29 +285,52 @@ async function withMcpClient<T>(
   }
 }
 
-export async function listRemoteMcpTools(server: McpServerRecord, authToken?: string, userId?: string) {
-  return withMcpClient(server, { authToken, userId }, async client => {
+export async function listRemoteMcpTools(
+  server: McpServerRecord,
+  authToken?: string,
+  userId?: string,
+) {
+  return withMcpClient(server, { authToken, userId }, async (client) => {
     const tools: McpToolMeta[] = [];
     const seen = new Set<string>();
     let cursor: string | undefined;
     do {
-      const page = await client.listTools(cursor ? { cursor } : {}, { timeout: 20_000 });
+      const page = await client.listTools(cursor ? { cursor } : {}, {
+        timeout: 20_000,
+      });
       for (const item of page.tools) {
-        tools.push({ name: item.name, ...(item.description ? { description: item.description } : {}),
-          inputSchema: item.inputSchema, enabled: true });
+        tools.push({
+          name: item.name,
+          ...(item.description ? { description: item.description } : {}),
+          inputSchema: item.inputSchema,
+          enabled: true,
+        });
       }
       cursor = page.nextCursor;
-      if (cursor && (seen.has(cursor) || tools.length >= 1000)) throw new Error("MCP tool discovery exceeded its pagination limit.");
+      if (cursor && (seen.has(cursor) || tools.length >= 1000))
+        throw new Error("MCP tool discovery exceeded its pagination limit.");
       if (cursor) seen.add(cursor);
     } while (cursor);
     return tools;
   });
 }
 
-export async function callRemoteMcpTool(server: McpServerRecord, identity: McpIdentity, toolName: string, args: unknown) {
-  return withMcpClient(server, identity, client => client.callTool({
-    name: toolName, arguments: (args ?? {}) as Record<string, unknown>,
-  }, undefined, { timeout: 120_000 }));
+export async function callRemoteMcpTool(
+  server: McpServerRecord,
+  identity: McpIdentity,
+  toolName: string,
+  args: unknown,
+) {
+  return withMcpClient(server, identity, (client) =>
+    client.callTool(
+      {
+        name: toolName,
+        arguments: (args ?? {}) as Record<string, unknown>,
+      },
+      undefined,
+      { timeout: 120_000 },
+    ),
+  );
 }
 
 function safeToolName(serverName: string, toolName: string) {
@@ -320,11 +370,14 @@ export async function buildProjectMcpTools(identity: McpIdentity) {
     }
   } else if (identity.userId && internalSecret) {
     if (identity.conversationId) {
-      await fetchMutation((api as any).mcpServers.ensureProjectDefaultsForServer, {
-        userId: identity.userId as any,
-        conversationId: identity.conversationId as any,
-        internalSecret,
-      });
+      await fetchMutation(
+        (api as any).mcpServers.ensureProjectDefaultsForServer,
+        {
+          userId: identity.userId as any,
+          conversationId: identity.conversationId as any,
+          internalSecret,
+        },
+      );
       servers = (await fetchQuery(
         (api as any).mcpServers.listForProjectServer,
         {
@@ -348,7 +401,27 @@ export async function buildProjectMcpTools(identity: McpIdentity) {
     let remoteTools = (server.tools || []).filter(
       (item) => item.enabled !== false,
     );
-    if (!remoteTools.length) {
+    if (server.catalogVersion) {
+      const stored = [];
+      let cursor: string | null = null;
+      do {
+        const page: any = await fetchQuery(
+          api.mcpCatalog.page,
+          {
+            serverId: server._id as any,
+            cursor,
+            ...(!identity.authToken
+              ? { userId: identity.userId as any, internalSecret }
+              : {}),
+          },
+          identity.authToken ? { token: identity.authToken } : {},
+        );
+        stored.push(...page.tools.map(decodeMcpTool));
+        cursor = page.cursor;
+      } while (cursor);
+      remoteTools = stored.filter((item) => item.enabled !== false);
+    }
+    if (!remoteTools.length && !server.catalogVersion) {
       try {
         remoteTools = await listRemoteMcpTools(
           server,
