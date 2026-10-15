@@ -488,6 +488,14 @@ async function scanStoreReadiness(
   return { overall, summary, checks, counts, aiEnhanced: aiChecks.length > 0 };
 }
 
+async function readExpoDeviceUrl(workspace: Workspace, scheme: string, launchTarget: ExpoLaunchTarget, logs: string) {
+  // Noninteractive Expo prints its HTTP server address instead of the phone link.
+  // Ask the running CLI for the actual tunnel/deep link; retain log support for older SDKs.
+  const endpoint = "http://127.0.0.1:8081/_expo/open?platform=ios&runtime=" + (launchTarget === "expo-go" ? "expo" : "custom");
+  const info = await run(workspace, "node -e 'fetch(" + JSON.stringify(endpoint) + ",{signal:AbortSignal.timeout(2000)}).then(async r=>{if(!r.ok)process.exit(1);console.log(JSON.stringify(await r.json()))}).catch(()=>process.exit(1))'", undefined, true);
+  return deviceUrlFromLogs(info.output, scheme, launchTarget) || deviceUrlFromLogs(logs, scheme, launchTarget);
+}
+
 async function startExpoPreview(workspace: Workspace, forceRestart = false) {
   if (!(await hasNativeExpoSource(workspace))) throw new Error("Generate the Expo app before previewing it.");
   const pkg = (await readJsonFile(workspace, "package.json")) || {};
@@ -508,7 +516,7 @@ async function startExpoPreview(workspace: Workspace, forceRestart = false) {
   if (!forceRestart && previous?.runtimeRevision === runtimeRevision && previous.deviceUrl &&
       (await run(workspace, healthCommand, undefined, true)).exitCode === 0) {
     const logs = await run(workspace, "cat .cryzo-expo-preview.log 2>/dev/null || true", undefined, true);
-    const currentUrl = deviceUrlFromLogs(logs.output, scheme, previous.launchTarget || "expo-go");
+    const currentUrl = await readExpoDeviceUrl(workspace, scheme, previous.launchTarget || "expo-go", logs.output);
     if (currentUrl && previous.webReady) return { deviceUrl: currentUrl, webPreviewUrl: workspace.sandbox.domain(SOURCE_PREVIEW_PORT),
       launchTarget: previous.launchTarget || "expo-go", output: logs.output.slice(-6000), status: "ready" as const };
   }
@@ -529,7 +537,7 @@ async function startExpoPreview(workspace: Workspace, forceRestart = false) {
   for (let attempt = 0; attempt < 40; attempt++) {
     await new Promise(resolve => setTimeout(resolve, 1500));
     lastOutput = (await run(workspace, "cat .cryzo-expo-preview.log 2>/dev/null || true", undefined, true)).output;
-    const deviceUrl = deviceUrlFromLogs(lastOutput, scheme, launchTarget);
+    const deviceUrl = await readExpoDeviceUrl(workspace, scheme, launchTarget, lastOutput);
     if (deviceUrl && (await run(workspace, healthCommand, undefined, true)).exitCode === 0) {
       const webHealth = await run(workspace, "node -e 'fetch(\"http://127.0.0.1:5173/\",{signal:AbortSignal.timeout(45000)}).then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))'", undefined, true);
       await workspace.sandbox.writeFiles([{ path: workspace.cwd + "/.cryzo-expo-runtime.json",

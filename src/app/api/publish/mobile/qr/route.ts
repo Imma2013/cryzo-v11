@@ -3,13 +3,22 @@ import QRCode from "qrcode";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const EXPO_PREVIEW_URI = /^(?:exps?|cryzo-[a-z0-9-]+):\/\/[^\s]+$/i;
+function isExpoPreviewUri(value: string) {
+  if (/\s/.test(value)) return false;
+  try {
+    const url = new URL(value);
+    if (url.username || url.password || !url.hostname) return false;
+    if (url.protocol === "exp:" || url.protocol === "exps:") return true;
+    return !["http:", "https:", "javascript:", "data:", "file:", "vbscript:"].includes(url.protocol)
+      && url.hostname === "expo-development-client" && /^https?:\/\//.test(url.searchParams.get("url") || "");
+  } catch { return false; }
+}
 
 /** No external QR gateway: render the Expo/development-client link inside Cryzo. */
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const value = searchParams.get("data")?.trim() || "";
-  if (!EXPO_PREVIEW_URI.test(value) || value.length > 2048) {
+  if (!isExpoPreviewUri(value) || value.length > 2048) {
     return Response.json({ error: "Invalid Expo preview URL" }, { status: 400 });
   }
   try {
