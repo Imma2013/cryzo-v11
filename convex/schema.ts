@@ -4,6 +4,15 @@ import { authTables } from "@convex-dev/auth/server";
 
 export default defineSchema({
   ...authTables,
+  chatgptOAuthAttempts: defineTable({
+    userId: v.id("users"), browserHash: v.string(), stateHash: v.string(),
+    ciphertext: v.string(), iv: v.string(), tag: v.string(), expiresAt: v.number(),
+  }).index("by_browser", ["browserHash"]).index("by_expiry", ["expiresAt"]),
+  chatgptConnections: defineTable({
+    userId: v.id("users"), subject: v.string(), email: v.optional(v.string()),
+    ciphertext: v.string(), iv: v.string(), tag: v.string(), expiresAt: v.number(),
+    version: v.number(), refreshLease: v.optional(v.number()), updatedAt: v.number(),
+  }).index("by_user", ["userId"]),
 
   users: defineTable({
     name: v.optional(v.string()),

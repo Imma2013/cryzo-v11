@@ -13,6 +13,7 @@ import {
   Search,
   Triangle,
 } from "lucide-react";
+import { ChatGPTConnectionCard } from "@/components/ChatGPTConnectionCard";
 import { useAuth } from "@/providers/AuthProvider";
 import {
   type AppConnection,
@@ -318,6 +319,8 @@ export default function AppsPage() {
         <p className="mt-1 text-sm text-zinc-400">
           Connect developer infrastructure and apps your Cryzo agent can use.
         </p>
+
+        <ChatGPTConnectionCard />
 
         <section className="mt-7">
           <a href="/chat/apps/mcp" className="group flex items-center gap-4 rounded-2xl border border-zinc-800 bg-zinc-950 p-5 transition hover:border-zinc-600">

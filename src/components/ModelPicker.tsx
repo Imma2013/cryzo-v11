@@ -138,6 +138,8 @@ export function ModelPicker({
   const [accountConnections, setAccountConnections] = useState<AccountConnection[]>([]);
   const [feedback, setFeedback] = useState<Feedback>({ type: "idle" });
   const [busy, setBusy] = useState(false);
+  const [chatgptModels, setChatgptModels] = useState<CatalogModel[]>([]);
+  const [chatgptConnected, setChatgptConnected] = useState(false);
   const [discoveredModels, setDiscoveredModels] = useState<CatalogModel[]>([]);
   const [modelReasoningEffort, setModelReasoningEffort] = useState(selection.reasoningEffort || "default");
 
@@ -189,6 +191,9 @@ export function ModelPicker({
     if (nextProvider.id === "cryzo") {
       setCredentialMode("cryzo");
       setModelId(normalizeManagedModelId(modelId));
+    } else if (nextProvider.id === "chatgpt") {
+      setCredentialMode("account");setBaseURL("");setApiKey("");
+      if(selection.providerId !== "chatgpt")setModelId("");
     } else if (nextProvider.local) {
       setCredentialMode("device");
     } else if (selection.providerId !== providerId) {
@@ -226,7 +231,15 @@ export function ModelPicker({
       .catch(() => {});
   }, [open, authToken]);
 
+  useEffect(() => {
+    if(!open || !authToken)return;
+    let active=true;
+    fetch("/api/chatgpt",{headers:{Authorization:"Bearer "+authToken},cache:"no-store"}).then(res=>res.json()).then(data=>{if(active){setChatgptConnected(Boolean(data.connected));setChatgptModels(data.models || []);}}).catch(()=>{if(active){setChatgptConnected(false);setChatgptModels([]);}});
+    return()=>{active=false;};
+  },[open,authToken]);
+
   const providerModels = useMemo<CatalogModel[]>(() => {
+    if(provider.id === "chatgpt")return chatgptModels.filter(model=>!search || (model.name+" "+model.id).toLowerCase().includes(search.toLowerCase()));
     if (provider.id === "cryzo") {
       const query = search.trim().toLowerCase();
       return (catalog.providers?.cryzo?.models ?? []).filter(
@@ -255,7 +268,7 @@ export function ModelPicker({
         model.name.toLowerCase().includes(query) ||
         model.id.toLowerCase().includes(query),
     );
-  }, [catalog.providers, discoveredModels, provider.id, search]);
+  }, [catalog.providers, discoveredModels, provider.id, search, chatgptModels]);
 
   const selectedCatalogModel = providerModels.find((model) => model.id === modelId);
   const selectedReasoningEfforts = (selectedCatalogModel?.reasoningEfforts || [])
@@ -436,6 +449,10 @@ export function ModelPicker({
     setBusy(true);
     setFeedback({ type: "idle" });
     try {
+      if(provider.id === "chatgpt") {
+        if(!chatgptConnected || !chatgptModels.some(model=>model.id===modelId))throw new Error("Connect ChatGPT in Apps and choose an available model.");
+        onChange({providerId:"chatgpt",modelId,credentialMode:"account"});setOpen(false);return;
+      }
       if (provider.id === "cryzo") {
         onChange({
           providerId: "cryzo",
@@ -499,7 +516,7 @@ export function ModelPicker({
       >
         <ModelLogo provider={selectedProvider} modelId={selectedModelId} size={26} />
         <span className="max-w-[min(40vw,17rem)] truncate text-zinc-200">{catalog.providers?.[selection.providerId]?.models?.find(model => model.id === selectedModelId)?.name || selectedModelName}</span>
-        {!compact && <span className="text-[10px] text-zinc-500">{selectedProvider.id === "cryzo" ? "Included with Cryzo" : "Your key"}</span>}
+        {!compact && <span className="text-[10px] text-zinc-500">{selectedProvider.id === "cryzo" ? "Included with Cryzo" : selectedProvider.id === "chatgpt" ? "ChatGPT plan" : "Your key"}</span>}
         <ChevronDown size={13} className="shrink-0" />
       </button>
 
@@ -522,7 +539,7 @@ export function ModelPicker({
               <aside className="border-b border-zinc-800 p-3 md:overflow-y-auto md:border-b-0 md:border-r">
                 <div className="mb-2 px-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-zinc-600">Providers</div>
                 <div className="flex gap-2 overflow-x-auto pb-1 md:block md:space-y-1 md:overflow-visible">
-                  {PROVIDERS.map((item) => {
+                  {PROVIDERS.filter(item => item.id !== "chatgpt" || chatgptConnected || selection.providerId === "chatgpt").map((item) => {
                     const active = item.id === providerId;
                     return (
                       <button
@@ -538,7 +555,7 @@ export function ModelPicker({
                       >
                         <ProviderLogo provider={item} size={28} />
                         <span className="truncate font-medium">{item.name}</span>
-                        {item.id !== "cryzo" && !item.local && (
+                        {item.id !== "cryzo" && item.id !== "chatgpt" && !item.local && (
                           <span className={`ml-auto hidden text-[9px] md:inline ${active ? "text-zinc-500" : "text-sky-400"}`}>BYOK</span>
                         )}
                       </button>
@@ -555,7 +572,7 @@ export function ModelPicker({
                       <h3 className="font-semibold text-white">{provider.name}</h3>
                       {provider.id === "cryzo" ? (
                         <ModelBadge tone="free">No key required</ModelBadge>
-                      ) : provider.local ? (
+                      ) : provider.id === "chatgpt" ? <ModelBadge>ChatGPT plan</ModelBadge> : provider.local ? (
                         <ModelBadge>Local</ModelBadge>
                       ) : (
                         <ModelBadge tone="byok">BYOK · 0 Cryzo message credits</ModelBadge>
@@ -565,7 +582,7 @@ export function ModelPicker({
                   </div>
                 </div>
 
-                {provider.id !== "cryzo" && (
+                {provider.id !== "cryzo" && provider.id !== "chatgpt" && (
                   <section className="mt-5 rounded-2xl border border-zinc-800 bg-zinc-900/30 p-4">
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div>
@@ -760,7 +777,7 @@ export function ModelPicker({
                               <div className="min-w-0">
                                 <div className="flex flex-wrap items-center gap-2">
                                   <span className="truncate text-sm font-medium text-white">{model.name}</span>
-                                  <ModelBadge tone="byok">BYOK</ModelBadge>
+                                  <ModelBadge tone="byok">{provider.id === "chatgpt" ? "ChatGPT plan" : "BYOK"}</ModelBadge>
                                   {model.reasoning && <ModelBadge>Reasoning</ModelBadge>}
                                   {model.toolCall && <ModelBadge>Tools</ModelBadge>}
                                   {formatContext(model.context) && <ModelBadge>{formatContext(model.context)}</ModelBadge>}
@@ -809,7 +826,7 @@ export function ModelPicker({
                 {provider.id === "cryzo" ? (
                   <span className="inline-flex items-center gap-1.5"><Sparkles size={13} /> Managed AI · exact usage from your dollar allowance</span>
                 ) : (
-                  <span>BYOK · unlimited app creation · 0 Cryzo message credits</span>
+                  <span>{provider.id === "chatgpt" ? "Your ChatGPT limits apply · 0 Cryzo message credits" : "BYOK · unlimited app creation · 0 Cryzo message credits"}</span>
                 )}
               </div>
               <button

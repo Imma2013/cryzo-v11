@@ -1,3 +1,8 @@
+import { fetchQuery } from "convex/nextjs";
+import { api } from "../../../convex/_generated/api";
+import { chatgptAccessToken, chatgptModels } from "./chatgpt-connection";
+import { completedChatGPTResponse } from "@/lib/ai/chatgpt-response";
+import { chatgptRequestBody } from "@/lib/ai/chatgpt-request";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
@@ -107,6 +112,24 @@ async function resolveManagedCryzoModel(requestedModel?: string) {
 export async function resolveServerModel(request: ServerModelRequest) {
   const providerId = request.providerId?.trim() || "cryzo";
   const requestedModel = request.modelId?.trim();
+
+  if (providerId === "chatgpt") {
+    if (!request.authToken || request.credentialMode !== "account" || request.modelApiKey || request.modelBaseUrl) throw new Error("Use the ChatGPT connection from Apps. API keys and custom URLs cannot be used in ChatGPT plan mode.");
+    const user=await fetchQuery(api.users.currentUser,{}, {token:request.authToken});
+    if(!user)throw new Error("Sign in to Cryzo to use your ChatGPT connection");
+    const accessToken=await chatgptAccessToken(String(user._id));
+    const catalog=await chatgptModels(accessToken);
+    if(!requestedModel || !catalog.some(model=>model.id===requestedModel))throw new Error("Choose a model available to your connected ChatGPT account.");
+    const planFetch:typeof fetch=async(input,init)=>{
+      if(String(input)!=="https://api.openai.com/v1/responses" || typeof init?.body!=="string")throw new Error("Unsupported ChatGPT plan request");
+      const original=JSON.parse(init.body);
+      const body=chatgptRequestBody(original);
+      const response=await fetch(input,{...init,body:JSON.stringify(body)});
+      return original.stream === true ? response : completedChatGPTResponse(response);
+    };
+    const capabilities=await resolveModelCapabilities("openai",requestedModel);
+    return { model:createOpenAI({apiKey:accessToken,baseURL:"https://api.openai.com/v1",fetch:planFetch}).responses(requestedModel),providerId,modelId:requestedModel,upstreamModelId:requestedModel,billingTier:"byok" as const,usesCryzoCredits:false,creditMultiplier:0,minimumPlan:"free" as const,supportsTools:true,supportsVision:capabilities.supportsVision,contextWindow:capabilities.contextWindow,maxOutputTokens:capabilities.maxOutputTokens,capabilitySource:capabilities.source,profile:undefined };
+  }
 
   if (providerId === "ollama" || providerId === "lmstudio") {
     throw new Error("Local providers must run directly in the browser");
