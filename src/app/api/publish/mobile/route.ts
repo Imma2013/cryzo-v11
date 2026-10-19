@@ -623,7 +623,7 @@ export async function POST(req: Request) {
     const nativeTarget = isNativeConversation(conversation);
     const workspace = await workspaceFor(body.conversationId, nativeTarget);
 
-    if ((body.operation === "check" || body.operation === "preview" || body.operation === "build") && nativeTarget) {
+    if ((body.operation === "check" || body.operation === "build") && nativeTarget) {
       await syncNativeSource(workspace, body.sourceFiles);
     }
 

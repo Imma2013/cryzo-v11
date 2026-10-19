@@ -31,7 +31,7 @@ describe("temporary Expo relay",()=>{
   await t.mutation(api.expoRelay.endStream,args);
   const row=await t.run(ctx=>ctx.db.query("expoRelaySessions").withIndex("by_session",q=>q.eq("sessionId",sessionId)).unique());expect(row?.pendingBytes).toBe(6);
   await t.mutation(api.expoRelay.openStream,{...args,streamId:0x80000002});
-  await t.mutation(api.expoRelay.close,{...base,userId});await expect(t.query(api.expoRelay.status,base)).rejects.toThrow("expired");
+  await t.mutation(api.expoRelay.close,{...base,userId});expect((await t.query(api.expoRelay.status,base)).online).toBe(false);
  });
 });
 describe("ChatGPT OAuth transaction storage",()=>{

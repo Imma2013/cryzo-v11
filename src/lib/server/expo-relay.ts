@@ -12,7 +12,7 @@ export function relayClient(){const url=process.env.NEXT_PUBLIC_CONVEX_URL;if(!u
 export function packet(type:number,id:number,payload:Uint8Array=Buffer.alloc(0)){const result=Buffer.alloc(5+payload.length);result[0]=type;result.writeUInt32LE(id>>>0,1);result.set(payload,5);return result;}
 export function credit(id:number){const p=Buffer.alloc(4);p.writeUInt32LE(32);return packet(3,id,p);}
 export const relayArgs=(sessionId:string)=>({sessionId,internalSecret:relaySecret()});
-export async function relayStatus(sessionId:string){return fetchQuery(relayApi.status,relayArgs(sessionId));}
+export async function relayStatus(sessionId:string){const value=await fetchQuery(relayApi.status,relayArgs(sessionId));if(value.expiresAt<=Date.now())throw new Error("Expo session expired");return value;}
 export async function createRelaySession(userId:string,conversationId:string,origin:string){
  previewDomain();
  const sessionId=randomBytes(16).toString("hex");

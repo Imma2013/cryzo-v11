@@ -989,7 +989,8 @@ function TokenHelp({ href, note }: { href: string; note?: string }) {
   );
 }
 
-function PublishPhonePreview({conversationId,files}:{conversationId:string;files:FileMap}) {
- const preview=useExpoPreview(conversationId as Id<"conversations">,files,true,true);
+function PublishPhonePreview({conversationId,files}:{conversationId:string;files:PublishFile[]}) {
+ const map=useMemo<FileMap>(()=>Object.fromEntries(files.map(file=>[file.path,{type:"file",content:file.content}])),[files]);
+ const preview=useExpoPreview(conversationId as Id<"conversations">,map,true,true);
  return <section className="rounded-2xl border border-zinc-800 bg-zinc-900/35 p-4"><div className="flex items-center justify-between gap-3"><div><h3 className="text-sm font-semibold">Preview on your phone</h3><p className="mt-1 text-xs text-zinc-500">Uses the same Vivari project and Metro session as your editor.</p></div><ExpoDevicePreview preview={preview}/></div></section>;
 }

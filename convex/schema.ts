@@ -8,7 +8,7 @@ export default defineSchema({
     sessionId:v.string(), userId:v.id("users"), conversationId:v.id("conversations"),
     epoch:v.number(), online:v.boolean(), listening:v.boolean(), heartbeatAt:v.number(),
     nextSeq:v.number(), pendingBytes:v.number(), expiresAt:v.number(),
-  }).index("by_session",["sessionId"]).index("by_user_expiry",["userId","expiresAt"]).index("by_expiry",["expiresAt"]),
+  }).index("by_session",["sessionId"]).index("by_user_expiry",["userId","expiresAt"]).index("by_expiry",["expiresAt"]).index("by_heartbeat",["online","heartbeatAt"]),
   expoRelayStreams: defineTable({
     sessionId:v.string(), epoch:v.number(), streamId:v.number(), expiresAt:v.number(),
   }).index("by_stream",["sessionId","epoch","streamId"]).index("by_session_expiry",["sessionId","epoch","expiresAt"]).index("by_expiry",["expiresAt"]),
