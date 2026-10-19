@@ -18,6 +18,7 @@ export const begin = mutation({
 });
 export const consume = mutation({
   args: { internalSecret: v.string(), browserHash: v.string(), stateHash: v.string() },
+  returns:v.union(v.null(),v.object({userId:v.id("users"),...encrypted})),
   handler: async (ctx,args) => {
     authorize(args.internalSecret);
     const row = await ctx.db.query("chatgptOAuthAttempts").withIndex("by_browser",q=>q.eq("browserHash",args.browserHash)).unique();
@@ -29,6 +30,7 @@ export const consume = mutation({
 });
 export const read = query({
   args: { internalSecret: v.string(), userId: v.id("users") },
+  returns:v.union(v.null(),v.object({_id:v.id("chatgptConnections"),_creationTime:v.number(),userId:v.id("users"),subject:v.string(),email:v.optional(v.string()),...encrypted,expiresAt:v.number(),version:v.number(),refreshLease:v.optional(v.number()),updatedAt:v.number()})),
   handler: async (ctx,args) => { authorize(args.internalSecret); return ctx.db.query("chatgptConnections").withIndex("by_user",q=>q.eq("userId",args.userId)).unique(); },
 });
 export const save = mutation({

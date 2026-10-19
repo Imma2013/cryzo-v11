@@ -17,6 +17,8 @@ import {
   Triangle,
   X,
 } from "lucide-react";
+import { ExpoDevicePreview, useExpoPreview } from "./ExpoDevicePreview";
+import type { Id } from "../../../convex/_generated/dataModel";
 import { cn } from "@/lib/utils";
 import type { FileMap } from "@/lib/workspace/types";
 import {
@@ -435,8 +437,6 @@ function DeployPublishModal({
   const [mobileBuild, setMobileBuild] = useState<MobileBuild | null>(null);
   const [mobileReport, setMobileReport] = useState<StoreReadinessReportData | null>(null);
   const [scanStage, setScanStage] = useState<string | null>(null);
-  const [expoPreviewUrl, setExpoPreviewUrl] = useState("");
-  const [expoPreviewLoading, setExpoPreviewLoading] = useState(false);
   const [iosKeyContent, setIosKeyContent] = useState("");
   const [iosKeyId, setIosKeyId] = useState("");
   const [iosIssuerId, setIosIssuerId] = useState("");
@@ -587,21 +587,6 @@ function DeployPublishModal({
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || `Mobile ${operation} failed`);
     return data;
-  };
-
-  const previewPhone = async () => {
-    setExpoPreviewLoading(true);
-    setExpoPreviewUrl("");
-    setMobileStatus({ type: "loading", message: "Starting Expo phone preview…" });
-    try {
-      const data = await mobileRequest("preview");
-      setExpoPreviewUrl(data.previewUrl || data.qrValue || "");
-      setMobileStatus({ type: "success", message: "Expo phone preview is ready. Scan the QR code with Expo Go." });
-    } catch (error) {
-      setMobileStatus({ type: "error", message: error instanceof Error ? error.message : "Phone preview failed" });
-    } finally {
-      setExpoPreviewLoading(false);
-    }
   };
 
   const checkMobile = async () => {
@@ -807,39 +792,7 @@ function DeployPublishModal({
               <TextField label={mobilePlatform === "ios" ? "Bundle identifier" : "Android package"} value={mobileIdentifier} onChange={setMobileIdentifier} placeholder="com.yourcompany.app" />
             </div>
 
-            <section className="rounded-2xl border border-zinc-800 bg-zinc-900/35 p-4">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <div className="flex items-center gap-2 text-sm font-semibold"><QrCode size={16} /> Preview on your phone</div>
-                  <p className="mt-1 text-xs text-zinc-500">Starts the current Expo project and gives you an Expo Go QR code.</p>
-                </div>
-                <button type="button" onClick={() => void previewPhone()} disabled={expoPreviewLoading} className="inline-flex h-9 items-center gap-2 rounded-lg bg-white px-3 text-sm font-medium text-black disabled:opacity-40">
-                  {expoPreviewLoading ? <Loader2 size={14} className="animate-spin" /> : <Smartphone size={14} />}
-                  {expoPreviewLoading ? "Starting…" : "Preview on device"}
-                </button>
-              </div>
-
-              {expoPreviewUrl && (
-                <div className="mt-4 grid gap-4 rounded-xl border border-zinc-800 bg-black/50 p-4 sm:grid-cols-[180px_minmax(0,1fr)] sm:items-center">
-                  <div className="mx-auto overflow-hidden rounded-xl bg-white p-2">
-                    <img
-                      src={`https://api.qrserver.com/v1/create-qr-code/?size=260x260&data=${encodeURIComponent(expoPreviewUrl)}`}
-                      alt="Expo Go preview QR code"
-                      className="h-40 w-40"
-                    />
-                  </div>
-                  <div>
-                    <p className="text-sm font-semibold">Expo</p>
-                    <ol className="mt-2 space-y-1 text-xs leading-5 text-zinc-400">
-                      <li>1. Install Expo Go on your iPhone or Android device.</li>
-                      <li>2. Scan this QR code with the camera or Expo Go.</li>
-                      <li>3. Keep this Cryzo project open while testing.</li>
-                    </ol>
-                    <p className="mt-3 break-all rounded-lg bg-zinc-950 px-2.5 py-2 font-mono text-[10px] text-zinc-500">{expoPreviewUrl}</p>
-                  </div>
-                </div>
-              )}
-            </section>
+            <PublishPhonePreview conversationId={conversationId} files={files} />
 
             <MobileStep number={1} title="Check Your App" complete={mobileCheckPassed}>
               <p className="mb-3 text-xs text-zinc-500">Scan the current React Native source against native and store-readiness checks, then add a Nemotron review for semantic mobile UX issues.</p>
@@ -1034,4 +987,9 @@ function TokenHelp({ href, note }: { href: string; note?: string }) {
       {note && <><span className="text-zinc-700">|</span><span>{note}</span></>}
     </span>
   );
+}
+
+function PublishPhonePreview({conversationId,files}:{conversationId:string;files:FileMap}) {
+ const preview=useExpoPreview(conversationId as Id<"conversations">,files,true,true);
+ return <section className="rounded-2xl border border-zinc-800 bg-zinc-900/35 p-4"><div className="flex items-center justify-between gap-3"><div><h3 className="text-sm font-semibold">Preview on your phone</h3><p className="mt-1 text-xs text-zinc-500">Uses the same Vivari project and Metro session as your editor.</p></div><ExpoDevicePreview preview={preview}/></div></section>;
 }

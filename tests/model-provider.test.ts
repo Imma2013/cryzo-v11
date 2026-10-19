@@ -62,3 +62,5 @@ describe("Cryzo managed paid routing", () => {
 });
 
 vi.mock("server-only", () => ({}));
+
+it("rejects API keys in ChatGPT plan mode instead of falling back to managed inference",async()=>{await expect(resolveServerModel({providerId:"chatgpt",modelId:"any",credentialMode:"device",modelApiKey:"key"})).rejects.toThrow("ChatGPT connection");});

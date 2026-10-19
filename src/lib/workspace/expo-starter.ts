@@ -39,6 +39,7 @@ export function expoStarterFiles(): Array<{ path: string; content: string }> {
     { path: "tsconfig.json", content: JSON.stringify({ extends: "expo/tsconfig.base", compilerOptions: { strict: true },
       include: ["**/*.ts", "**/*.tsx", ".expo/types/**/*.ts", "expo-env.d.ts"], exclude: ["node_modules"] }, null, 2) + "\n" },
     { path: "index.ts", content: 'import "@expo/metro-runtime";\nimport { registerRootComponent } from "expo";\nimport App from "./App";\nregisterRootComponent(App);\n' },
+    { path: "metro.config.js", content: 'const { getDefaultConfig } = require("expo/metro-config");\nconst config = getDefaultConfig(__dirname);\nconfig.resolver.useWatchman = false;\nconfig.maxWorkers = 1;\nmodule.exports = config;\n' },
     { path: "App.tsx", content: 'import { StatusBar } from "expo-status-bar";\nimport { StyleSheet, Text, View } from "react-native";\n\nexport default function App() {\n  return <View style={styles.screen}><Text style={styles.title}>Your Cryzo app</Text><StatusBar style="auto" /></View>;\n}\n\nconst styles = StyleSheet.create({screen: { flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: "#fff" }, title: { fontSize: 28, fontWeight: "700" }});\n' },
   ];
 }
