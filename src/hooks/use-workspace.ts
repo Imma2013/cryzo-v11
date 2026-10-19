@@ -6,6 +6,7 @@ import { api } from "../../convex/_generated/api";
 import { Id } from "../../convex/_generated/dataModel";
 import { useAuth } from "@/providers/AuthProvider";
 import type { StreamingRuntimeSnapshot } from "@/lib/workspace/streaming-runtime";
+import { editorSession } from "@/lib/workspace/editor-session";
 import { nativeTargetFromActions } from "@/lib/workspace/native-target";
 import {
   getStreamingRuntimeSnapshot,
@@ -41,7 +42,7 @@ export function useWorkspace(conversationId: Id<"conversations">) {
 
   useEffect(() => {
     setRuntime(getStreamingRuntimeSnapshot(runtimeId));
-    setSelectedFile(null);
+    setSelectedFile(editorSession(runtimeId).selected);
 
     const unsubscribe = subscribeStreamingRuntime(runtimeId, (next) => {
       setRuntime(next);
