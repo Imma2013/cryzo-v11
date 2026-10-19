@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resolveServerModel } from "../src/lib/server/model-provider";
 
 const original = {
@@ -60,3 +60,5 @@ describe("Cryzo managed paid routing", () => {
     expect(result.upstreamModelId).toBe("gemini-3.8-flash");
   });
 });
+
+vi.mock("server-only", () => ({}));

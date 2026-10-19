@@ -4,6 +4,7 @@ const fake=vi.hoisted(()=>({serverReady:null as null | ((port:number,url:string)
 vi.mock("@/lib/workspace/sandbox",()=>({
   getSandbox:vi.fn(async()=>({
     fs:{rm:vi.fn(async()=>{fake.files={};}),mkdir:vi.fn(async()=>{}),exists:vi.fn(async(path:string)=>path in fake.files),readTextFile:vi.fn(async(path:string)=>fake.files[path]),writeFile:vi.fn(async(path:string,value:string)=>{fake.files[path]=value;}),readdir:vi.fn(async()=>[])},
+    watchSource:()=>()=>{},
     on:(event:string,listener:any)=>{if(event==="server-ready")fake.serverReady=listener;return()=>{};},
     spawn:vi.fn(async()=>({output:new ReadableStream({start(c){c.close();}}),exit:Promise.resolve(0),kill:vi.fn()})),
     spawnShell:vi.fn(async(command:string)=>{fake.commands.push(command);fake.starts++;queueMicrotask(()=>fake.serverReady?.(8081,"https://cryzo.test/__vv/8081/"));return{output:new ReadableStream(),exit:new Promise<number>(()=>{}),kill:vi.fn()};}),

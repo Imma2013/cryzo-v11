@@ -114,6 +114,16 @@ export function useWorkspace(conversationId: Id<"conversations">) {
     return saved;
   };
 
+  useEffect(()=>{
+    const changed=(event:Event)=>{
+      const detail=(event as CustomEvent<{conversationId:string;files:{path:string;content:string}[]}>).detail;
+      if(detail?.conversationId!==runtimeId || !isAuthenticated)return;
+      for(const file of detail.files)void saveManualFile({conversationId,artifactId:`terminal:${Date.now()}:${crypto.randomUUID()}`,filePath:file.path,content:file.content}).catch(()=>{});
+    };
+    window.addEventListener("cryzo:workspace-files-changed",changed);
+    return()=>window.removeEventListener("cryzo:workspace-files-changed",changed);
+  },[conversationId,runtimeId,isAuthenticated,saveManualFile]);
+
   const isBooting =
     isAuthenticated &&
     runtime.active &&

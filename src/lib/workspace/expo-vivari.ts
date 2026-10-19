@@ -5,7 +5,7 @@ export const EXPO_COMMAND = "node node_modules/expo/bin/cli start --go --web --l
 /** Native-only host assumptions must not leak into the browser kernel. */
 export async function prepareVivariMetro(runtime: Sandbox) {
   await runtime.fs.writeFile("metro.config.js", 'const { getDefaultConfig } = require("expo/metro-config");\nconst config = getDefaultConfig(__dirname);\nconfig.resolver.useWatchman = false;\nconfig.maxWorkers = 1;\nmodule.exports = config;\n');
-  const patch = `const fs=require('fs'),path=require('path');
+  const patch = String.raw`const fs=require('fs'),path=require('path');
 for(const name of ['lightningcss','lightningcss-wasm']){try{
  const entry=require.resolve(name), file=path.join(path.dirname(entry),'wasm-node.cjs');
  if(!fs.existsSync(file))continue;

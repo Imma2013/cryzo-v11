@@ -16,6 +16,7 @@ import {
   resetSandboxProject,
   writeFiles,
 } from "./sandbox";
+import { preparePhoneSession, releasePhoneSession } from "./expo-phone-session";
 import { closeProjectTerminals } from "./terminal-session";
 import { EXPO_COMMAND, EXPO_ENV, prepareVivariMetro } from "./expo-vivari";
 import { readSupabaseRuntimeContext } from "@/lib/developer-connections";
@@ -57,6 +58,8 @@ type RuntimeState = StreamingRuntimeSnapshot & {
 const runtimes = new Map<string, RuntimeState>();
 let sandboxAuthToken: string | null = null;
 let activeConversationId: string | null = null;
+let sourceWatcher: (()=>void) | null = null;
+let sourceWatchTimer: ReturnType<typeof setTimeout> | null = null;
 
 export function setStreamingRuntimeAuthToken(token: string | null) {
   sandboxAuthToken = token;
@@ -270,6 +273,7 @@ async function ensureContainer(conversationId: string, state: RuntimeState) {
     await previous.queue.catch(() => undefined); // Finish queued writes before clearing the singleton filesystem.
     stopDevProcess(previous);
     closeProjectTerminals(activeConversationId);
+    await releasePhoneSession(activeConversationId);
     previous.active = false;
     previous.previewUrl = null;
     previous.initialized = false;
@@ -291,8 +295,16 @@ async function ensureContainer(conversationId: string, state: RuntimeState) {
     // Vivari may persist its directory across document reloads. Claim a clean
     // project before writing the authoritative snapshot so tsc cannot compile
     // orphaned files absent from preflight validation.
+    sourceWatcher?.();sourceWatcher=null;if(sourceWatchTimer)clearTimeout(sourceWatchTimer);
     await resetSandboxProject(wc);
     activeConversationId = conversationId;
+    sourceWatcher=wc.watchSource?.(path=>{
+      const relative=path.replace(/^\/cryzo-project\//,"");
+      if(relative.split("/").some(part=>/^(node_modules|\.git|\.expo|\.next|dist|build|coverage|\.cache)$/.test(part)))return;
+      if(!/\.(?:[cm]?[jt]sx?|json|html|css|md|txt|ya?ml|toml|svg)$/.test(relative))return;
+      if(sourceWatchTimer)clearTimeout(sourceWatchTimer);
+      sourceWatchTimer=setTimeout(()=>{void state.queue.catch(()=>{}).then(()=>syncWorkspaceFiles(conversationId)).catch(()=>{});},600);
+    });
 
     wc.on("server-ready", (_port, url) => {
       if (activeConversationId !== conversationId) return;
@@ -1200,7 +1212,9 @@ async function startNativeMetro(conversationId: string, state: RuntimeState, for
   stopDevProcess(state);
   state.active = true; state.startCommand = EXPO_COMMAND; state.progress = "starting"; state.previewUrl = null; state.error = null;
   appendOutput(state, "\n$ " + EXPO_COMMAND + "\n"); emit(state);
-  const proc = await wc.spawnShell(EXPO_COMMAND, {env: EXPO_ENV}); state.devProcess = proc;
+  const publicOrigin=await preparePhoneSession(conversationId,wc,await waitForSandboxAuthToken(),chunk=>{appendOutput(state,chunk);emit(state);},force);
+  const env={...EXPO_ENV,...(publicOrigin?{EXPO_PACKAGER_PROXY_URL:publicOrigin}:{})};
+  const proc = await wc.spawnShell(EXPO_COMMAND, {env}); state.devProcess = proc;
   void proc.output.pipeTo(new WritableStream<string>({write(chunk) { if (state.devProcess === proc) { appendOutput(state,chunk); emit(state); } }})).catch(() => {});
   state.serverReadyTimer = setTimeout(() => { if (state.devProcess === proc && !state.previewUrl) setError(state,"Metro has not opened port 8081. Inspect the runtime output, then retry."); },120_000);
   void proc.exit.then(code => { if (state.devProcess !== proc) return; state.devProcess = null; clearServerReadyTimer(state); setError(state, `Metro exited with code ${code}. Reconnect to restart it.`); });

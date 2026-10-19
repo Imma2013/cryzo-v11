@@ -8,6 +8,8 @@
  * @module
  */
 
+import type * as chatgptConnections from "../chatgptConnections.js";
+import type * as expoRelay from "../expoRelay.js";
 import type * as appBackends from "../appBackends.js";
 import type * as aiUsage from "../aiUsage.js";
 import type * as artifacts from "../artifacts.js";
@@ -35,6 +37,8 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  expoRelay: typeof expoRelay;
+  chatgptConnections: typeof chatgptConnections;
   aiUsage: typeof aiUsage;
   appBackends: typeof appBackends;
   artifacts: typeof artifacts;
