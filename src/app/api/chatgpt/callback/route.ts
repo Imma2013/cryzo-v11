@@ -3,7 +3,7 @@ import { CHATGPT_COOKIE, completeChatGPTConnection, chatgptConfiguration } from 
 export const runtime="nodejs";
 export async function GET(req:NextRequest) {
   const cfg=chatgptConfiguration();
-  const registered=cfg.redirectUri ? new URL(cfg.redirectUri).origin : req.nextUrl.origin;
+  const registered=cfg.configured ? new URL(cfg.redirectUri).origin : req.nextUrl.origin;
   const destination=new URL("/chat/apps",registered);
   try {
     const browser=req.cookies.get(CHATGPT_COOKIE)?.value;

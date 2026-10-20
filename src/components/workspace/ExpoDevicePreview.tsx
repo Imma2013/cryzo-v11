@@ -17,7 +17,8 @@ export function useExpoPreview(conversationId: Id<"conversations">, files: FileM
   const isExpo=isExpoProject(files);
   const start=useCallback(async(force=false)=>{if(enabled&&isExpo)await ensureNativePreview(id,force).catch(()=>{});},[enabled,isExpo,id]);
   useEffect(()=>{if(enabled&&isExpo&&ready)void start();},[enabled,isExpo,ready,start]);
-  return {data:state.data,loading:state.phase==="connecting",error:state.error,ready:state.phase==="ready",start,message:state.message,webPreviewUrl:getStreamingRuntimeSnapshot(id).previewUrl};
+  const browser=getStreamingRuntimeSnapshot(id);
+  return {webError:browser.error,webLoading:browser.active && browser.progress!=="ready" && browser.progress!=="error",data:state.data,loading:state.phase==="connecting",error:state.error,ready:state.phase==="ready",start,message:state.message,webPreviewUrl:getStreamingRuntimeSnapshot(id).previewUrl};
 }
 
 export type ExpoPreviewState = ReturnType<typeof useExpoPreview>;
@@ -25,9 +26,9 @@ export type ExpoPreviewState = ReturnType<typeof useExpoPreview>;
 export function NativeExpoPreview({ preview }: { preview: ExpoPreviewState }) {
   if (preview.webPreviewUrl) return <LivePreview url={preview.webPreviewUrl} isBooting={false} progress="ready" mobile />;
   return <div className="flex h-full flex-col items-center justify-center gap-4 bg-zinc-950 px-6 text-center text-white">
-    {preview.loading ? <><Loader2 className="animate-spin" /><p>Starting your app preview…</p></> :
-      <><p>{preview.error || (preview.ready ? "Browser preview is unavailable for this app's native modules. Device Preview opens the native app." : "Creating your mobile app…")}</p>
-      {preview.ready && <button type="button" onClick={() => void preview.start(true)} className="rounded-xl bg-blue-600 px-4 py-2 text-sm">Retry preview</button>}</>}
+    {preview.webLoading ? <><Loader2 className="animate-spin" /><p>Starting your app preview…</p></> :
+      <><p>{preview.webError || (preview.ready ? "Browser preview is unavailable for this app's native modules. Device Preview opens the native app." : "Creating your mobile app…")}</p>
+      {(preview.webError || preview.ready) && <button type="button" onClick={() => void preview.start(true)} className="rounded-xl bg-blue-600 px-4 py-2 text-sm">Retry preview</button>}</>}
   </div>;
 }
 

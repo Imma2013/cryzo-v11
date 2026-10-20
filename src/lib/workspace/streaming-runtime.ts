@@ -780,10 +780,19 @@ async function executeSandboxAction(
   await startDevServer(conversationId, state, action.content);
 }
 
-export async function saveStreamingRuntimeFile(
+export function saveStreamingRuntimeFile(conversationId: string, filePath: string, content: string, expectedContent?: string) {
+  const state=getState(conversationId);
+  const expected=expectedContent ?? state.files[filePath]?.content;
+  const task=state.queue.catch(()=>{}).then(()=>writeManualRuntimeFile(conversationId,filePath,content,expected));
+  state.queue=task.then(()=>{},()=>{});
+  return task;
+}
+
+async function writeManualRuntimeFile(
   conversationId: string,
   filePath: string,
   content: string,
+  expectedContent: string | undefined,
 ) {
   const state = getState(conversationId);
   state.active = true;
@@ -804,11 +813,13 @@ export async function saveStreamingRuntimeFile(
   }
 
   const safeAction = validation.action as ArtifactAction & { filePath: string };
+  if (fileContent(state,filePath) !== (expectedContent ?? "")) throw new Error("This file changed while you were editing. Your draft has been kept.");
   if (state.nativeTarget) {
     if (["app.json", "tsconfig.json", "index.ts", "metro.config.js"].includes(safeAction.filePath) || isViteOnlyMobileArtifact(safeAction.filePath)) throw new Error("Native framework configuration is managed by Cryzo. Edit app screens instead.");
     if (safeAction.filePath === "package.json") safeAction.content = reconcileExpoPackage(safeAction.content, fileContent(state, "package.json"));
   }
   const wc = await ensureContainer(conversationId, state);
+  if (await wc.fs.exists(safeAction.filePath) && await wc.fs.readTextFile(safeAction.filePath) !== (expectedContent ?? "")) throw new Error("This file changed in the terminal. Your draft has been kept.");
   await writeFiles(wc, [safeAction]);
   updateFileMap(state, safeAction);
   if (validation.output) appendOutput(state, validation.output);

@@ -21,9 +21,9 @@ export function preparePhoneSession(id:string,runtime:Sandbox,token:string,outpu
  const current=pending.get(id);if(current)return current;
  const task=(async()=>{
   const old=controllers.get(id);
-  if(old && old.config.expiresAt>Date.now()+60_000){
+  if(old && old.runtime===runtime && old.config.expiresAt>Date.now()+60_000){
    old.token=token;
-   if(force){const renewed=await api(token,{operation:"renew",sessionId:old.config.sessionId}) as Config;old.config=renewed;update(id,{phase:"connecting",error:"",message:"Reconnecting phone preview…"});await runtime.setPhoneRelay(renewed.producerUrl);}
+   if(force){const renewed=await api(token,{operation:"renew",sessionId:old.config.sessionId}) as Config;old.config=renewed;update(id,{phase:"connecting",error:"",message:"Reconnecting phone preview…",data:null});await runtime.setPhoneRelay(renewed.producerUrl);}
    return old.config.publicOrigin;
   }
   if(old)await releasePhoneSession(id);
@@ -31,22 +31,24 @@ export function preparePhoneSession(id:string,runtime:Sandbox,token:string,outpu
   try{
    const config=await api(token,{operation:"start",conversationId:id}) as Config;
    await runtime.setPhoneRelay(config.producerUrl);
-   let stopped=false,polling=false,printed=false,renewing=false;
-   const controller={runtime,token,config,renew:0 as unknown as ReturnType<typeof setInterval>,poll:0 as unknown as ReturnType<typeof setInterval>,stop:()=>{stopped=true;}};
-   const check=async()=>{
-    if(stopped || polling)return;polling=true;
+   let stopped=false,polling=false,printed=false,renewing=false,lastRenewedAt=Date.now(),lastCheckedAt=0;
+   const resume=()=>{if(document.visibilityState!=="visible")return;void (async()=>{if(Date.now()-lastRenewedAt>30_000)await renew();await check(true);})();};
+   const controller={runtime,token,config,renew:0 as unknown as ReturnType<typeof setInterval>,poll:0 as unknown as ReturnType<typeof setInterval>,stop:()=>{stopped=true;document.removeEventListener("visibilitychange",resume);window.removeEventListener("online",resume);window.removeEventListener("pageshow",resume);}};
+   const check=async(force=false)=>{
+    if(stopped || polling || (!force && phoneSnapshot(id).phase==="ready" && Date.now()-lastCheckedAt<30_000))return;polling=true;lastCheckedAt=Date.now();
     try{
      const status=await api(controller.token,{operation:"status",sessionId:config.sessionId});if(stopped)return;
      if(status.phase==="ready"){
       update(id,{phase:"ready",error:"",message:"Ready to scan",data:{deviceUrl:status.deviceUrl,webPreviewUrl:null,launchTarget:"expo-go",sourceRevision:config.sessionId,status:"ready"}});
       if(!printed){printed=true;output("\n"+terminalQr(status.deviceUrl)+"\nMetro waiting on "+status.deviceUrl+"\nScan with Expo Go or your iPhone camera. Keep Cryzo open.\n");}
-     }else update(id,{phase:status.phase==="error"?"error":"connecting",message:status.message||"Connecting phone preview…",error:status.phase==="error"?status.message:""});
-    }catch(error){if(!stopped)update(id,{phase:"error",error:error instanceof Error?error.message:"Phone preview disconnected"});}
+     }else update(id,{phase:status.phase==="error"?"error":"connecting",message:status.message||"Connecting phone preview…",error:status.phase==="error"?status.message:"",data:null});
+    }catch(error){if(!stopped)update(id,{phase:"error",error:error instanceof Error?error.message:"Phone preview disconnected",data:null});}
     finally{polling=false;}
    };
-   const renew=async()=>{if(stopped||renewing)return;renewing=true;try{controller.config=await api(controller.token,{operation:"renew",sessionId:config.sessionId});if(!stopped)await runtime.setPhoneRelay(controller.config.producerUrl);}catch(error){if(!stopped)update(id,{phase:"error",error:error instanceof Error?error.message:"Reconnect phone preview"});}finally{renewing=false;}};
+   const renew=async()=>{if(stopped||renewing)return;renewing=true;try{controller.config=await api(controller.token,{operation:"renew",sessionId:config.sessionId});if(!stopped){await runtime.setPhoneRelay(controller.config.producerUrl);lastRenewedAt=Date.now();}}catch(error){if(!stopped)update(id,{phase:"error",error:error instanceof Error?error.message:"Reconnect phone preview",data:null});}finally{renewing=false;}};
+   document.addEventListener("visibilitychange",resume);window.addEventListener("online",resume);window.addEventListener("pageshow",resume);
    controller.poll=setInterval(()=>void check(),4_000);controller.renew=setInterval(()=>void renew(),210_000);controllers.set(id,controller);void check();
    return config.publicOrigin;
-  }catch(error){const message=error instanceof Error?error.message:"Phone preview could not connect";update(id,{phase:"error",error:message,message});output("\n[Phone preview] "+message+"\n");return null;}
- })().catch(error=>{const message=error instanceof Error?error.message:"Phone preview disconnected";update(id,{phase:"error",error:message,message});output("\n[Phone preview] "+message+"\n");return null;});pending.set(id,task);const done=()=>{if(pending.get(id)===task)pending.delete(id);};void task.then(done,done);return task;
+  }catch(error){const message=error instanceof Error?error.message:"Phone preview could not connect";update(id,{phase:"error",error:message,message,data:null});output("\n[Phone preview] "+message+"\n");return null;}
+ })().catch(error=>{const message=error instanceof Error?error.message:"Phone preview disconnected";update(id,{phase:"error",error:message,message,data:null});output("\n[Phone preview] "+message+"\n");return null;});pending.set(id,task);const done=()=>{if(pending.get(id)===task)pending.delete(id);};void task.then(done,done);return task;
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useReducer, useState } from "react";
+import { useEffect, useReducer, useState, type KeyboardEvent } from "react";
 import { useQuery } from "convex/react";
 import { api } from "../../../convex/_generated/api";
 import { Panel, Group, Separator } from "react-resizable-panels";
@@ -17,6 +17,7 @@ import {
   RefreshCw,
   RotateCcw,
   Save,
+  X,
 } from "lucide-react";
 import { useWorkspace } from "@/hooks/use-workspace";
 import {
@@ -152,6 +153,21 @@ export function WorkspacePanel({
     } finally {
       setSavingFile(false);
     }
+  };
+
+  const saveShortcut = (event: KeyboardEvent) => {
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
+      event.preventDefault();
+      if (!event.repeat) void saveSelectedFile();
+    }
+  };
+  const closeFileTab = (path: string) => {
+    // Closing a tab keeps its draft in the conversation's editor session.
+    const remaining=editor.tabs.filter(value=>value!==path && files[value]?.type==="file");
+    if (!remaining.length) return;
+    editor.tabs=remaining;
+    if (selectedFile===path) setSelectedFile(remaining[remaining.length-1]);
+    refreshEditor();
   };
 
   const discardSelectedFile = () => {
@@ -328,12 +344,12 @@ export function WorkspacePanel({
           )}
           <div className="min-h-0 flex-1 overflow-hidden">
             {selectedFile ? (
-              <CodeEditor
+              <div onKeyDownCapture={saveShortcut} className="contents"><CodeEditor
                 filePath={selectedFile}
                 content={draftContent}
                 editable
                 onChange={setDraftContent}
-              />
+              /></div>
             ) : (
               <div className="flex h-full items-center justify-center text-xs text-zinc-600">
                 Choose a file to edit its code.
@@ -551,7 +567,14 @@ export function WorkspacePanel({
               <div className="flex-1 overflow-hidden">
                 {selectedFile ? (
                   <div className="flex h-full flex-col">
-                    <div className="flex shrink-0 overflow-x-auto border-b border-zinc-800" role="tablist" aria-label="Open files">{editor.tabs.filter(path => files[path]?.type === "file").map(path => <button type="button" role="tab" aria-selected={selectedFile === path} key={path} onClick={() => setSelectedFile(path)} onAuxClick={event => { if (event.button === 1 && (!editor.drafts[path] || editor.drafts[path].content === files[path]?.content)) { editor.tabs = editor.tabs.filter(p => p !== path); refreshEditor(); } }} className={"shrink-0 border-r border-zinc-800 px-3 py-2 text-xs " + (selectedFile === path ? "bg-zinc-800 text-white" : "text-zinc-500")}>{path.split("/").pop()}{editor.drafts[path] && editor.drafts[path].content !== files[path]?.content ? " •" : ""}</button>)}</div>
+                    <div className="flex shrink-0 overflow-x-auto border-b border-zinc-800" role="tablist" aria-label="Open files">
+                      {editor.tabs.filter(path=>files[path]?.type==="file").map(path=><div key={path} className="flex shrink-0 items-center border-r border-zinc-800" role="presentation">
+                        <button type="button" role="tab" aria-selected={selectedFile===path} title={path} onClick={()=>setSelectedFile(path)} onAuxClick={event=>{if(event.button===1){event.preventDefault();closeFileTab(path);}}} className={"px-3 py-2 text-xs "+(selectedFile===path?"bg-zinc-800 text-white":"text-zinc-500")}>
+                          {path.split("/").pop()}{editor.drafts[path] && editor.drafts[path].content!==files[path]?.content?" •":""}
+                        </button>
+                        {editor.tabs.filter(value=>files[value]?.type==="file").length>1 && <button type="button" aria-label={"Close "+path} title="Close tab (draft kept)" onClick={()=>closeFileTab(path)} className="mr-1 rounded p-1 text-zinc-500 hover:bg-zinc-800 hover:text-white"><X size={12}/></button>}
+                      </div>)}
+                    </div>
                     <div className="flex min-h-10 items-center gap-2 border-b border-zinc-800 px-3 text-xs text-zinc-500">
                       <span className="min-w-0 flex-1 truncate">{selectedFile}</span>
                       {dirty && <span className="text-amber-400">Unsaved</span>}
@@ -579,12 +602,12 @@ export function WorkspacePanel({
                       </div>
                     )}
                     <div className="flex-1 overflow-hidden">
-                      <CodeEditor
+                      <div onKeyDownCapture={saveShortcut} className="contents"><CodeEditor
                         filePath={selectedFile}
                         content={draftContent}
                         editable
                         onChange={setDraftContent}
-                      />
+                      /></div>
                     </div>
                   </div>
                 ) : (

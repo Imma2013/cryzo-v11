@@ -10,7 +10,9 @@ export async function completedChatGPTResponse(response: Response): Promise<Resp
       if (done) break;
       received += value.byteLength;
       if (received > 32_000_000) throw new Error("ChatGPT response exceeded the supported size");
-      pending += decoder.decode(value,{stream:true}).replace(/\r\n/g,"\n");
+      pending += decoder.decode(value,{stream:true});
+      // CR and LF can arrive in separate network chunks. Normalize the buffered frame.
+      pending = pending.replace(/\r\n/g,"\n");
       let boundary: number;
       while ((boundary = pending.indexOf("\n\n")) !== -1) {
         const frame = pending.slice(0,boundary); pending = pending.slice(boundary+2);

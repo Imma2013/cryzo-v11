@@ -15,3 +15,10 @@ describe("ChatGPT plan transport",()=>{
   expect(limited.status).toBe(429);
  });
 });
+
+it("reads CRLF event frames and UTF-8 characters split across network chunks",async()=>{
+ const response={id:"split",output:[{text:"café 🌍"}]};
+ const bytes=new TextEncoder().encode("data: "+JSON.stringify({type:"response.completed",response})+"\r\n\r\n");
+ const stream=new ReadableStream<Uint8Array>({start(controller){for(const byte of bytes)controller.enqueue(Uint8Array.of(byte));controller.close();}});
+ expect(await (await completedChatGPTResponse(new Response(stream))).json()).toEqual(response);
+});

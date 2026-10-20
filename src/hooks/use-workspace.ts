@@ -103,7 +103,7 @@ export function useWorkspace(conversationId: Id<"conversations">) {
   }, [firstFile, runtime.files, selectedFile]);
 
   const saveFile = async (filePath: string, content: string) => {
-    const saved = await saveStreamingRuntimeFile(runtimeId, filePath, content);
+    const saved = await saveStreamingRuntimeFile(runtimeId, filePath, content, runtime.files[filePath]?.content);
     const artifactId = `manual:${Date.now()}:${crypto.randomUUID()}`;
     await saveManualFile({
       conversationId,
