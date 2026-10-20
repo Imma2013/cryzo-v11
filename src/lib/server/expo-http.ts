@@ -21,7 +21,7 @@ export async function forwardExpoHttp(req:Request,sessionId:string,host:string,p
  const allowed=["accept","expo-platform","expo-protocol-version","expo-runtime-version","expo-expect-signature","if-none-match"];
  const lines=[`${req.method} ${path} HTTP/1.1`,`Host: ${host}`,`X-Forwarded-Host: ${host}`,"X-Forwarded-Proto: https","Accept-Encoding: identity","Connection: close"];
  for(const name of allowed){const value=req.headers.get(name);if(value && !/[\r\n]/.test(value))lines.push(`${name}: ${value}`);}
- await channel.send(Buffer.from(lines.join("\r\n")+"\r\n\r\n"));
+ try{await channel.send(Buffer.from(lines.join("\r\n")+"\r\n\r\n"));}catch(error){await channel.close();throw error;}
  let head=Buffer.alloc(0),boundary=-1;
  try{
   while((boundary=head.indexOf("\r\n\r\n"))<0){const next=await reader.read();if(next.done)throw new Error("Metro closed before replying");head=Buffer.concat([head,Buffer.from(next.value)]);if(head.length>131072 && head.indexOf("\r\n\r\n")<0)throw new Error("Metro response header too large");}

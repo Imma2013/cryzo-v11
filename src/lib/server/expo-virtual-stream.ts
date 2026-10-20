@@ -12,9 +12,10 @@ export async function openExpoStream(sessionId:string,signal?:AbortSignal){
  let unsubscribe=()=>{};
  const timer=setTimeout(()=>{failure=new Error("Expo stream expired. Reconnect your phone");wake?.();},285_000);
  const abort=()=>{failure=new Error("Expo request cancelled");wake?.();void close();};
- async function close(){if(closed)return;closed=true;clearTimeout(timer);signal?.removeEventListener("abort",abort);unsubscribe();wake?.();await client.close();await fetchMutation(relayApi.endStream,args).catch(()=>{});}
+ async function close(){if(closed)return;closed=true;clearTimeout(timer);signal?.removeEventListener("abort",abort);unsubscribe();wake?.();try{await client.close();}finally{await fetchMutation(relayApi.endStream,args).catch(()=>{});}}
  const readable=new ReadableStream<Uint8Array>({
   async pull(controller){
+   try{
    while(!closed){
     if(failure){controller.error(failure);await close();return;}
     const frame=frames.shift();if(!frame){await new Promise<void>(resolve=>{wake=resolve;});wake=undefined;continue;}
@@ -24,6 +25,7 @@ export async function openExpoStream(sessionId:string,signal?:AbortSignal){
     if(value[0]===4 || value[0]===20){controller.close();await close();return;}
    }
    controller.close();
+   }catch(error){controller.error(error);await close();}
   },cancel:()=>close(),
  },{highWaterMark:1});
  unsubscribe=client.onUpdate(relayApi.pull,{...args,direction:"out"},result=>{
@@ -34,7 +36,7 @@ export async function openExpoStream(sessionId:string,signal?:AbortSignal){
  },()=>{failure=new Error("Expo relay disconnected");wake?.();});
  signal?.addEventListener("abort",abort,{once:true});if(signal?.aborted)abort();
  const target=Buffer.alloc(9);target.writeUInt16LE(8081,0);target.write("phone:0",2);
- await pushPackets(sessionId,epoch,"in",[{streamId,packet:packet(19,streamId,target)},{streamId,packet:credit(streamId)}]);
+ try{await pushPackets(sessionId,epoch,"in",[{streamId,packet:packet(19,streamId,target)},{streamId,packet:credit(streamId)}]);}catch(error){await close();throw error;}
  return{
   readable,close,
   async send(value:Uint8Array){if(closed)throw new Error("Expo connection closed");const packets=[];for(let i=0;i<value.length;i+=65536)packets.push({streamId,packet:packet(2,streamId,value.subarray(i,i+65536))});await pushPackets(sessionId,epoch,"in",packets);},

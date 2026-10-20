@@ -819,7 +819,8 @@ async function writeManualRuntimeFile(
     if (safeAction.filePath === "package.json") safeAction.content = reconcileExpoPackage(safeAction.content, fileContent(state, "package.json"));
   }
   const wc = await ensureContainer(conversationId, state);
-  if (await wc.fs.exists(safeAction.filePath) && await wc.fs.readTextFile(safeAction.filePath) !== (expectedContent ?? "")) throw new Error("This file changed in the terminal. Your draft has been kept.");
+  const exists=await wc.fs.exists(safeAction.filePath);
+  if ((!exists && expectedContent!==undefined) || (exists && await wc.fs.readTextFile(safeAction.filePath)!==(expectedContent ?? ""))) throw new Error("This file changed in the terminal. Your draft has been kept.");
   await writeFiles(wc, [safeAction]);
   updateFileMap(state, safeAction);
   if (validation.output) appendOutput(state, validation.output);
