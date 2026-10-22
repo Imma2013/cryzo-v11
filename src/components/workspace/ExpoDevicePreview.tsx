@@ -54,7 +54,7 @@ export function ExpoDevicePreview({ preview, compact = false }: { preview: ExpoP
       <div className="flex items-center justify-between"><h2 className="font-semibold">Preview on your phone</h2><button type="button" aria-label="Close phone preview" onClick={() => setOpen(false)}><X size={16}/></button></div>
       <p className="mt-2 text-xs leading-5 text-zinc-300">{preview.data?.launchTarget === "development-build" ? "Install this project's development build, then scan to open it." : "Install Expo Go. Scan with your iPhone camera or the scanner in Expo Go on Android."}</p>
       {preview.loading && <p role="status" className="mt-4 flex items-center gap-2 text-xs"><Loader2 size={14} className="animate-spin"/>{preview.message || "Starting Expo…"}</p>}
-      {!preview.ready && <p className="mt-3 text-xs text-zinc-300">{preview.message || "The QR code appears after the public Expo manifest is reachable."}</p>}
+      {!preview.ready && !preview.loading && !preview.error && <p className="mt-3 text-xs text-zinc-300">{preview.message || "The QR code appears after the public Expo manifest is reachable."}</p>}
       {preview.error && <p role="alert" className="mt-3 text-xs text-red-300">{preview.error}</p>}
       {canScan && <div className="mt-4">
         <img src={"/api/publish/mobile/qr?data=" + encodeURIComponent(canScan.deviceUrl)} width={224} height={224} alt="Scan to open your app" className="mx-auto rounded-lg bg-white p-2"/>

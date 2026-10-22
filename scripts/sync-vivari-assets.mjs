@@ -19,6 +19,7 @@
 // Vivari's own scripts/vendor-npm.mjs (MIT, © Duc Trung Mai).
 import { createHash } from "node:crypto";
 import { patchVivariRelay } from "./vivari-relay-patch.mjs";
+import { patchVivariPreview } from "./vivari-preview-patch.mjs";
 import { execSync } from "node:child_process";
 import {
   copyFileSync,
@@ -93,7 +94,7 @@ function syncRuntime() {
     if (name === kernelName) writeFileSync(join(assetsDir,kernelOutput),patched);
     else copyFileSync(join(dist,"assets",name),join(assetsDir,name));
   }
-  copyFileSync(join(dist, "assets", "sw.js"), join(publicDir, "sw.js"));
+  writeFileSync(join(publicDir, "sw.js"), patchVivariPreview(readFileSync(join(dist, "assets", "sw.js"), "utf8"), version));
   const entry = readFileSync(join(dist,"index.js"),"utf8");
   if (!entry.includes(kernelName)) throw new Error("Vivari entry no longer references the pinned kernel");
   writeFileSync(join(publicDir,"vivari","index.js"),entry.replaceAll(kernelName,kernelOutput));

@@ -10,7 +10,18 @@ const pending=new Map<string,Promise<string|null>>();
 export function phoneSnapshot(id:string){return snapshots.get(id)||empty;}
 export function subscribePhoneSession(id:string,listener:()=>void){let values=listeners.get(id);if(!values){values=new Set();listeners.set(id,values);}values.add(listener);return()=>{values.delete(listener);};}
 function update(id:string,value:Partial<PhoneSnapshot>){snapshots.set(id,{...phoneSnapshot(id),...value});listeners.get(id)?.forEach(listener=>listener());}
-async function api(token:string,body:Record<string,unknown>){const response=await fetch("/api/preview/expo/session",{method:"POST",headers:{"Content-Type":"application/json",Authorization:"Bearer "+token},body:JSON.stringify(body),signal:AbortSignal.timeout(25_000)});const data=await response.json();if(!response.ok)throw new Error(data.error || "Expo phone forwarding could not connect");return data;}
+async function api(token:string,body:Record<string,unknown>){
+ const response=await fetch("/api/expo/session",{method:"POST",headers:{"Content-Type":"application/json",Authorization:"Bearer "+token},body:JSON.stringify(body),signal:AbortSignal.timeout(25_000)});
+ const fallback="Phone preview could not connect (HTTP "+response.status+"). Reconnect to retry.";
+ if(!response.headers.get("content-type")?.includes("application/json"))throw new Error(fallback);
+ let data:any;try{data=await response.json();}catch{throw new Error(fallback);}
+ if(!data || typeof data!=="object")throw new Error(fallback);
+ if(!response.ok)throw new Error(typeof data.error==="string"?data.error:fallback);
+ if(body.operation==="start" || body.operation==="renew"){
+  if(typeof data.sessionId!=="string" || !/^[a-f0-9]{32}$/.test(data.sessionId) || typeof data.publicOrigin!=="string" || typeof data.producerUrl!=="string" || typeof data.expiresAt!=="number")throw new Error("Phone preview returned an incomplete session. Reconnect to retry.");
+ }
+ return data;
+}
 export function terminalQr(url:string){
  const matrix=QRCode.create(url,{errorCorrectionLevel:"L"}).modules,quiet=4,side=matrix.size+quiet*2;
  const bit=(x:number,y:number)=>x>=quiet&&y>=quiet&&x<side-quiet&&y<side-quiet?matrix.get(y-quiet,x-quiet):0;

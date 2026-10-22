@@ -24,7 +24,7 @@ export async function relayConfiguration(sessionId:string,userId:string,origin:s
  const status=await relayStatus(sessionId);if(status.userId!==userId)throw new Error("Unauthorized Expo session");
  const claims:Ticket={sessionId,userId,epoch:status.epoch,origin,expiresAt:Math.min(status.expiresAt,Date.now()+300_000)};
  const payload=Buffer.from(JSON.stringify(claims)).toString("base64url");const signature=createHmac("sha256",relaySecret()).update("cryzo-expo-producer-v1:"+payload).digest("base64url");
- const producer=new URL("/api/preview/expo/producer",origin);producer.protocol="wss:";producer.searchParams.set("ticket",payload+"."+signature);
+ const producer=new URL("/api/expo/producer",origin);producer.protocol="wss:";producer.searchParams.set("ticket",payload+"."+signature);
  const publicOrigin="https://"+previewHost(sessionId);
  return{sessionId,producerUrl:producer.toString(),publicOrigin,deviceUrl:"exps://"+previewHost(sessionId),expiresAt:status.expiresAt};
 }
