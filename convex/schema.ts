@@ -4,6 +4,28 @@ import { authTables } from "@convex-dev/auth/server";
 
 export default defineSchema({
   ...authTables,
+  expoRelaySessions: defineTable({
+    sessionId:v.string(), userId:v.id("users"), conversationId:v.id("conversations"),
+    epoch:v.number(), online:v.boolean(), listening:v.boolean(), heartbeatAt:v.number(),
+    nextSeq:v.number(), pendingBytes:v.number(), expiresAt:v.number(),
+  }).index("by_session",["sessionId"]).index("by_user_expiry",["userId","expiresAt"]).index("by_expiry",["expiresAt"]).index("by_heartbeat",["online","heartbeatAt"]),
+  expoRelayStreams: defineTable({
+    sessionId:v.string(), epoch:v.number(), streamId:v.number(), expiresAt:v.number(),
+  }).index("by_stream",["sessionId","epoch","streamId"]).index("by_session_expiry",["sessionId","epoch","expiresAt"]).index("by_expiry",["expiresAt"]),
+  expoRelayFrames: defineTable({
+    sessionId:v.string(),epoch:v.number(),streamId:v.number(),direction:v.union(v.literal("in"),v.literal("out")),
+    sequence:v.number(),packet:v.bytes(),size:v.number(),expiresAt:v.number(),
+  }).index("by_session_direction",["sessionId","epoch","direction","sequence"])
+    .index("by_stream_direction",["sessionId","epoch","streamId","direction","sequence"]).index("by_expiry",["expiresAt"]),
+  chatgptOAuthAttempts: defineTable({
+    userId: v.id("users"), browserHash: v.string(), stateHash: v.string(),
+    ciphertext: v.string(), iv: v.string(), tag: v.string(), expiresAt: v.number(),
+  }).index("by_browser", ["browserHash"]).index("by_expiry", ["expiresAt"]),
+  chatgptConnections: defineTable({
+    userId: v.id("users"), subject: v.string(), email: v.optional(v.string()),
+    ciphertext: v.string(), iv: v.string(), tag: v.string(), expiresAt: v.number(),
+    version: v.number(), refreshLease: v.optional(v.number()), updatedAt: v.number(),
+  }).index("by_user", ["userId"]),
 
   users: defineTable({
     name: v.optional(v.string()),

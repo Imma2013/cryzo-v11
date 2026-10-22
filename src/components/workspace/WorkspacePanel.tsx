@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useReducer, useState, type KeyboardEvent } from "react";
 import { useQuery } from "convex/react";
 import { api } from "../../../convex/_generated/api";
 import { Panel, Group, Separator } from "react-resizable-panels";
@@ -17,6 +17,7 @@ import {
   RefreshCw,
   RotateCcw,
   Save,
+  X,
 } from "lucide-react";
 import { useWorkspace } from "@/hooks/use-workspace";
 import {
@@ -30,10 +31,11 @@ import { WorkspaceTerminal } from "./WorkspaceTerminal";
 import { PublishControls } from "./PublishControls";
 import { WorkspaceDashboard } from "./WorkspaceDashboard";
 import { ExpoDevicePreview, NativeExpoPreview, useExpoPreview } from "./ExpoDevicePreview";
+import { editorSession, draftConflicts } from "@/lib/workspace/editor-session";
 import { hasNativeSource } from "@/lib/workspace/native-target";
 import { Id } from "../../../convex/_generated/dataModel";
 
-type ViewMode = "preview" | "dashboard";
+type ViewMode = "preview" | "code" | "dashboard";
 type MobilePanel = "preview" | "code" | "files" | "dashboard";
 
 export type WorkspaceStatus = {
@@ -62,7 +64,8 @@ export function WorkspacePanel({
   const [refreshToken, setRefreshToken] = useState(0);
   const [showErrorLogs, setShowErrorLogs] = useState(false);
   const [retrying, setRetrying] = useState(false);
-  const [draftContent, setDraftContent] = useState("");
+  const [, refreshEditor] = useReducer(value => value + 1, 0);
+  const editor = editorSession(String(conversationId));
   const [savingFile, setSavingFile] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
@@ -117,21 +120,34 @@ export function WorkspacePanel({
     }, onBackToChat ? 150 : 0);
   };
   const selectedContent = selectedFile ? files[selectedFile]?.content || "" : "";
+  const draft = selectedFile ? editor.drafts[selectedFile] : undefined;
+  const draftContent = draft?.content ?? selectedContent;
   const dirty = Boolean(selectedFile && draftContent !== selectedContent);
+  const conflict = draftConflicts(draft, selectedContent);
+  const setDraftContent = (content: string) => {
+    if (!selectedFile) return;
+    editor.drafts[selectedFile] = { base: draft?.base ?? selectedContent, content };
+    refreshEditor();
+  };
   const errorSummary = error?.split("\n")[0] || "The preview server could not start.";
 
   useEffect(() => {
-    setDraftContent(selectedContent);
+    if (!selectedFile) return;
+    editor.selected = selectedFile;
+    if (!editor.tabs.includes(selectedFile)) editor.tabs.push(selectedFile);
+    refreshEditor();
     setSaveError(null);
-  }, [selectedFile, selectedContent]);
+  }, [selectedFile, editor]);
 
   const saveSelectedFile = async () => {
     if (!selectedFile || !dirty || savingFile) return;
+    if (conflict) { setSaveError("This file changed while you were editing. Copy your changes or discard the draft before saving."); return; }
     setSavingFile(true);
     setSaveError(null);
     try {
       const saved = await saveFile(selectedFile, draftContent);
-      setDraftContent(saved.content);
+      editor.drafts[selectedFile] = { base: saved.content, content: saved.content };
+      refreshEditor();
     } catch (saveFailure) {
       setSaveError(saveFailure instanceof Error ? saveFailure.message : "Unable to save file");
     } finally {
@@ -139,8 +155,24 @@ export function WorkspacePanel({
     }
   };
 
+  const saveShortcut = (event: KeyboardEvent) => {
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
+      event.preventDefault();
+      if (!event.repeat) void saveSelectedFile();
+    }
+  };
+  const closeFileTab = (path: string) => {
+    // Closing a tab keeps its draft in the conversation's editor session.
+    const remaining=editor.tabs.filter(value=>value!==path && files[value]?.type==="file");
+    if (!remaining.length) return;
+    editor.tabs=remaining;
+    if (selectedFile===path) setSelectedFile(remaining[remaining.length-1]);
+    refreshEditor();
+  };
+
   const discardSelectedFile = () => {
-    setDraftContent(selectedContent);
+    if (selectedFile) delete editor.drafts[selectedFile];
+    refreshEditor();
     setSaveError(null);
   };
 
@@ -297,7 +329,7 @@ export function WorkspacePanel({
               <button
                 type="button"
                 onClick={() => void saveSelectedFile()}
-                disabled={!dirty || savingFile}
+                disabled={!dirty || savingFile || conflict}
                 className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-white px-2.5 text-xs font-semibold text-black disabled:opacity-30"
               >
                 {savingFile ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
@@ -305,19 +337,19 @@ export function WorkspacePanel({
               </button>
             </div>
           )}
-          {saveError && (
+          {(saveError || conflict) && (
             <div className="shrink-0 border-b border-red-950 bg-red-950/20 px-3 py-2 text-[11px] text-red-300">
-              {saveError}
+              {saveError || "File changed externally. Your draft has been kept. Copy it or discard to load the latest version."}
             </div>
           )}
           <div className="min-h-0 flex-1 overflow-hidden">
             {selectedFile ? (
-              <CodeEditor
+              <div onKeyDownCapture={saveShortcut} className="contents"><CodeEditor
                 filePath={selectedFile}
                 content={draftContent}
                 editable
                 onChange={setDraftContent}
-              />
+              /></div>
             ) : (
               <div className="flex h-full items-center justify-center text-xs text-zinc-600">
                 Choose a file to edit its code.
@@ -470,6 +502,7 @@ export function WorkspacePanel({
             <Eye size={12} />
             Preview
           </button>
+          <button type="button" onClick={() => setViewMode("code")} className={"flex items-center gap-1.5 rounded px-3 py-1 text-xs font-medium " + (viewMode === "code" ? "bg-zinc-700 text-white" : "text-zinc-400 hover:text-white")}><FileText size={12}/>Code</button>
           <button
             type="button"
             onClick={() => setViewMode("dashboard")}
@@ -520,7 +553,7 @@ export function WorkspacePanel({
       {viewMode === "preview" ? (
         <div className="flex-1 overflow-hidden">{previewContent}</div>
       ) : (
-        <WorkspaceDashboard conversationId={conversationId} onRequestBackend={requestBackend}>
+        <WorkspaceCodeFrame dashboard={viewMode === "dashboard"} conversationId={conversationId} onRequestBackend={requestBackend}>
         <Group orientation="vertical" className="flex-1">
           <Panel defaultSize={65} minSize={30}>
             <div className="flex h-full">
@@ -534,6 +567,14 @@ export function WorkspacePanel({
               <div className="flex-1 overflow-hidden">
                 {selectedFile ? (
                   <div className="flex h-full flex-col">
+                    <div className="flex shrink-0 overflow-x-auto border-b border-zinc-800" role="tablist" aria-label="Open files">
+                      {editor.tabs.filter(path=>files[path]?.type==="file").map(path=><div key={path} className="flex shrink-0 items-center border-r border-zinc-800" role="presentation">
+                        <button type="button" role="tab" aria-selected={selectedFile===path} title={path} onClick={()=>setSelectedFile(path)} onAuxClick={event=>{if(event.button===1){event.preventDefault();closeFileTab(path);}}} className={"px-3 py-2 text-xs "+(selectedFile===path?"bg-zinc-800 text-white":"text-zinc-500")}>
+                          {path.split("/").pop()}{editor.drafts[path] && editor.drafts[path].content!==files[path]?.content?" •":""}
+                        </button>
+                        {editor.tabs.filter(value=>files[value]?.type==="file").length>1 && <button type="button" aria-label={"Close "+path} title="Close tab (draft kept)" onClick={()=>closeFileTab(path)} className="mr-1 rounded p-1 text-zinc-500 hover:bg-zinc-800 hover:text-white"><X size={12}/></button>}
+                      </div>)}
+                    </div>
                     <div className="flex min-h-10 items-center gap-2 border-b border-zinc-800 px-3 text-xs text-zinc-500">
                       <span className="min-w-0 flex-1 truncate">{selectedFile}</span>
                       {dirty && <span className="text-amber-400">Unsaved</span>}
@@ -548,25 +589,25 @@ export function WorkspacePanel({
                       <button
                         type="button"
                         onClick={() => void saveSelectedFile()}
-                        disabled={!dirty || savingFile}
+                        disabled={!dirty || savingFile || conflict}
                         className="inline-flex h-7 items-center gap-1 rounded-md bg-white px-2 text-[11px] font-semibold text-black disabled:opacity-30"
                       >
                         {savingFile ? <Loader2 size={11} className="animate-spin" /> : <Save size={11} />}
                         Save
                       </button>
                     </div>
-                    {saveError && (
+                    {(saveError || conflict) && (
                       <div className="border-b border-red-950 bg-red-950/20 px-3 py-1.5 text-[11px] text-red-300">
-                        {saveError}
+                        {saveError || "File changed externally. Your draft has been kept. Copy it or discard to load the latest version."}
                       </div>
                     )}
                     <div className="flex-1 overflow-hidden">
-                      <CodeEditor
+                      <div onKeyDownCapture={saveShortcut} className="contents"><CodeEditor
                         filePath={selectedFile}
                         content={draftContent}
                         editable
                         onChange={setDraftContent}
-                      />
+                      /></div>
                     </div>
                   </div>
                 ) : (
@@ -581,11 +622,16 @@ export function WorkspacePanel({
           <Separator className="h-1 cursor-row-resize bg-zinc-800 hover:bg-zinc-700" />
 
           <Panel defaultSize={35} minSize={10} collapsible>
-            <WorkspaceTerminal output={terminalOutput + (expoPreview.data?.output ? "\n[Expo]\n" + expoPreview.data.output : "")} />
+            <WorkspaceTerminal conversationId={String(conversationId)} output={terminalOutput + (expoPreview.data?.output ? "\n[Expo]\n" + expoPreview.data.output : "")} />
           </Panel>
         </Group>
-        </WorkspaceDashboard>
+        </WorkspaceCodeFrame>
       )}
     </div>
   );
+}
+
+function WorkspaceCodeFrame({ dashboard, conversationId, onRequestBackend, children }: { dashboard: boolean; conversationId: Id<"conversations">; onRequestBackend: () => void; children: React.ReactNode }) {
+  if (dashboard) return <WorkspaceDashboard conversationId={conversationId} onRequestBackend={onRequestBackend}>{children}</WorkspaceDashboard>;
+  return <div className="flex min-h-0 flex-1 flex-col">{children}</div>;
 }

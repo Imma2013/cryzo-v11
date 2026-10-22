@@ -20,9 +20,9 @@ export function nativeTargetFromActions(actions: ArtifactAction[]): boolean {
   return hasNativeSource(files);
 }
 
-/** No browser kernel, npm install, Vite build or HMR recovery for Expo. */
+/** Both web and native projects use the same Vivari kernel. Native build guards are separate. */
 export function shouldUseVivari(nativeTarget: boolean, files: FileMap): boolean {
-  return !nativeTarget && !hasNativeSource(files);
+  void nativeTarget; void files; return true;
 }
 
 export function shouldRetryFailedPreview(progress: string, sourceChanged: boolean): boolean {

@@ -6,6 +6,7 @@ import { api } from "../../convex/_generated/api";
 import { Id } from "../../convex/_generated/dataModel";
 import { useAuth } from "@/providers/AuthProvider";
 import type { StreamingRuntimeSnapshot } from "@/lib/workspace/streaming-runtime";
+import { editorSession } from "@/lib/workspace/editor-session";
 import { nativeTargetFromActions } from "@/lib/workspace/native-target";
 import {
   getStreamingRuntimeSnapshot,
@@ -41,7 +42,7 @@ export function useWorkspace(conversationId: Id<"conversations">) {
 
   useEffect(() => {
     setRuntime(getStreamingRuntimeSnapshot(runtimeId));
-    setSelectedFile(null);
+    setSelectedFile(editorSession(runtimeId).selected);
 
     const unsubscribe = subscribeStreamingRuntime(runtimeId, (next) => {
       setRuntime(next);
@@ -102,7 +103,7 @@ export function useWorkspace(conversationId: Id<"conversations">) {
   }, [firstFile, runtime.files, selectedFile]);
 
   const saveFile = async (filePath: string, content: string) => {
-    const saved = await saveStreamingRuntimeFile(runtimeId, filePath, content);
+    const saved = await saveStreamingRuntimeFile(runtimeId, filePath, content, runtime.files[filePath]?.content);
     const artifactId = `manual:${Date.now()}:${crypto.randomUUID()}`;
     await saveManualFile({
       conversationId,
@@ -112,6 +113,16 @@ export function useWorkspace(conversationId: Id<"conversations">) {
     });
     return saved;
   };
+
+  useEffect(()=>{
+    const changed=(event:Event)=>{
+      const detail=(event as CustomEvent<{conversationId:string;files:{path:string;content:string}[]}>).detail;
+      if(detail?.conversationId!==runtimeId || !isAuthenticated)return;
+      for(const file of detail.files)void saveManualFile({conversationId,artifactId:`terminal:${Date.now()}:${crypto.randomUUID()}`,filePath:file.path,content:file.content}).catch(()=>{});
+    };
+    window.addEventListener("cryzo:workspace-files-changed",changed);
+    return()=>window.removeEventListener("cryzo:workspace-files-changed",changed);
+  },[conversationId,runtimeId,isAuthenticated,saveManualFile]);
 
   const isBooting =
     isAuthenticated &&

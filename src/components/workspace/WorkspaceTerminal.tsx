@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal as XTerm } from "@xterm/xterm";
-import { getSandbox, type SandboxProcess } from "@/lib/workspace/sandbox";
+import { projectTerminal } from "@/lib/workspace/terminal-session";
 import "@xterm/xterm/css/xterm.css";
 
 type TerminalTab = "terminal" | "output";
@@ -51,7 +51,7 @@ function createTerminal(readonly = false) {
   });
 }
 
-export function WorkspaceTerminal({ output }: { output: string }) {
+export function WorkspaceTerminal({ output, conversationId }: { output: string; conversationId: string }) {
   const [tab, setTab] = useState<TerminalTab>("terminal");
   const shellHostRef = useRef<HTMLDivElement>(null);
   const outputHostRef = useRef<HTMLDivElement>(null);
@@ -59,7 +59,7 @@ export function WorkspaceTerminal({ output }: { output: string }) {
   const outputTerminalRef = useRef<XTerm | null>(null);
   const shellFitRef = useRef<FitAddon | null>(null);
   const outputFitRef = useRef<FitAddon | null>(null);
-  const shellProcessRef = useRef<SandboxProcess | null>(null);
+  const [shellTab, setShellTab] = useState("1");
   const lastOutputRef = useRef("");
 
   useEffect(() => {
@@ -87,11 +87,9 @@ export function WorkspaceTerminal({ output }: { output: string }) {
     else outputTerminal.writeln("Waiting for runtime output…");
 
     let disposed = false;
-    let inputWriter: WritableStreamDefaultWriter<string> | null = null;
-    // Vivari's shell is line-oriented: it reads whole lines on stdin and echoes
-    // each command itself. Keystrokes are edited locally and sent on Enter.
-    let line = "";
-
+    const session = projectTerminal(conversationId, shellTab);
+    shellTerminal.write(session.output);
+    const detachSession = session.subscribe(chunk => shellTerminal.write(chunk));
     const fit = () => {
       try {
         shellFit.fit();
@@ -106,85 +104,10 @@ export function WorkspaceTerminal({ output }: { output: string }) {
     resizeObserver.observe(outputHost);
     requestAnimationFrame(fit);
 
-    const eraseLocalEcho = () => {
-      if (line.length > 0) shellTerminal.write("\b \b".repeat(line.length));
-    };
-
-    const startShell = async () => {
-      const sandbox = await getSandbox();
-      if (disposed) return;
-
-      const process = await sandbox.spawn("sh");
-      if (disposed) {
-        process.kill();
-        return;
-      }
-
-      shellProcessRef.current = process;
-      inputWriter = process.input.getWriter();
-
-      void process.output
-        .pipeTo(
-          new WritableStream({
-            write(data) {
-              if (!disposed && shellProcessRef.current === process) {
-                shellTerminal.write(data.replace(/\r?\n/g, "\r\n"));
-              }
-            },
-          }),
-        )
-        .catch(() => {});
-    };
-
-    const restartShell = () => {
-      const current = shellProcessRef.current;
-      shellProcessRef.current = null;
-      try {
-        inputWriter?.releaseLock();
-      } catch {}
-      inputWriter = null;
-      try {
-        current?.kill();
-      } catch {}
-      void startShell().catch(() => {});
-    };
-
-    const dataDisposable = shellTerminal.onData((data) => {
-      if (!inputWriter) return;
-      // Cursor keys and other escape sequences have no meaning to a line-based shell.
-      if (data.startsWith("\x1b")) return;
-
-      for (const char of data) {
-        if (char === "\r" || char === "\n") {
-          const command = line;
-          eraseLocalEcho();
-          line = "";
-          void inputWriter.write(`${command}\n`).catch(() => {});
-        } else if (char === "\x7f" || char === "\b") {
-          if (line.length > 0) {
-            line = line.slice(0, -1);
-            shellTerminal.write("\b \b");
-          }
-        } else if (char === "\x15") {
-          eraseLocalEcho();
-          line = "";
-        } else if (char === "\x03") {
-          // Ctrl+C: there is no signal channel on stdin, so stop the shell (and
-          // whatever it is running) and start a fresh one.
-          line = "";
-          shellTerminal.write("^C\r\n");
-          restartShell();
-          return;
-        } else if (char >= " ") {
-          line += char;
-          shellTerminal.write(char);
-        }
-      }
-    });
-
+    const dataDisposable = shellTerminal.onData(data => session.input(data));
     void (async () => {
       try {
-        await startShell();
+        await session.start();
         fit();
         shellTerminal.focus();
       } catch (error) {
@@ -203,13 +126,7 @@ export function WorkspaceTerminal({ output }: { output: string }) {
       disposed = true;
       resizeObserver.disconnect();
       dataDisposable.dispose();
-      try {
-        inputWriter?.releaseLock();
-      } catch {}
-      try {
-        shellProcessRef.current?.kill();
-      } catch {}
-      shellProcessRef.current = null;
+      detachSession();
       shellTerminal.dispose();
       outputTerminal.dispose();
       shellTerminalRef.current = null;
@@ -219,7 +136,7 @@ export function WorkspaceTerminal({ output }: { output: string }) {
     };
     // The terminals and shell process are intentionally created once per panel mount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [conversationId, shellTab]);
 
   useEffect(() => {
     const terminal = outputTerminalRef.current;
@@ -277,6 +194,7 @@ export function WorkspaceTerminal({ output }: { output: string }) {
             Output
           </button>
         </div>
+        {tab === "terminal" && <div className="ml-2 flex gap-1">{["1", "2"].map(id => <button type="button" aria-label={"Terminal " + id} aria-pressed={shellTab === id} key={id} onClick={() => setShellTab(id)} className={"rounded px-2 py-1 text-[11px] " + (shellTab === id ? "bg-zinc-700 text-white" : "text-zinc-500")}>{id}</button>)}</div>}
         <span className="ml-auto pr-1 text-[10px] text-zinc-600">
           {tab === "terminal" ? "Project shell" : "Runtime logs"}
         </span>

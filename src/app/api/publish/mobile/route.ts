@@ -496,59 +496,6 @@ async function readExpoDeviceUrl(workspace: Workspace, scheme: string, launchTar
   return deviceUrlFromLogs(info.output, scheme, launchTarget) || deviceUrlFromLogs(logs, scheme, launchTarget);
 }
 
-async function startExpoPreview(workspace: Workspace, forceRestart = false) {
-  if (!(await hasNativeExpoSource(workspace))) throw new Error("Generate the Expo app before previewing it.");
-  const pkg = (await readJsonFile(workspace, "package.json")) || {};
-  const app = (await readJsonFile(workspace, "app.json")) || {};
-  const configuredScheme = Array.isArray(app?.expo?.scheme) ? app.expo.scheme[0] : app?.expo?.scheme;
-  const scheme = typeof configuredScheme === "string" && /^[a-z][a-z0-9+.-]*$/i.test(configuredScheme) ? configuredScheme : "cryzo-app";
-  if (!configuredScheme) {
-    app.expo = { ...app.expo, scheme };
-    await workspace.sandbox.writeFiles([{ path: workspace.cwd + "/app.json",
-      content: Buffer.from(JSON.stringify({ ...app, expo: { ...app.expo, scheme } })) }]);
-  }
-  const runtimeConfig = await run(workspace, "node -e 'const fs=require(\"fs\");for(const p of [\"metro.config.js\",\"metro.config.cjs\",\"babel.config.js\",\"babel.config.cjs\",\"app.config.js\",\"app.config.ts\"]){if(fs.existsSync(p))console.log(p+\":\"+fs.readFileSync(p,\"utf8\"))}'");
-  const runtimeRevision = createHash("sha256").update(JSON.stringify([pkg, app, runtimeConfig.output])).digest("hex");
-  const healthCommand = "node -e 'fetch(\"http://127.0.0.1:5173/status\",{signal:AbortSignal.timeout(3000)}).then(async r=>{if(!r.ok||!(await r.text()).includes(\"packager-status:running\"))process.exit(1)}).catch(()=>process.exit(1))'";
-  const previous = (await readJsonFile(workspace, ".cryzo-expo-runtime.json")) as {
-    runtimeRevision?: string; launchTarget?: ExpoLaunchTarget; deviceUrl?: string; webReady?: boolean;
-  } | null;
-  if (!forceRestart && previous?.runtimeRevision === runtimeRevision && previous.deviceUrl &&
-      (await run(workspace, healthCommand, undefined, true)).exitCode === 0) {
-    const logs = await run(workspace, "cat .cryzo-expo-preview.log 2>/dev/null || true", undefined, true);
-    const currentUrl = await readExpoDeviceUrl(workspace, scheme, previous.launchTarget || "expo-go", logs.output);
-    if (currentUrl && previous.webReady) return { deviceUrl: currentUrl, webPreviewUrl: workspace.sandbox.domain(SOURCE_PREVIEW_PORT),
-      launchTarget: previous.launchTarget || "expo-go", output: logs.output.slice(-6000), status: "ready" as const };
-  }
-  await run(workspace, "npm install --no-audit --no-fund", undefined, false);
-  await run(workspace, "./node_modules/.bin/tsc --noEmit --noUnusedLocals false --noUnusedParameters false", undefined, false);
-  const inspection = await run(workspace, "node -e 'const fs=require(\"fs\"),p=require(\"./package.json\"),b=require(\"expo/bundledNativeModules.json\");const names=Object.keys({...p.dependencies,...p.devDependencies});const native=names.filter(n=>{const d=\"node_modules/\"+n;try{const x=JSON.parse(fs.readFileSync(d+\"/package.json\",\"utf8\"));return x.codegenConfig||[\"ios\",\"android\",\"expo-module.config.json\"].some(k=>fs.existsSync(d+\"/\"+k))}catch{return false}});console.log(JSON.stringify({native,bundled:Object.keys(b)}))'");
-  const nativeModules = JSON.parse(inspection.output) as { native: string[]; bundled: string[] };
-  const launchTarget = selectExpoLaunchTarget(nativeModules.native, nativeModules.bundled);
-  await run(workspace, "npm install --no-audit --no-fund --no-save @expo/ngrok@^4.1.0", undefined, false);
-  await workspace.sandbox.writeFiles([{ path: workspace.cwd + "/.cryzo-expo-web-proxy.cjs", content: Buffer.from(EXPO_WEB_PROXY) }]);
-  await run(workspace, "if [ -f .cryzo-expo-web-proxy.pid ]; then kill $(cat .cryzo-expo-web-proxy.pid) 2>/dev/null || true; fi; (node .cryzo-expo-web-proxy.cjs > .cryzo-expo-web-proxy.log 2>&1 & echo $! > .cryzo-expo-web-proxy.pid)", undefined, false);
-  await run(workspace,
-    "if [ -f .cryzo-expo-preview.pid ]; then kill $(cat .cryzo-expo-preview.pid) 2>/dev/null || true; fi; rm -f .cryzo-expo-preview.log; " +
-    "(CI=1 BROWSER=none EXPO_NO_TELEMETRY=1 npx expo start " + (launchTarget === "expo-go" ? "--go" : "--dev-client") +
-    " --web --tunnel --port 8081 > .cryzo-expo-preview.log 2>&1 & echo $! > .cryzo-expo-preview.pid)",
-    undefined, false);
-  let lastOutput = "";
-  for (let attempt = 0; attempt < 40; attempt++) {
-    await new Promise(resolve => setTimeout(resolve, 1500));
-    lastOutput = (await run(workspace, "cat .cryzo-expo-preview.log 2>/dev/null || true", undefined, true)).output;
-    const deviceUrl = await readExpoDeviceUrl(workspace, scheme, launchTarget, lastOutput);
-    if (deviceUrl && (await run(workspace, healthCommand, undefined, true)).exitCode === 0) {
-      const webHealth = await run(workspace, "node -e 'fetch(\"http://127.0.0.1:5173/\",{signal:AbortSignal.timeout(45000)}).then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))'", undefined, true);
-      await workspace.sandbox.writeFiles([{ path: workspace.cwd + "/.cryzo-expo-runtime.json",
-        content: Buffer.from(JSON.stringify({ runtimeRevision, launchTarget, deviceUrl, webReady: webHealth.exitCode === 0 })) }]);
-      return { deviceUrl, webPreviewUrl: webHealth.exitCode === 0 ? workspace.sandbox.domain(SOURCE_PREVIEW_PORT) : null,
-        launchTarget, output: lastOutput.slice(-6000), status: "ready" as const };
-    }
-    if (/CommandError|Error:|ERR_/i.test(lastOutput) && !/waiting|starting|tunnel ready/i.test(lastOutput)) break;
-  }
-  throw new Error("Expo preview could not start. " + lastOutput.slice(-1800));
-}
 
 async function configureNativeExpoProject(
   workspace: Workspace,
@@ -671,11 +618,12 @@ export async function POST(req: Request) {
     if (!body.conversationId) return Response.json({ error: "Missing conversationId" }, { status: 400 });
 
     const { token: authToken, conversation } = await requireConversation(req, body.conversationId);
+    if (body.operation === "preview") return Response.json({ error: "Expo preview now runs in your Vivari workspace. Open Device Preview in the builder.", code: "USE_VIVARI_PREVIEW" }, { status: 410 });
     const subscription = await fetchQuery(api.billing.getSubscription, { userId: conversation.userId }, { token: authToken });
     const nativeTarget = isNativeConversation(conversation);
     const workspace = await workspaceFor(body.conversationId, nativeTarget);
 
-    if ((body.operation === "check" || body.operation === "preview" || body.operation === "build") && nativeTarget) {
+    if ((body.operation === "check" || body.operation === "build") && nativeTarget) {
       await syncNativeSource(workspace, body.sourceFiles);
     }
 
@@ -718,16 +666,6 @@ export async function POST(req: Request) {
         managedBuildIncluded: canUseManagedMobileBuilds(subscription.plan),
         managedSubmissionIncluded: canUseManagedStoreSubmission(subscription.plan),
       });
-    }
-
-    if (body.operation === "preview") {
-      if (!nativeTarget) {
-        return Response.json({ error: "This conversation is still marked as a website. Cryzo is restoring its original mobile target; reload the chat and try Device Preview again." }, { status: 400 });
-      }
-      const preview = await startExpoPreview(workspace, body.forceRestart === true);
-      const sourceRevision = createHash("sha256").update(JSON.stringify(safeSourceFiles(body.sourceFiles).sort((a, b) => a.path.localeCompare(b.path)))).digest("hex");
-      return Response.json({ success: true, sourceType: workspace.sourceType, ...preview,
-        previewUrl: preview.deviceUrl, qrValue: preview.deviceUrl, sourceRevision });
     }
 
     if (body.operation === "build" && !canUseManagedMobileBuilds(subscription.plan)) {

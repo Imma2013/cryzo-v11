@@ -8,19 +8,24 @@
  * @module
  */
 
-import type * as appBackends from "../appBackends.js";
 import type * as aiUsage from "../aiUsage.js";
+import type * as appBackends from "../appBackends.js";
 import type * as artifacts from "../artifacts.js";
 import type * as auth from "../auth.js";
 import type * as billing from "../billing.js";
+import type * as chatgptConnections from "../chatgptConnections.js";
 import type * as cloudAdmin from "../cloudAdmin.js";
 import type * as cloudAuth from "../cloudAuth.js";
 import type * as cloudAuthStore from "../cloudAuthStore.js";
 import type * as cloudRuntime from "../cloudRuntime.js";
 import type * as conversations from "../conversations.js";
+import type * as crons from "../crons.js";
+import type * as emailVerification from "../emailVerification.js";
+import type * as expoRelay from "../expoRelay.js";
 import type * as generationJobs from "../generationJobs.js";
 import type * as hosting from "../hosting.js";
 import type * as http from "../http.js";
+import type * as mcpServers from "../mcpServers.js";
 import type * as messages from "../messages.js";
 import type * as mobileBuilds from "../mobileBuilds.js";
 import type * as providerSecrets from "../providerSecrets.js";
@@ -40,14 +45,19 @@ declare const fullApi: ApiFromModules<{
   artifacts: typeof artifacts;
   auth: typeof auth;
   billing: typeof billing;
+  chatgptConnections: typeof chatgptConnections;
   cloudAdmin: typeof cloudAdmin;
   cloudAuth: typeof cloudAuth;
   cloudAuthStore: typeof cloudAuthStore;
   cloudRuntime: typeof cloudRuntime;
   conversations: typeof conversations;
+  crons: typeof crons;
+  emailVerification: typeof emailVerification;
+  expoRelay: typeof expoRelay;
   generationJobs: typeof generationJobs;
   hosting: typeof hosting;
   http: typeof http;
+  mcpServers: typeof mcpServers;
   messages: typeof messages;
   mobileBuilds: typeof mobileBuilds;
   providerSecrets: typeof providerSecrets;

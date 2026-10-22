@@ -35,6 +35,7 @@ export const DEFAULT_MODEL_SELECTION: ModelSelection = {
 };
 
 export const PROVIDERS: ProviderDefinition[] = [
+  { id:"chatgpt",name:"ChatGPT plan",logoSlug:"openai",description:"Use your connected ChatGPT plan. Your ChatGPT usage limits apply; Cryzo message credits are not charged." },
   {
     id: "cryzo",
     name: "Cryzo",

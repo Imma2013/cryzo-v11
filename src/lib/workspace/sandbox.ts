@@ -97,6 +97,20 @@ export class Sandbox {
     });
   }
 
+  previewUrl(port: number, path = "/") { return this.vivari.previewUrl(port,path); }
+  watchSource(listener: (path: string) => void) {
+    const watch = this.vivari.fs.watch(SANDBOX_PROJECT_DIR,{recursive:true},event=>listener(event.path));
+    return () => watch.close();
+  }
+  async setPhoneRelay(url: string | null) {
+    if (url) {
+      const value = new URL(url);
+      if (typeof window === "undefined" || value.protocol !== "wss:" || value.host !== window.location.host || value.pathname !== "/api/preview/expo/producer") throw new Error("Untrusted phone relay");
+    }
+    const reply=await this.vivari.internal.request("cryzo-set-net-relay",{url},{timeout:5000});
+    if (!reply.ok) throw new Error("Vivari phone forwarding could not be configured");
+  }
+
   /** Run a shell command line (pipes, `&&`, env assignments) inside the project. */
   spawnShell(commandLine: string, options: { cwd?: string; env?: Record<string, string> } = {}) {
     return this.spawn("sh", ["-c", commandLine], options);

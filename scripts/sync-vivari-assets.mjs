@@ -17,6 +17,8 @@
 //
 // The npm-pack.bin layout is defined by Vivari's kernel and this packer follows
 // Vivari's own scripts/vendor-npm.mjs (MIT, © Duc Trung Mai).
+import { createHash } from "node:crypto";
+import { patchVivariRelay } from "./vivari-relay-patch.mjs";
 import { execSync } from "node:child_process";
 import {
   copyFileSync,
@@ -80,13 +82,23 @@ function syncRuntime() {
     for (const name of readJson(manifestPath).files ?? []) rmSync(join(assetsDir, name), { force: true });
   }
 
-  const files = readdirSync(join(dist, "assets")).filter((name) => name !== "sw.js");
-  for (const name of files) copyFileSync(join(dist, "assets", name), join(assetsDir, name));
+  const { version } = readJson(join(dist, "..", "package.json"));
+  const originals = readdirSync(join(dist, "assets")).filter((name) => name !== "sw.js");
+  const kernelName = originals.find(name => /^kernel-worker-.*\.js$/.test(name));
+  if (!kernelName) throw new Error("Vivari kernel asset was not found");
+  const patched = patchVivariRelay(readFileSync(join(dist,"assets",kernelName),"utf8"),version);
+  const kernelOutput = "kernel-worker-cryzo-" + createHash("sha256").update(patched).digest("hex").slice(0,16) + ".js";
+  const files = originals.map(name => name === kernelName ? kernelOutput : name);
+  for (const name of originals) {
+    if (name === kernelName) writeFileSync(join(assetsDir,kernelOutput),patched);
+    else copyFileSync(join(dist,"assets",name),join(assetsDir,name));
+  }
   copyFileSync(join(dist, "assets", "sw.js"), join(publicDir, "sw.js"));
-  copyFileSync(join(dist, "index.js"), join(publicDir, "vivari", "index.js"));
+  const entry = readFileSync(join(dist,"index.js"),"utf8");
+  if (!entry.includes(kernelName)) throw new Error("Vivari entry no longer references the pinned kernel");
+  writeFileSync(join(publicDir,"vivari","index.js"),entry.replaceAll(kernelName,kernelOutput));
   copyFileSync(join(publicDir, "inspector-script.js"), join(publicDir, "vv-devtools", "chobitsu.js"));
 
-  const { version } = readJson(join(dist, "..", "package.json"));
   writeFileSync(manifestPath, JSON.stringify({ version, files }, null, 2) + "\n");
   log(`runtime @vivari/core@${version}: ${files.length} worker files, sw.js, index.js`);
 }
