@@ -105,7 +105,7 @@ export class Sandbox {
   async setPhoneRelay(url: string | null) {
     if (url) {
       const value = new URL(url);
-      if (typeof window === "undefined" || value.protocol !== "wss:" || value.host !== window.location.host || value.pathname !== "/api/preview/expo/producer") throw new Error("Untrusted phone relay");
+      if (typeof window === "undefined" || value.protocol !== "wss:" || value.host !== window.location.host || value.pathname !== "/api/expo/producer") throw new Error("Untrusted phone relay");
     }
     const reply=await this.vivari.internal.request("cryzo-set-net-relay",{url},{timeout:5000});
     if (!reply.ok) throw new Error("Vivari phone forwarding could not be configured");

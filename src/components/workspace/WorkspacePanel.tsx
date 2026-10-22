@@ -1,5 +1,4 @@
 "use client";
-
 import { useEffect, useReducer, useState, type KeyboardEvent } from "react";
 import { useQuery } from "convex/react";
 import { api } from "../../../convex/_generated/api";
@@ -34,8 +33,7 @@ import { ExpoDevicePreview, NativeExpoPreview, useExpoPreview } from "./ExpoDevi
 import { editorSession, draftConflicts } from "@/lib/workspace/editor-session";
 import { hasNativeSource } from "@/lib/workspace/native-target";
 import { Id } from "../../../convex/_generated/dataModel";
-
-type ViewMode = "preview" | "code" | "dashboard";
+type ViewMode = "preview" | "dashboard";
 type MobilePanel = "preview" | "code" | "files" | "dashboard";
 
 export type WorkspaceStatus = {
@@ -43,7 +41,6 @@ export type WorkspaceStatus = {
   progress: string | null | undefined;
   previewUrl: string | null | undefined;
 };
-
 export function WorkspacePanel({
   conversationId,
   onElementSelected,
@@ -68,7 +65,6 @@ export function WorkspacePanel({
   const editor = editorSession(String(conversationId));
   const [savingFile, setSavingFile] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
-
   const {
     files,
     previewUrl,
@@ -82,7 +78,6 @@ export function WorkspacePanel({
   } = useWorkspace(conversationId);
   const nativeProject = Boolean(conversation?.projectPlatforms?.some((platform) => platform === "ios" || platform === "android")) || hasNativeSource(files);
   const expoPreview = useExpoPreview(conversationId, files, progress === "ready", nativeProject);
-
   useEffect(() => {
     onStatusChange?.({
       isBooting,
@@ -94,7 +89,6 @@ export function WorkspacePanel({
   useEffect(() => {
     if (!error) setShowErrorLogs(false);
   }, [error]);
-
   useEffect(() => {
     if (!mobile) return;
     const handlePanel = (event: Event) => {
@@ -106,7 +100,6 @@ export function WorkspacePanel({
     window.addEventListener("cryzo:workspace-panel", handlePanel);
     return () => window.removeEventListener("cryzo:workspace-panel", handlePanel);
   }, [mobile]);
-
   const requestBackend = () => {
     onBackToChat?.();
     // On phones, ChatArea may mount only after the preview closes.
@@ -130,7 +123,6 @@ export function WorkspacePanel({
     refreshEditor();
   };
   const errorSummary = error?.split("\n")[0] || "The preview server could not start.";
-
   useEffect(() => {
     if (!selectedFile) return;
     editor.selected = selectedFile;
@@ -138,7 +130,6 @@ export function WorkspacePanel({
     refreshEditor();
     setSaveError(null);
   }, [selectedFile, editor]);
-
   const saveSelectedFile = async () => {
     if (!selectedFile || !dirty || savingFile) return;
     if (conflict) { setSaveError("This file changed while you were editing. Copy your changes or discard the draft before saving."); return; }
@@ -154,7 +145,6 @@ export function WorkspacePanel({
       setSavingFile(false);
     }
   };
-
   const saveShortcut = (event: KeyboardEvent) => {
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
       event.preventDefault();
@@ -169,7 +159,6 @@ export function WorkspacePanel({
     if (selectedFile===path) setSelectedFile(remaining[remaining.length-1]);
     refreshEditor();
   };
-
   const discardSelectedFile = () => {
     if (selectedFile) delete editor.drafts[selectedFile];
     refreshEditor();
@@ -188,7 +177,6 @@ export function WorkspacePanel({
       setRetrying(false);
     }
   };
-
   const viewLogs = async () => {
     try {
       await refreshStreamingRuntimeLogs(String(conversationId));
@@ -197,7 +185,6 @@ export function WorkspacePanel({
     }
     setShowErrorLogs(true);
   };
-
   const loadingContent = error ? (
     <div className="flex h-full flex-col items-center justify-center bg-zinc-950 px-6 py-8 text-center text-white">
       <div className="flex h-12 w-12 items-center justify-center rounded-full bg-red-500/10 text-red-400">
@@ -248,7 +235,6 @@ export function WorkspacePanel({
       </div>
     </div>
   );
-
   if (mobile) {
     const handleVoice = () => {
       onBackToChat?.();
@@ -259,7 +245,6 @@ export function WorkspacePanel({
         voiceButton?.click();
       }, 120);
     };
-
     const mobileWorkspaceContent =
       mobilePanel === "dashboard" ? (
         <WorkspaceDashboard
@@ -356,6 +341,9 @@ export function WorkspacePanel({
               </div>
             )}
           </div>
+          <div className="h-44 shrink-0 border-t border-zinc-800">
+            <WorkspaceTerminal conversationId={String(conversationId)} />
+          </div>
         </div>
       ) : nativeProject ? (
         <NativeExpoPreview preview={expoPreview} />
@@ -370,11 +358,9 @@ export function WorkspacePanel({
           refreshToken={refreshToken}
         />
       );
-
     return (
       <div className="flex h-full min-h-0 flex-col overflow-hidden bg-zinc-950">
         <div className="min-h-0 flex-1 overflow-hidden">{mobileWorkspaceContent}</div>
-
         <div className="relative z-40 shrink-0 border-t border-zinc-200 bg-[#fafafa] px-4 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-3 text-black">
           {mobileMenuOpen && (
             <div className="absolute bottom-[calc(100%+0.5rem)] right-4 w-56 overflow-hidden rounded-2xl border border-zinc-200 bg-white p-1.5 shadow-2xl shadow-black/20">
@@ -429,7 +415,6 @@ export function WorkspacePanel({
               </button>
             </div>
           )}
-
           <div className="flex items-center gap-3">
             <button
               type="button"
@@ -439,7 +424,6 @@ export function WorkspacePanel({
               <ArrowLeft size={20} />
               Chat
             </button>
-
             <button
               type="button"
               onClick={handleVoice}
@@ -450,7 +434,6 @@ export function WorkspacePanel({
             </button>
 
             <div className="min-w-0 flex-1" />
-
             <button
               type="button"
               onClick={() => setMobileMenuOpen((open) => !open)}
@@ -459,7 +442,6 @@ export function WorkspacePanel({
             >
               <MoreHorizontal size={23} />
             </button>
-
             {nativeProject && <ExpoDevicePreview preview={expoPreview} compact />}
             <PublishControls
               files={files}
@@ -472,7 +454,6 @@ export function WorkspacePanel({
       </div>
     );
   }
-
   const previewContent = nativeProject ? (
     <NativeExpoPreview preview={expoPreview} />
   ) : isBooting || !previewUrl || error ? (
@@ -485,7 +466,6 @@ export function WorkspacePanel({
       onElementSelected={onElementSelected}
     />
   );
-
   return (
     <div className="flex h-full flex-col overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950">
       <div className="flex items-center gap-1 border-b border-zinc-800 px-3 py-2">
@@ -502,7 +482,6 @@ export function WorkspacePanel({
             <Eye size={12} />
             Preview
           </button>
-          <button type="button" onClick={() => setViewMode("code")} className={"flex items-center gap-1.5 rounded px-3 py-1 text-xs font-medium " + (viewMode === "code" ? "bg-zinc-700 text-white" : "text-zinc-400 hover:text-white")}><FileText size={12}/>Code</button>
           <button
             type="button"
             onClick={() => setViewMode("dashboard")}
@@ -516,7 +495,6 @@ export function WorkspacePanel({
             Dashboard
           </button>
         </div>
-
         <div className="ml-auto flex items-center gap-3">
           {nativeProject && <ExpoDevicePreview preview={expoPreview} />}
           <PublishControls
@@ -524,7 +502,6 @@ export function WorkspacePanel({
             conversationId={conversationId}
             disabled={isBooting || !!error}
           />
-
           <div className="flex items-center gap-2 text-xs">
             {error ? (
               <button
@@ -549,11 +526,10 @@ export function WorkspacePanel({
           </div>
         </div>
       </div>
-
       {viewMode === "preview" ? (
         <div className="flex-1 overflow-hidden">{previewContent}</div>
       ) : (
-        <WorkspaceCodeFrame dashboard={viewMode === "dashboard"} conversationId={conversationId} onRequestBackend={requestBackend}>
+        <WorkspaceDashboard conversationId={conversationId} onRequestBackend={requestBackend}>
         <Group orientation="vertical" className="flex-1">
           <Panel defaultSize={65} minSize={30}>
             <div className="flex h-full">
@@ -618,20 +594,14 @@ export function WorkspacePanel({
               </div>
             </div>
           </Panel>
-
           <Separator className="h-1 cursor-row-resize bg-zinc-800 hover:bg-zinc-700" />
 
           <Panel defaultSize={35} minSize={10} collapsible>
-            <WorkspaceTerminal conversationId={String(conversationId)} output={terminalOutput + (expoPreview.data?.output ? "\n[Expo]\n" + expoPreview.data.output : "")} />
+            <WorkspaceTerminal conversationId={String(conversationId)} />
           </Panel>
         </Group>
-        </WorkspaceCodeFrame>
+        </WorkspaceDashboard>
       )}
     </div>
   );
-}
-
-function WorkspaceCodeFrame({ dashboard, conversationId, onRequestBackend, children }: { dashboard: boolean; conversationId: Id<"conversations">; onRequestBackend: () => void; children: React.ReactNode }) {
-  if (dashboard) return <WorkspaceDashboard conversationId={conversationId} onRequestBackend={onRequestBackend}>{children}</WorkspaceDashboard>;
-  return <div className="flex min-h-0 flex-1 flex-col">{children}</div>;
 }

@@ -54,10 +54,11 @@ export function ExpoDevicePreview({ preview, compact = false }: { preview: ExpoP
       <div className="flex items-center justify-between"><h2 className="font-semibold">Preview on your phone</h2><button type="button" aria-label="Close phone preview" onClick={() => setOpen(false)}><X size={16}/></button></div>
       <p className="mt-2 text-xs leading-5 text-zinc-300">{preview.data?.launchTarget === "development-build" ? "Install this project's development build, then scan to open it." : "Install Expo Go. Scan with your iPhone camera or the scanner in Expo Go on Android."}</p>
       {preview.loading && <p role="status" className="mt-4 flex items-center gap-2 text-xs"><Loader2 size={14} className="animate-spin"/>{preview.message || "Starting Expo…"}</p>}
-      {!preview.ready && <p className="mt-3 text-xs text-zinc-300">{preview.message || "The QR code appears after the public Expo manifest is reachable."}</p>}
+      {!preview.ready && !preview.loading && !preview.error && <p className="mt-3 text-xs text-zinc-300">{preview.message || "The QR code appears after the public Expo manifest is reachable."}</p>}
       {preview.error && <p role="alert" className="mt-3 text-xs text-red-300">{preview.error}</p>}
       {canScan && <div className="mt-4">
         <img src={"/api/publish/mobile/qr?data=" + encodeURIComponent(canScan.deviceUrl)} width={224} height={224} alt="Scan to open your app" className="mx-auto rounded-lg bg-white p-2"/>
+        <p className="mt-3 break-all text-center font-mono text-[11px] text-zinc-400">{canScan.deviceUrl}</p>
         <a href={canScan.deviceUrl} className="mt-3 flex items-center justify-center gap-2 text-xs text-blue-300"><ExternalLink size={13}/>Open app</a>
         <button type="button" onClick={() => void navigator.clipboard.writeText(canScan.deviceUrl).catch(() => setCopyError("Copy failed. Use Open app."))} className="mt-2 flex w-full items-center justify-center gap-2 text-xs text-zinc-300"><Copy size={13}/>Copy link</button>
       </div>}

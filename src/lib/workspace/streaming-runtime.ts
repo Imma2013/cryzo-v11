@@ -1,4 +1,5 @@
 import type { ArtifactAction, FileMap } from "./types";
+import { terminalTranscript } from "./terminal-transcript";
 import { missingReactViteScaffold, projectReadinessIssues } from "./project-scaffold";
 import { expoStarterFiles, isExpoProject, isViteOnlyMobileArtifact, reconcileExpoPackage } from "./expo-starter";
 import { inferProjectPlatforms } from "@/lib/project-platform";
@@ -20,7 +21,6 @@ import { preparePhoneSession, releasePhoneSession } from "./expo-phone-session";
 import { closeProjectTerminals } from "./terminal-session";
 import { EXPO_COMMAND, EXPO_ENV, prepareVivariMetro } from "./expo-vivari";
 import { readSupabaseRuntimeContext } from "@/lib/developer-connections";
-
 export interface StreamingRuntimeSnapshot {
   active: boolean;
   files: FileMap;
@@ -37,7 +37,6 @@ export type SandboxBuildFile = {
 
 type Listener = (snapshot: StreamingRuntimeSnapshot) => void;
 type KillableProcess = { kill: () => void };
-
 type RuntimeState = StreamingRuntimeSnapshot & {
   listeners: Set<Listener>;
   processedActionsByMessage: Map<string, number>;
@@ -54,7 +53,6 @@ type RuntimeState = StreamingRuntimeSnapshot & {
   nativeTarget: boolean;
   serverReadyTimer: ReturnType<typeof setTimeout> | null;
 };
-
 const runtimes = new Map<string, RuntimeState>();
 let sandboxAuthToken: string | null = null;
 let activeConversationId: string | null = null;
@@ -64,7 +62,6 @@ let sourceWatchTimer: ReturnType<typeof setTimeout> | null = null;
 export function setStreamingRuntimeAuthToken(token: string | null) {
   sandboxAuthToken = token;
 }
-
 /** Conversation metadata is authoritative. Framework stays pinned through reloads/recovery. */
 export function configureStreamingRuntimeTarget(conversationId: string, nativeTarget: boolean) {
   const state = getState(conversationId);
@@ -79,7 +76,6 @@ export function configureStreamingRuntimeTarget(conversationId: string, nativeTa
   }
 }
 
-
 async function waitForSandboxAuthToken() {
   for (let attempt = 0; attempt < 100; attempt++) {
     if (sandboxAuthToken) return sandboxAuthToken;
@@ -87,7 +83,6 @@ async function waitForSandboxAuthToken() {
   }
   throw new Error("Authentication is still loading. Please retry.");
 }
-
 function createState(): RuntimeState {
   return {
     active: false,
@@ -112,7 +107,6 @@ function createState(): RuntimeState {
     serverReadyTimer: null,
   };
 }
-
 function getState(conversationId: string): RuntimeState {
   let state = runtimes.get(conversationId);
   if (!state) {
@@ -132,7 +126,6 @@ function snapshot(state: RuntimeState): StreamingRuntimeSnapshot {
     error: state.error,
   };
 }
-
 function emit(state: RuntimeState) {
   const next = snapshot(state);
   for (const listener of state.listeners) listener(next);
@@ -141,13 +134,14 @@ function emit(state: RuntimeState) {
 function appendOutput(state: RuntimeState, data: string) {
   if (!data) return;
   state.terminalOutput = `${state.terminalOutput}${data}`.slice(-50000);
+  const conversationId = [...runtimes].find(([, value]) => value === state)?.[0];
+  if (conversationId) terminalTranscript(conversationId).append(data);
 }
 
 function clearServerReadyTimer(state: RuntimeState) {
   if (state.serverReadyTimer) clearTimeout(state.serverReadyTimer);
   state.serverReadyTimer = null;
 }
-
 function setError(state: RuntimeState, error: unknown, requestRepair = false) {
   clearServerReadyTimer(state);
   const message = error instanceof Error ? error.message : String(error);
@@ -166,7 +160,6 @@ function setError(state: RuntimeState, error: unknown, requestRepair = false) {
     }
   }
 }
-
 function updateFileMap(state: RuntimeState, action: ArtifactAction) {
   if (action.type !== "file" || !action.filePath) return;
   const filePath = action.filePath.replace(/^\.\//, "").replace(/^\/+/, "");
@@ -178,7 +171,6 @@ function updateFileMap(state: RuntimeState, action: ArtifactAction) {
     if (!state.files[dir]) state.files[dir] = { type: "folder" };
   }
 }
-
 function fileMapFromActions(actions: ArtifactAction[]) {
   const files: FileMap = {};
   for (const action of actions) {
@@ -193,7 +185,6 @@ function fileMapFromActions(actions: ArtifactAction[]) {
   }
   return files;
 }
-
 function parseActionAttributes(raw: string) {
   const type = raw.match(/type="([^"]+)"/)?.[1] as ArtifactAction["type"] | undefined;
   const filePath = raw.match(/filePath="([^"]+)"/)?.[1];
@@ -203,7 +194,6 @@ function parseActionAttributes(raw: string) {
 
 function parseCompletedActions(text: string): ArtifactAction[] {
   if (!text.includes("<cryzoArtifact")) return [];
-
   const actions: ArtifactAction[] = [];
   const pattern = /<cryzoAction([^>]*)>([\s\S]*?)<\/cryzoAction>/g;
   let match: RegExpExecArray | null;
@@ -216,7 +206,6 @@ function parseCompletedActions(text: string): ArtifactAction[] {
 
   return actions;
 }
-
 function hasUnclosedArtifact(text: string) {
   const openCount = text.match(/<cryzoArtifact\b/g)?.length ?? 0;
   const closeCount = text.match(/<\/cryzoArtifact>/g)?.length ?? 0;
@@ -231,7 +220,6 @@ type GuardResponse = {
   repaired?: boolean;
   error?: string;
 };
-
 async function authenticatedPost<T>(url: string, body: Record<string, unknown>): Promise<T> {
   const authToken = await waitForSandboxAuthToken();
   const response = await fetch(url, {
@@ -242,7 +230,6 @@ async function authenticatedPost<T>(url: string, body: Record<string, unknown>):
     },
     body: JSON.stringify(body),
   });
-
   const data = (await response.json()) as T & { error?: string };
   if (!response.ok) {
     throw new Error(data.error || `Request failed with ${response.status}`);
@@ -253,7 +240,6 @@ async function authenticatedPost<T>(url: string, body: Record<string, unknown>):
 async function callGuard(body: Record<string, unknown>): Promise<GuardResponse> {
   return await authenticatedPost<GuardResponse>("/api/sandbox/validate", body);
 }
-
 function stopDevProcess(state: RuntimeState) {
   clearServerReadyTimer(state);
   const current = state.devProcess;
@@ -266,7 +252,6 @@ function stopDevProcess(state: RuntimeState) {
     }
   }
 }
-
 async function ensureContainer(conversationId: string, state: RuntimeState) {
   if (activeConversationId && activeConversationId !== conversationId) {
     const previous = getState(activeConversationId);
@@ -289,7 +274,6 @@ async function ensureContainer(conversationId: string, state: RuntimeState) {
     emit(previous);
     activeConversationId = null;
   }
-
   const wc = await getSandbox();
   if (activeConversationId !== conversationId) {
     // Vivari may persist its directory across document reloads. Claim a clean
@@ -305,7 +289,6 @@ async function ensureContainer(conversationId: string, state: RuntimeState) {
       if(sourceWatchTimer)clearTimeout(sourceWatchTimer);
       sourceWatchTimer=setTimeout(()=>{void state.queue.catch(()=>{}).then(()=>syncWorkspaceFiles(conversationId)).catch(()=>{});},600);
     });
-
     wc.on("server-ready", (_port, url) => {
       if (activeConversationId !== conversationId) return;
       clearServerReadyTimer(state);
@@ -316,7 +299,6 @@ async function ensureContainer(conversationId: string, state: RuntimeState) {
       appendOutput(state, `\nPreview ready at ${url}\n`);
       emit(state);
     });
-
     wc.on("preview-message", (message: any) => {
       if (activeConversationId !== conversationId) return;
       if (message?.type === "PREVIEW_LAYOUT_DIAGNOSTIC") {
@@ -342,10 +324,8 @@ async function ensureContainer(conversationId: string, state: RuntimeState) {
       setError(state, detail, true);
     });
   }
-
   return wc;
 }
-
 async function applyRepairedFiles(
   conversationId: string,
   state: RuntimeState,
@@ -365,13 +345,11 @@ async function applyRepairedFiles(
   emit(state);
   return true;
 }
-
 function packageJsonContent(state: RuntimeState) {
   return state.files["package.json"]?.type === "file"
     ? state.files["package.json"]?.content || ""
     : "";
 }
-
 /** Repair a missing manifest with an explicit, non-destructive web scaffold. */
 async function ensureExpoStarter(conversationId: string, state: RuntimeState) {
   if (!state.nativeTarget && !isExpoProject(state.files)) return;
@@ -381,13 +359,11 @@ async function ensureExpoStarter(conversationId: string, state: RuntimeState) {
   const actions: ArtifactAction[] = missing.map(({ path, content }) => ({ type: "file", filePath: path, content }));
   const wc = await ensureContainer(conversationId, state);
   await writeFiles(wc, actions);
-
   for (const action of actions) updateFileMap(state, action);
   state.installedPackageJson = null;
   appendOutput(state, `\nInitialized ${missing.length} verified Expo SDK 57 starter files (native Metro, no Vite).\n`);
   emit(state);
 }
-
 async function ensureProjectScaffold(conversationId: string, state: RuntimeState) {
   if (state.nativeTarget || isExpoProject(state.files)) { await ensureExpoStarter(conversationId, state); return; }
   const missing = missingReactViteScaffold(state.files);
@@ -402,7 +378,6 @@ async function ensureProjectScaffold(conversationId: string, state: RuntimeState
   appendOutput(state, `\nRestored ${missing.length} missing React/Vite starter files without overwriting generated code.\n`);
   emit(state);
 }
-
 async function assertRunnableProject(conversationId: string, state: RuntimeState, command?: string) {
   const issues = projectReadinessIssues(state.files, command);
   if (issues.length) throw new Error(issues.join(" "));
@@ -413,7 +388,6 @@ async function assertRunnableProject(conversationId: string, state: RuntimeState
     }
   }
 }
-
 async function validateCurrentProject(conversationId: string, state: RuntimeState, command?: string) {
   await assertRunnableProject(conversationId, state, command);
   const projectFiles = Object.entries(state.files)
@@ -428,7 +402,6 @@ async function validateCurrentProject(conversationId: string, state: RuntimeStat
     throw new Error(`Generated project validation failed:\n${message}`);
   }
 }
-
 function detectStartCommand(state: RuntimeState) {
   const packageJson = packageJsonContent(state);
   if (!packageJson) return null;
@@ -442,7 +415,6 @@ function detectStartCommand(state: RuntimeState) {
   }
   return null;
 }
-
 function fileContent(state: RuntimeState, path: string) {
   return state.files[path]?.type === "file" ? state.files[path]?.content || "" : "";
 }
@@ -450,12 +422,10 @@ function fileContent(state: RuntimeState, path: string) {
 function usesBun(state: RuntimeState) {
   return state.files["bun.lock"]?.type === "file" || state.files["bun.lockb"]?.type === "file";
 }
-
 // Python projects (run on Vivari's CPython) declare dependencies in requirements.txt.
 async function ensurePythonDependencies(conversationId: string, state: RuntimeState) {
   const requirements = fileContent(state, "requirements.txt");
   if (!requirements.trim() || state.installedRequirements === requirements) return;
-
   const wc = await ensureContainer(conversationId, state);
   state.progress = "installing";
   state.error = null;
@@ -471,7 +441,6 @@ async function ensurePythonDependencies(conversationId: string, state: RuntimeSt
   }
   state.installedRequirements = requirements;
 }
-
 /** Reconcile known packages before npm runs; surface every remaining unresolved import. */
 async function ensureProjectIntegrity(conversationId: string, state: RuntimeState) {
   const analysis = analyzeProject(state.files, true);
@@ -489,7 +458,6 @@ async function ensureProjectIntegrity(conversationId: string, state: RuntimeStat
   const remaining = analyzeProject(state.files).diagnostics;
   if (remaining.length) throw new Error(`Project preflight failed:\n${remaining.slice(0, 12).map((d) => `- ${d.message}`).join("\n")}`);
 }
-
 /** Compile a Vite web app before claiming its dev-server preview is healthy. */
 async function verifyWebBuild(conversationId: string, state: RuntimeState) {
   if (state.nativeTarget || isExpoProject(state.files)) return; // Native apps never run Vite build.
@@ -528,7 +496,6 @@ async function verifyWebBuild(conversationId: string, state: RuntimeState) {
   }
   state.verifiedBuild = fingerprint;
 }
-
 async function ensureDependencies(conversationId: string, state: RuntimeState) {
   await ensureProjectScaffold(conversationId, state);
   const native = state.nativeTarget || isExpoProject(state.files);
@@ -540,7 +507,6 @@ async function ensureDependencies(conversationId: string, state: RuntimeState) {
   const packageJson = packageJsonContent(state);
   if (!packageJson) return;
   if (!native) await assertRunnableProject(conversationId, state);
-
   const wc = await ensureContainer(conversationId, state);
   const nodeModules = await directoryExists(wc, "node_modules");
   if (nodeModules && state.installedPackageJson === packageJson) return;
@@ -554,7 +520,6 @@ async function ensureDependencies(conversationId: string, state: RuntimeState) {
       : "\nInstalling dependencies in the Cryzo runtime...\n",
   );
   emit(state);
-
   const installCommand = usesBun(state) ? "bun install" : "npm install --no-audit --no-fund";
   let installOutput = "";
   const exitCode = await runCommand(wc, installCommand, (data) => {
@@ -567,7 +532,6 @@ async function ensureDependencies(conversationId: string, state: RuntimeState) {
   }
   state.installedPackageJson = packageJson;
 }
-
 async function startDevServer(
   conversationId: string,
   state: RuntimeState,
@@ -582,7 +546,6 @@ async function startDevServer(
   state.error = null;
   appendOutput(state, `\n$ ${state.startCommand}\n`);
   emit(state);
-
   const process = await wc.spawnShell(state.startCommand);
   state.devProcess = process;
 
@@ -597,7 +560,6 @@ async function startDevServer(
       }),
     )
     .catch(() => {});
-
   state.serverReadyTimer = setTimeout(() => {
     if (state.devProcess === process && !state.previewUrl) {
       setError(
@@ -606,7 +568,6 @@ async function startDevServer(
       );
     }
   }, 60000);
-
   void process.exit.then((code) => {
     if (state.devProcess !== process) return;
     state.devProcess = null;
@@ -616,7 +577,6 @@ async function startDevServer(
     }
   });
 }
-
 function isInstallAction(action: ArtifactAction) {
   return (
     action.type === "shell" &&
@@ -625,7 +585,6 @@ function isInstallAction(action: ArtifactAction) {
     )
   );
 }
-
 async function executeSupabaseAction(
   conversationId: string,
   state: RuntimeState,
@@ -637,7 +596,6 @@ async function executeSupabaseAction(
       "This project requested a Supabase action, but no Supabase project is selected in Developer Connections.",
     );
   }
-
   state.progress = state.previewUrl ? "ready" : "writing";
   appendOutput(
     state,
@@ -649,7 +607,6 @@ async function executeSupabaseAction(
     conversationId,
     project: context.project,
   });
-
   const response = await fetch("/api/developer/supabase/query", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -662,7 +619,6 @@ async function executeSupabaseAction(
   });
   const data = (await response.json()) as { success?: boolean; error?: string };
   if (!response.ok) throw new Error(data.error || "Supabase action failed");
-
   appendOutput(state, `Supabase ${action.operation || "query"} completed.\n`);
   state.error = null;
   emit(state);
@@ -677,7 +633,6 @@ export async function syncSupabaseRuntime(conversationId: string) {
   });
   return true;
 }
-
 async function executeSandboxAction(
   conversationId: string,
   state: RuntimeState,
@@ -690,7 +645,6 @@ async function executeSandboxAction(
 
   const wc = await ensureContainer(conversationId, state);
   let safeAction = action;
-
   if (state.nativeTarget && action.type === "file" && action.filePath) {
     const path = action.filePath.replace(/^\.\//, "");
     if (isViteOnlyMobileArtifact(path)) {
@@ -706,7 +660,6 @@ async function executeSandboxAction(
       return;
     }
   }
-
   if (action.type === "file") {
     const validation = await callGuard({
       operation: "file",
@@ -720,7 +673,6 @@ async function executeSandboxAction(
     }
     safeAction = validation.action;
     if (validation.output) appendOutput(state, validation.output);
-
     await writeFiles(wc, [safeAction]);
     updateFileMap(state, safeAction);
     if (safeAction.filePath === "package.json") state.installedPackageJson = null;
@@ -731,7 +683,6 @@ async function executeSandboxAction(
     emit(state);
     return;
   }
-
   if (state.nativeTarget && action.type === "shell" && isInstallAction(action)) {
     await ensureDependencies(conversationId, state);
     return;
@@ -740,7 +691,6 @@ async function executeSandboxAction(
     await startNativeMetro(conversationId, state);
     return;
   }
-
   if (action.type === "shell") {
     if (isInstallAction(action)) {
       await ensureProjectScaffold(conversationId, state);
@@ -751,13 +701,11 @@ async function executeSandboxAction(
     state.error = null;
     appendOutput(state, `\n$ ${action.content}\n`);
     emit(state);
-
     const exitCode = await runCommand(wc, action.content.trim(), (data) => {
       appendOutput(state, data);
       emit(state);
     });
     if (exitCode !== 0) throw new Error(`Command exited with code ${exitCode}: ${action.content}`);
-
     if (isInstallAction(action)) {
       state.installedPackageJson = packageJsonContent(state) || state.installedPackageJson;
       if (/\bpip3?\b/.test(action.content)) {
@@ -771,7 +719,6 @@ async function executeSandboxAction(
     emit(state);
     return;
   }
-
   await ensureDependencies(conversationId, state);
   const preflight = await validateCurrentProject(conversationId, state, action.content);
   if (preflight.output) appendOutput(state, preflight.output);
@@ -779,7 +726,6 @@ async function executeSandboxAction(
   await verifyWebBuild(conversationId, state);
   await startDevServer(conversationId, state, action.content);
 }
-
 export function saveStreamingRuntimeFile(conversationId: string, filePath: string, content: string, expectedContent?: string) {
   const state=getState(conversationId);
   const expected=expectedContent ?? state.files[filePath]?.content;
@@ -787,7 +733,6 @@ export function saveStreamingRuntimeFile(conversationId: string, filePath: strin
   state.queue=task.then(()=>{},()=>{});
   return task;
 }
-
 async function writeManualRuntimeFile(
   conversationId: string,
   filePath: string,
@@ -797,7 +742,6 @@ async function writeManualRuntimeFile(
   const state = getState(conversationId);
   state.active = true;
   state.error = null;
-
   const requested: ArtifactAction = {
     type: "file",
     filePath,
@@ -811,7 +755,6 @@ async function writeManualRuntimeFile(
   if (!validation.action || validation.action.type !== "file" || !validation.action.filePath) {
     throw new Error(`File validation returned no writable action for ${filePath}`);
   }
-
   const safeAction = validation.action as ArtifactAction & { filePath: string };
   if (fileContent(state,filePath) !== (expectedContent ?? "")) throw new Error("This file changed while you were editing. Your draft has been kept.");
   if (state.nativeTarget) {
@@ -827,7 +770,6 @@ async function writeManualRuntimeFile(
   appendOutput(state, `Wrote ${safeAction.filePath}\n`);
   state.progress = state.previewUrl ? "ready" : "writing";
   emit(state);
-
   const needsInstall = /(^|\/)package\.json$/i.test(safeAction.filePath);
   const needsRestart =
     needsInstall ||
@@ -839,7 +781,6 @@ async function writeManualRuntimeFile(
     state.installedPackageJson = null;
     await ensureDependencies(conversationId, state);
   }
-
   if (needsRestart && state.nativeTarget) {
     await startNativeMetro(conversationId, state, true);
   } else if (needsRestart) {
@@ -856,7 +797,6 @@ async function writeManualRuntimeFile(
     content: safeAction.content,
   };
 }
-
 export function processStreamingArtifactText(
   conversationId: string,
   messageId: string,
@@ -864,7 +804,6 @@ export function processStreamingArtifactText(
   userIntent?: string,
 ) {
   if (!text.includes("<cryzoArtifact")) return false;
-
   const state = getState(conversationId);
   if (userIntent?.trim() && !/automatic project repair|generated project failed|fix the underlying cause by inspecting/i.test(userIntent)) {
     state.projectIntent = userIntent.slice(0, 3000);
@@ -873,7 +812,6 @@ export function processStreamingArtifactText(
   if (state.blockedMessageId === messageId) return true;
   if (!state.active) state.active = true;
   state.error = null;
-
   // While the model is still producing the artifact, "writing" means this is
   // new AI output — never project restoration from persisted files.
   if (hasUnclosedArtifact(text)) {
@@ -887,12 +825,10 @@ export function processStreamingArtifactText(
   const actions = parseCompletedActions(text);
   const processed = state.processedActionsByMessage.get(messageId) ?? 0;
   if (actions.length <= processed) return true;
-
   const newActions = actions.slice(processed);
   state.processedActionsByMessage.set(messageId, actions.length);
   state.progress = "writing";
   emit(state);
-
   for (const action of newActions) {
     state.queue = state.queue
       .then(() => {
@@ -908,7 +844,6 @@ export function processStreamingArtifactText(
 
   return true;
 }
-
 export async function prebootStreamingRuntime(conversationId: string, nativeTarget = false) {
   const state = getState(conversationId);
   state.nativeTarget = state.nativeTarget || nativeTarget;
@@ -920,7 +855,6 @@ export async function prebootStreamingRuntime(conversationId: string, nativeTarg
   // and should never put a reloaded chat into a "Writing files" state.
   if (!state.active) state.progress = "idle";
   emit(state);
-
   try {
     await ensureContainer(conversationId, state);
     appendOutput(state, "Cryzo runtime ready.\n");
@@ -933,7 +867,6 @@ export async function prebootStreamingRuntime(conversationId: string, nativeTarg
     throw error;
   }
 }
-
 export async function restoreStreamingRuntime(
   conversationId: string,
   actions: ArtifactAction[],
@@ -951,7 +884,6 @@ export async function restoreStreamingRuntime(
   state.error = null;
   appendOutput(state, "Restoring project in the Cryzo runtime...\n");
   emit(state);
-
   try {
     const nonSupabase = actions.filter((action) => action.type !== "supabase");
     const guarded = await callGuard({
@@ -991,7 +923,6 @@ export async function restoreStreamingRuntime(
     appendOutput(state, `Restored ${fileActions.length} project files.\n`);
     await ensureProjectScaffold(conversationId, state);
     await syncSupabaseRuntime(conversationId).catch(() => false);
-
     if (
       safeNonSupabase.some(isInstallAction) ||
       packageJsonContent(state) ||
@@ -1003,7 +934,6 @@ export async function restoreStreamingRuntime(
     const validation = await validateCurrentProject(conversationId, state);
     if (validation.output) appendOutput(state, validation.output);
     await applyRepairedFiles(conversationId, state, validation.repairedFiles);
-
     const startActions = safeNonSupabase.filter((action) => action.type === "start");
     const explicitStart = startActions.length
       ? startActions[startActions.length - 1].content
@@ -1026,9 +956,7 @@ export async function restoreStreamingRuntime(
   state.queue = restoreTask;
   await restoreTask;
 }
-
 const recoveringConversations = new Set<string>();
-
 /** Return from Safari background: revive the dev process, or restore persisted files. */
 export async function recoverStreamingRuntime(conversationId: string, savedActions: ArtifactAction[], forceTransportRecovery = false, nativeTarget = false) {
   if (recoveringConversations.has(conversationId)) return;
@@ -1093,7 +1021,6 @@ export async function recoverStreamingRuntime(conversationId: string, savedActio
     }
   } finally { recoveringConversations.delete(conversationId); }
 }
-
 export async function restartStreamingRuntime(conversationId: string) {
   const state = getState(conversationId);
   await state.queue;
@@ -1107,7 +1034,6 @@ export async function restartStreamingRuntime(conversationId: string) {
   state.previewUrl = null;
   appendOutput(state, "\nRestoring browser preview…\n");
   emit(state);
-
   try {
     await ensureContainer(conversationId, state);
     await syncSupabaseRuntime(conversationId).catch(() => false);
@@ -1116,7 +1042,6 @@ export async function restartStreamingRuntime(conversationId: string) {
     if (validation.output) appendOutput(state, validation.output);
     await applyRepairedFiles(conversationId, state, validation.repairedFiles);
     await verifyWebBuild(conversationId, state);
-
     const startCommand = state.startCommand || detectStartCommand(state);
     if (!startCommand) throw new Error("No dev/start script found in package.json");
     await startDevServer(conversationId, state, startCommand);
@@ -1125,7 +1050,6 @@ export async function restartStreamingRuntime(conversationId: string) {
     throw error;
   }
 }
-
 export async function refreshStreamingRuntimeLogs(conversationId: string) {
   const state = getState(conversationId);
   const diagnostics = [
@@ -1139,7 +1063,6 @@ export async function refreshStreamingRuntimeLogs(conversationId: string) {
   emit(state);
   return diagnostics;
 }
-
 export async function buildStreamingRuntime(conversationId: string) {
   const state = getState(conversationId);
   await state.queue;
@@ -1151,7 +1074,6 @@ export async function buildStreamingRuntime(conversationId: string) {
   const validation = await validateCurrentProject(conversationId, state);
   if (validation.output) appendOutput(state, validation.output);
   await applyRepairedFiles(conversationId, state, validation.repairedFiles);
-
   const packageJson = packageJsonContent(state);
   if (!packageJson) throw new Error("Project has no package.json to build");
   try {
@@ -1161,7 +1083,6 @@ export async function buildStreamingRuntime(conversationId: string) {
     if (error instanceof SyntaxError) throw new Error("Project package.json is invalid");
     throw error;
   }
-
   appendOutput(state, "\n$ npm run build (Cryzo runtime)\n");
   emit(state);
   let buildOutput = "";
@@ -1171,7 +1092,6 @@ export async function buildStreamingRuntime(conversationId: string) {
     emit(state);
   });
   if (exitCode !== 0) throw new Error(`npm run build exited with code ${exitCode}`);
-
   let outputDir: string | null = null;
   for (const candidate of ["dist", "build", "out"]) {
     if (await directoryExists(wc, candidate)) {
@@ -1182,7 +1102,6 @@ export async function buildStreamingRuntime(conversationId: string) {
   if (!outputDir) {
     throw new Error("Build completed but no dist, build, or out directory was found");
   }
-
   const files = await collectDirectoryFiles(wc, outputDir, {
     maxFiles: 500,
     maxBytes: 15_000_000,
@@ -1202,7 +1121,6 @@ export function subscribeStreamingRuntime(
     state.listeners.delete(listener);
   };
 }
-
 export function getStreamingRuntimeSnapshot(conversationId: string) {
   return snapshot(getState(conversationId));
 }
@@ -1211,7 +1129,6 @@ export function isStreamingRuntimeActive(conversationId: string) {
   const state = getState(conversationId);
   return state.active && Object.keys(state.files).length > 0;
 }
-
 /** Shared ownership entry point for editor, shell, Metro and phone forwarding. */
 export async function getWorkspaceContainer(conversationId: string) { return ensureContainer(conversationId, getState(conversationId)); }
 export function appendWorkspaceOutput(conversationId: string, chunk: string) { const state = getState(conversationId); appendOutput(state, chunk); emit(state); }
