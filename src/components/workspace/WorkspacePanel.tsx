@@ -341,6 +341,9 @@ export function WorkspacePanel({
               </div>
             )}
           </div>
+          <div className="h-44 shrink-0 border-t border-zinc-800">
+            <WorkspaceTerminal conversationId={String(conversationId)} />
+          </div>
         </div>
       ) : nativeProject ? (
         <NativeExpoPreview preview={expoPreview} />
