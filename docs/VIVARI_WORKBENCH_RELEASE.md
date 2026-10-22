@@ -14,8 +14,8 @@ This is a development preview. The producing browser must stay open; mobile brow
 
 Keep existing CRYZO_INTERNAL_API_SECRET and CRYZO_SECRETS_KEY values. Do not rotate them for this release.
 
-- CRYZO_EXPO_PREVIEW_DOMAIN=preview.cryzo.me on the release environment.
-- Attach *.preview.cryzo.me to the same Vercel deployment as the app. DNS currently requires CNAME *.preview -> 067d61491bddd6ca.vercel-dns-017.com. Keep the existing authoritative nameservers.
+- Future phone-preview setup requires CRYZO_EXPO_PREVIEW_DOMAIN=preview.cryzo.me and the wildcard bound to the app environment. The current configuration remains scoped to the PR preview branch; production phone-preview activation is deferred at the user's request.
+- Attach *.preview.cryzo.me to the same Vercel deployment as the app. DNS is saved at Squarespace: CNAME *.preview -> 067d61491bddd6ca.vercel-dns-017.com, plus NS _acme-challenge.preview -> ns1.vercel-dns.com and ns2.vercel-dns.com for certificate validation. Existing authoritative nameservers are retained. Vercel accepts the wildcard configuration; certificate readiness has not been established.
 - Convex must contain expoRelay, chatgptConnections and crons plus the additive tables/indexes from this branch. Audit the production schema diff before deployment; do not remove unrelated production indexes.
 - Fluid Compute and the configured 300 second function duration are required. Producer connections rotate before that limit; each session expires after one hour.
 
@@ -31,7 +31,14 @@ Official hosted eligibility: https://developers.openai.com/siwc/website
 
 The existing Vercel build script runs the complete unit suite and Next compilation. The additional Actions workflow introduced in this PR duplicates that gate and could not run because the GitHub account is billing-locked; it has been removed. Existing repository checks are unchanged.
 
-Before production release:
+Release status (2026-10-22 UTC):
+
+- The code commit 92af1f5 passed all 176 tests across 43 suites, Next compilation and TypeScript on Vercel.
+- Production Convex deployment to precise-oyster-745 completed successfully. The deployment added 13 indexes and deleted none.
+- The user explicitly excluded Expo phone-preview testing from this release. Native bundle delivery, physical QR scanning and phone HMR remain unverified and are not claimed as passing. The following phone checks are deferred follow-up checks, not release blockers.
+- Hosted ChatGPT remains disabled pending OpenAI approval and the registered hosted client configuration.
+
+Verification checklist:
 
 1. Require a successful Vercel build for the exact head commit.
 2. Validate wildcard DNS/TLS from outside the producing browser.
@@ -39,6 +46,6 @@ Before production release:
 4. Decode the terminal QR and toolbar QR and verify the same URL. Open the iOS link in Expo Go and confirm an edit refreshes the phone. Check reconnect after suspension, expired sessions and unsupported native dependencies.
 5. Check editor conflict handling against concurrent generation/shell writes, panel remounts, terminal persistence, and source checkpoint persistence. Source deletions and a complete file CRUD interface are not part of this change; file creation/editing through the terminal remains available.
 6. Complete hosted OAuth and plan inference tests only with an approved client; until then leave the gate off.
-7. Audit/deploy the additive Convex schema, move wildcard binding to production, set the production preview domain, and merge only after the phone smoke passes.
+7. The additive Convex schema is deployed. Release the verified workbench and gated ChatGPT changes with Expo phone acceptance explicitly deferred by the user. Retain the phone-preview configuration steps for future validation.
 
-The automated remote smoke authenticated to Vercel and confirmed cross-origin isolation, but its Vivari page crashed in the small remote test sandbox before Metro started. Physical phone/bundle delivery has not been verified. Development Convex codegen/typecheck/deployment passed; production Convex is unchanged.
+The automated remote smoke authenticated to Vercel and confirmed cross-origin isolation, but its Vivari page crashed in the small remote test sandbox before Metro started. Physical phone/bundle delivery has not been verified, and further phone testing was excluded by the user. Development and production Convex typecheck/deployment passed. Workbench source deletions and a complete file CRUD interface remain outside this change.
