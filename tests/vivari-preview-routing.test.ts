@@ -4,14 +4,14 @@ import { runInNewContext } from "node:vm";
 // @ts-expect-error The build helper is also executed directly by Node.
 import { patchVivariPreview } from "../scripts/vivari-preview-patch.mjs";
 const original = readFileSync("node_modules/@vivari/core/dist/assets/sw.js", "utf8");
-function worker(source: string) {
+function worker(source: string, clientUrl = "https://cryzo.test/chat/project") {
   const handlers: Record<string, (event: any) => void> = {};
   const network = vi.fn(async () => Response.json({ network: true }));
   const cache = { match: async () => undefined, put: async () => {} };
   runInNewContext(source, {
     self: {
       location: new URL("https://cryzo.test/sw.js"),
-      clients: { get: async () => ({ url: "https://cryzo.test/chat/project", frameType: "top-level" }), matchAll: async () => [] },
+      clients: { get: async () => ({ url: clientUrl, frameType: "top-level" }), matchAll: async () => [] },
       addEventListener: (type: string, handler: (event: any) => void) => { handlers[type] = handler; },
     },
     URL, Request, Response, Headers, TextEncoder, TextDecoder, console,
@@ -50,6 +50,12 @@ describe("Vivari preview routing and Cryzo APIs", () => {
     // No kernel in this fixture, proving the virtual preview handler was used.
     expect(response).not.toBeNull();
     expect(await response?.text()).not.toContain("Bad preview URL");
+  });
+  it("preserves a generated app's absolute API requests inside the virtual runtime", async () => {
+    const instance = worker(patchVivariPreview(original, "1.1.1"), "https://cryzo.test/preview/8081/");
+    const response = await instance.request("/api/my-app-endpoint");
+    expect(response).not.toBeNull();
+    expect(instance.network).not.toHaveBeenCalled();
   });
   it("fails closed when the pinned worker contract changes", () => {
     expect(() => patchVivariPreview(original, "2.0.0")).toThrow();

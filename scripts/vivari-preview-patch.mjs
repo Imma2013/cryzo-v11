@@ -6,6 +6,6 @@ export function patchVivariPreview(source, version) {
   if (source.split(originGuard).length !== 2 || source.split(previewMatch).length !== 2) {
     throw new Error("Pinned Vivari service worker routing changed");
   }
-  return source.replace(originGuard, originGuard + '\n  if (url.pathname === "/api" || url.pathname.startsWith("/api/")) return;')
+  return source.replace(originGuard, originGuard + '\n  if (url.pathname.startsWith("/api/expo/") || url.pathname.startsWith("/api/preview/expo/")) return;')
     .replace(previewMatch, 'const match = url.pathname.match(/^\\/preview\\/([1-9]\\d{0,4})(?:\\/|$)/);\n  const idx = match && Number(match[1]) <= 65535 ? 0 : -1;');
 }
