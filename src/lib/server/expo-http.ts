@@ -19,7 +19,7 @@ export async function forwardExpoHttp(req:Request,sessionId:string,host:string,p
  if(!["GET","HEAD"].includes(req.method))return new Response("Method not allowed",{status:405});
  const channel=await openExpoStream(sessionId,req.signal),reader=channel.readable.getReader();
  const allowed=["accept","expo-platform","expo-protocol-version","expo-runtime-version","expo-expect-signature","if-none-match"];
- const lines=[`${req.method} ${path} HTTP/1.1`,`Host: ${host}`,`X-Forwarded-Host: ${host}`,"X-Forwarded-Proto: https","Accept-Encoding: identity","Connection: close"];
+ const lines=[`${req.method} ${path} HTTP/1.1`,`Host: ${host}`,`Forwarded: host="${host}";proto=https`,`X-Forwarded-Host: ${host}`,"X-Forwarded-Proto: https","Accept-Encoding: identity","Connection: close"];
  for(const name of allowed){const value=req.headers.get(name);if(value && !/[\r\n]/.test(value))lines.push(`${name}: ${value}`);}
  try{await channel.send(Buffer.from(lines.join("\r\n")+"\r\n\r\n"));}catch(error){await channel.close();throw error;}
  let head=Buffer.alloc(0),boundary=-1;

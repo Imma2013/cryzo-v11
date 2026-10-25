@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Script from "next/script";
 import { Geist, Geist_Mono } from "next/font/google";
+import "@xterm/xterm/css/xterm.css";
 import "./globals.css";
 import { ConvexClientProvider } from "@/providers/ConvexProvider";
 import { AuthProvider } from "@/providers/AuthProvider";

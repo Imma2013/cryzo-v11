@@ -1,7 +1,9 @@
+import sdkModules from "./expo-sdk58-modules.json";
 import type { FileMap } from "./types";
 
-/** Pinned to the Expo SDK 57 official blank TypeScript template family. */
-export const EXPO_STARTER_VERSION = "57.0.17";
+/** Official Expo SDK 58 template and published bundledNativeModules matrix. */
+export const EXPO_SUPPORTED_SDK = 58;
+export const EXPO_STARTER_VERSION = "58.0.17";
 
 export const EXPO_STARTER_PACKAGE = {
   name: "cryzo-native-app",
@@ -16,16 +18,16 @@ export const EXPO_STARTER_PACKAGE = {
     typecheck: "tsc --noEmit --noUnusedLocals false --noUnusedParameters false",
   },
   dependencies: {
-    expo: "~57.0.17",
-    "expo-status-bar": "~57.0.1",
-    "expo-dev-client": "~57.0.20",
-    react: "19.2.3",
-    "react-native": "0.86.3",
-    "react-dom": "19.2.3",
-    "react-native-web": "~0.21.0",
-    "@expo/metro-runtime": "~57.0.16",
+    expo: "~58.0.17",
+    "expo-status-bar": "~58.0.4",
+    "expo-dev-client": "~58.0.14",
+    react: "19.3.0",
+    "react-native": "0.88.0",
+    "react-dom": "19.3.0",
+    "react-native-web": "~0.21.4",
+    "@expo/metro-runtime": "~58.0.15",
   },
-  devDependencies: { "@types/react": "~19.2.2", typescript: "~6.0.3" },
+  devDependencies: { "@types/react": "~19.3.0", typescript: "~6.0.3" },
 };
 
 /** Framework config belongs to Cryzo, not to an LLM's best guess. */
@@ -60,11 +62,21 @@ export function reconcileExpoPackage(proposedContent: string, currentContent?: s
   let current: Record<string, unknown> = {};
   try { current = currentContent ? JSON.parse(currentContent) : {}; } catch { /* use verified baseline */ }
   const known = EXPO_STARTER_PACKAGE;
+  const existingExpo = (current.dependencies as Record<string, string> | undefined)?.expo;
+  const major = Number(existingExpo?.match(/\d+/)?.[0]);
+  if (major > EXPO_SUPPORTED_SDK) throw new Error(`This project uses Expo SDK ${major}. Cryzo supports SDK ${EXPO_SUPPORTED_SDK}; its dependencies were not downgraded.`);
   const readDeps = (pkg: Record<string, unknown>, field: "dependencies" | "devDependencies") => {
     const deps = pkg[field]; return deps && typeof deps === "object" && !Array.isArray(deps) ? deps as Record<string, string> : {};
   };
   const dependencies = { ...known.dependencies, ...readDeps(current,"dependencies"), ...readDeps(proposed,"dependencies") } as Record<string,string>;
   const devDependencies = { ...known.devDependencies, ...readDeps(current,"devDependencies"), ...readDeps(proposed,"devDependencies") } as Record<string,string>;
+  // Align optional Expo/native modules too, not just the starter's core packages.
+  for (const deps of [dependencies, devDependencies]) {
+    for (const name of Object.keys(deps)) {
+      const version = (sdkModules as Record<string, string>)[name];
+      if (version) deps[name] = version;
+    }
+  }
   // Never let generated Vite-only versions replace Expo's tested SDK/React Native trio.
   for (const [name, version] of Object.entries(known.dependencies)) dependencies[name] = version;
   for (const [name, version] of Object.entries(known.devDependencies)) devDependencies[name] = version;

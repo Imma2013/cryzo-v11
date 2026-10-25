@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
-// @ts-expect-error The build helper is also executed directly by Node.
 import { patchVivariPreview } from "../scripts/vivari-preview-patch.mjs";
 const original = readFileSync("node_modules/@vivari/core/dist/assets/sw.js", "utf8");
 function worker(source: string, clientUrl = "https://cryzo.test/chat/project") {

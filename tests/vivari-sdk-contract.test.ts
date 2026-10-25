@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import { readdirSync, readFileSync } from "node:fs";
-// @ts-expect-error Build helper intentionally stays executable without a TS loader.
 import { patchVivariRelay } from "../scripts/vivari-relay-patch.mjs";
 describe("pinned Vivari private ABI",()=>{
  it("patches the published worker exactly once and rejects an unreviewed upgrade",()=>{
