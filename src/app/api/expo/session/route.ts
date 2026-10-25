@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { fetchMutation } from "convex/nextjs";
 import { requireRequestUserId } from "@/lib/server/request-user";
+import { inspectExpoManifest } from "@/lib/server/expo-manifest";
 import { createRelaySession,relayConfiguration,relayStatus,relayApi,relayArgs,previewHost } from "@/lib/server/expo-relay";
 import type { Id } from "../../../../../convex/_generated/dataModel";
 export const runtime="nodejs";
@@ -20,8 +21,8 @@ export async function POST(req:Request){
   try{response=await fetch(publicOrigin+"/",{headers:{Accept:"application/expo+json","Expo-Platform":"ios","Expo-Protocol-Version":"1"},cache:"no-store",signal:AbortSignal.timeout(15_000)});}catch{return NextResponse.json({phase:"connecting",message:"The public Expo preview address is not reachable yet. Check preview DNS and reconnect."});}
   if(!response.ok)return NextResponse.json({phase:"connecting",message:"Metro is starting. Waiting for the public manifest…"});
   let manifest:any;try{manifest=await response.json();}catch{return NextResponse.json({phase:"connecting",message:"Metro has not returned an Expo manifest yet."});}
-  const bundle=manifest?.launchAsset?.url || manifest?.bundleUrl;
-  if(typeof bundle!=="string" || !bundle.startsWith(publicOrigin+"/"))return NextResponse.json({phase:"error",message:"Metro advertised a bundle outside this phone session. Reconnect Expo preview."});
-  return NextResponse.json({phase:"ready",deviceUrl:"exps://"+previewHost(input.sessionId),bundleUrl:bundle,expiresAt:status.expiresAt},{headers:{"Cache-Control":"no-store"}});
+  const inspected=inspectExpoManifest(manifest,publicOrigin);
+  if(inspected.phase!=="ready")return NextResponse.json(inspected,{headers:{"Cache-Control":"no-store"}});
+  return NextResponse.json({...inspected,deviceUrl:"exps://"+previewHost(input.sessionId),expiresAt:status.expiresAt},{headers:{"Cache-Control":"no-store"}});
  }catch{return NextResponse.json({error:"Expo phone forwarding could not connect. Check preview configuration and retry."},{status:503});}
 }

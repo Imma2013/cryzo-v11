@@ -50,7 +50,7 @@ export function preparePhoneSession(id:string,runtime:Sandbox,token:string,outpu
     try{
      const status=await api(controller.token,{operation:"status",sessionId:config.sessionId});if(stopped)return;
      if(status.phase==="ready"){
-      update(id,{phase:"ready",error:"",message:"Ready to scan",data:{deviceUrl:status.deviceUrl,webPreviewUrl:null,launchTarget:"expo-go",sourceRevision:config.sessionId,status:"ready"}});
+      update(id,{phase:"ready",error:"",message:"Ready to scan",data:{deviceUrl:status.deviceUrl,webPreviewUrl:null,launchTarget:"expo-go",sourceRevision:config.sessionId,status:"ready",sdkVersion:status.sdkVersion}});
       if(!printed){printed=true;output("\n"+terminalQr(status.deviceUrl)+"\nMetro waiting on "+status.deviceUrl+"\nScan with Expo Go or your iPhone camera. Keep Cryzo open.\n");}
      }else update(id,{phase:status.phase==="error"?"error":"connecting",message:status.message||"Connecting phone preview…",error:status.phase==="error"?status.message:"",data:null});
     }catch(error){if(!stopped)update(id,{phase:"error",error:error instanceof Error?error.message:"Phone preview disconnected",data:null});}

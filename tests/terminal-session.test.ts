@@ -22,39 +22,39 @@ function fixture() {
   const session = new ProjectTerminal("terminal-test-" + ++serial); sessions.push(session);
   return { session, process, writes, output, spawn };
 }
-describe("editable terminal with shared runtime output", () => {
-  it("keeps an edited draft while logs arrive and sends only the finished command", async () => {
-    const { session, writes } = fixture(); await session.start();
-    const render: string[] = []; const detach = session.subscribe(chunk => render.push(chunk));
-    session.input("pwx"); session.input("\x7f"); session.input("d");
-    terminalTranscript(session.conversationId).append("Metro ready\n");
-    expect(render.at(-1)).toContain("$ pwd");
-    expect(session.output).toBe("Metro ready\n");
-    session.input("\r"); await vi.advanceTimersByTimeAsync(0);
-    expect(writes).toEqual(["pwd\n"]);
-    expect(session.output).toBe("Metro ready\n$ pwd\r\n");
-    detach();
-    expect(session.output).toContain("Metro ready");
-  });
-  it("supports multiline paste, history and cursor editing without persisting redraws", async () => {
-    const { session, writes } = fixture(); await session.start();
-    session.input("\x1b[200~pwd\r\nls\x1b[201~"); session.input("\r");
-    session.input("\x1b[A"); session.input("\x1b[D"); session.input("a"); session.input("\r");
-    await vi.advanceTimersByTimeAsync(0);
-    expect(writes).toEqual(["pwd\n", "ls\n", "las\n"]);
-    expect(session.output).not.toContain("\x1b[2K");
-  });
-  it("leaves the shell running when its renderer detaches and syncs command file changes", async () => {
-    const { session, output, process } = fixture(); await session.start();
-    const detach = session.subscribe(() => {}); detach();
-    output.enqueue("wrote file\n"); await vi.advanceTimersByTimeAsync(800);
-    expect(process.kill).not.toHaveBeenCalled();
-    expect(runtime.sync).toHaveBeenCalledWith(session.conversationId);
-    expect(session.output).toContain("wrote file");
-  });
-  it("cancels only its own interactive shell", async () => {
-    const { session, process } = fixture(); await session.start();
-    session.input("\x03"); expect(process.kill).toHaveBeenCalledTimes(1);
-    expect(session.output).toContain("^C");
-  });
+
+describe("one editable Vivari shell with shared output", () => {
+ it("forwards raw editing to Vivari without adding a second prompt or echo", async () => {
+  const {session,writes,output}=fixture();await session.start();
+  const render:string[]=[];session.subscribe(chunk=>render.push(chunk));
+  session.input("pwx");session.input("\x7f");session.input("d\r");
+  await vi.advanceTimersByTimeAsync(0);
+  expect(writes.join("")).toBe("pwx\x7fd\r");expect(session.output).toBe("");
+  output.enqueue("cryzo-project$ pwd\n/cryzo-project\ncryzo-project$ ");await vi.advanceTimersByTimeAsync(0);
+  expect(session.output).toBe("cryzo-project$ pwd\n/cryzo-project\ncryzo-project$ ");expect(session.draft).toBe("");
+  expect(render.join("")).toBe(session.output);
+ });
+ it("filters split device replies while retaining paste, history, arrows and shell operators", async () => {
+  const {session,writes}=fixture();await session.start();
+  session.input("\x1b[20");session.input("0~echo 'R && $$'\r\nls\x1b[201~");
+  session.input("\x1b[A\x1b[D");session.input("\x1b[12;");session.input("40R\x1b[?1;2c");
+  await vi.advanceTimersByTimeAsync(0);
+  expect(writes.join("")).toBe("echo 'R && $$'\rls\x1b[A\x1b[D");
+ });
+ it("keeps the shell running when a renderer detaches and syncs command file changes", async () => {
+  const {session,output,process}=fixture();await session.start();
+  const detach=session.subscribe(()=>{});detach();
+  output.enqueue("wrote file\n");await vi.advanceTimersByTimeAsync(800);
+  expect(process.kill).not.toHaveBeenCalled();expect(runtime.sync).toHaveBeenCalledWith(session.conversationId);
+  terminalTranscript(session.conversationId).append("Metro ready\n");
+  expect(session.output).toContain("wrote file\nMetro ready\n");
+ });
+ it("passes Ctrl+C to the foreground job instead of destroying the persistent shell", async () => {
+  const {session,process,writes}=fixture();await session.start();session.input("\x03");await vi.advanceTimersByTimeAsync(0);
+  expect(writes).toEqual(["\x03"]);expect(process.kill).not.toHaveBeenCalled();
+ });
+ it("queues early input once while the shell is starting", async () => {
+  const {session,writes,spawn}=fixture();session.input("pw");session.input("d\r");await vi.advanceTimersByTimeAsync(0);
+  expect(spawn).toHaveBeenCalledTimes(1);expect(writes.join("")).toBe("pwd\r");
+ });
 });

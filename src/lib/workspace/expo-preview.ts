@@ -1,7 +1,7 @@
 export type ExpoLaunchTarget = "expo-go" | "development-build";
 export type ExpoPreview = {
   deviceUrl: string; webPreviewUrl: string | null; launchTarget: ExpoLaunchTarget;
-  sourceRevision: string; status: "ready"; output?: string;
+  sourceRevision: string; status: "ready"; output?: string; sdkVersion?: string;
 };
 
 export function selectExpoLaunchTarget(nativeDependencies: string[], bundledDependencies: string[]): ExpoLaunchTarget {

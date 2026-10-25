@@ -27,4 +27,22 @@ describe("native Vivari restoration",()=>{
   await runtime.recoverStreamingRuntime("native-shared",actions,false,true);expect(fake.starts).toBe(count);
   await runtime.restartStreamingRuntime("native-shared");expect(fake.starts).toBe(count+1);
  });
+ it("upgrades a saved SDK 57 app without replacing its config, entry or source", async () => {
+  const app = 'import { View } from "react-native"; export default function App(){return <View/>}';
+  const actions:ArtifactAction[]=[
+   {type:"file",filePath:"App.tsx",content:app},
+   {type:"file",filePath:"package.json",content:JSON.stringify({name:"saved-app",dependencies:{expo:"~57.0.17","react-native":"0.86.3","expo-font":"~57.0.0",zod:"^4"}})},
+   {type:"file",filePath:"app.json",content:JSON.stringify({expo:{name:"Saved",slug:"saved",sdkVersion:"57.0.0",ios:{bundleIdentifier:"me.saved.app"}}})},
+   {type:"file",filePath:"index.ts",content:'import "./custom-entry";'},
+   {type:"file",filePath:"tsconfig.json",content:JSON.stringify({extends:"expo/tsconfig.base",compilerOptions:{strict:true,paths:{"@/*":["src/*"]}}})},
+  ];
+  await runtime.restoreStreamingRuntime("migrating-sdk57",actions,true);
+  const pkg=JSON.parse(fake.files["package.json"]);
+  expect(pkg.dependencies.expo).toBe("~58.0.17"); expect(pkg.dependencies["expo-font"]).toBe("~58.0.9"); expect(pkg.dependencies.zod).toBe("^4");
+  expect(fake.files["App.tsx"]).toBe(app);expect(fake.files["index.ts"]).toBe('import "./custom-entry";');
+  expect(JSON.parse(fake.files["app.json"]).expo).toMatchObject({name:"Saved",ios:{bundleIdentifier:"me.saved.app"}});
+  expect(JSON.parse(fake.files["app.json"]).expo.sdkVersion).toBeUndefined();
+  const installed=fake.starts;await runtime.ensureNativePreview("migrating-sdk57");expect(fake.starts).toBe(installed);
+ });
+
 });

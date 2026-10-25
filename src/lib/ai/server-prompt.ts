@@ -21,7 +21,7 @@ The current project target is Web.
 
   return `## Project Target — Expo / React Native (Native Mobile: ${targetLabel}) — CRITICAL
 The user's app runs natively on Android and iOS, not inside a browser WebView.
-Cryzo already provides a VERIFIED Expo SDK 57 + React Native + TypeScript starter. The following starter files ALREADY EXIST and are owned by the runtime:
+Cryzo already provides a VERIFIED Expo SDK 58 + React Native + TypeScript starter. The following starter files ALREADY EXIST and are owned by the runtime:
 - package.json (expo, react-native, react-native-web, Expo CLI scripts, dependencies)
 - app.json (native Expo config for iOS and Android)
 - tsconfig.json (extends expo/tsconfig.base and includes root App.tsx)

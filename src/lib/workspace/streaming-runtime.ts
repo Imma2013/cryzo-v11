@@ -284,7 +284,7 @@ async function ensureContainer(conversationId: string, state: RuntimeState) {
     activeConversationId = conversationId;
     sourceWatcher=wc.watchSource?.(path=>{
       const relative=path.replace(/^\/cryzo-project\//,"");
-      if(relative.split("/").some(part=>/^(node_modules|\.git|\.expo|\.next|dist|build|coverage|\.cache)$/.test(part)))return;
+      if(relative.split("/").some(part=>/^(node_modules|\.git|\.cryzo-expo|\.expo|\.next|dist|build|coverage|\.cache)$/.test(part)))return;
       if(!/\.(?:[cm]?[jt]sx?|json|html|css|md|txt|ya?ml|toml|svg)$/.test(relative))return;
       if(sourceWatchTimer)clearTimeout(sourceWatchTimer);
       sourceWatchTimer=setTimeout(()=>{void state.queue.catch(()=>{}).then(()=>syncWorkspaceFiles(conversationId)).catch(()=>{});},600);
@@ -355,13 +355,26 @@ async function ensureExpoStarter(conversationId: string, state: RuntimeState) {
   if (!state.nativeTarget && !isExpoProject(state.files)) return;
   state.nativeTarget = true;
   const missing = expoStarterFiles().filter((file) => state.files[file.path]?.type !== "file");
-  if (!missing.length) return;
   const actions: ArtifactAction[] = missing.map(({ path, content }) => ({ type: "file", filePath: path, content }));
+  const previous = packageJsonContent(state);
+  if (previous) {
+    const content = reconcileExpoPackage(previous, previous);
+    if (content !== previous) actions.push({ type: "file", filePath: "package.json", content });
+  }
+  const app = fileContent(state, "app.json");
+  if (app) {
+    const config = JSON.parse(app);
+    if (config.expo?.sdkVersion && config.expo.sdkVersion !== "58.0.0") {
+      delete config.expo.sdkVersion;
+      actions.push({ type: "file", filePath: "app.json", content: JSON.stringify(config, null, 2) + "\n" });
+    }
+  }
+  if (!actions.length) return;
   const wc = await ensureContainer(conversationId, state);
   await writeFiles(wc, actions);
   for (const action of actions) updateFileMap(state, action);
   state.installedPackageJson = null;
-  appendOutput(state, `\nInitialized ${missing.length} verified Expo SDK 57 starter files (native Metro, no Vite).\n`);
+  appendOutput(state, `\nInitialized ${missing.length} verified Expo SDK 58 starter files (native Metro, no Vite).\n`);
   emit(state);
 }
 async function ensureProjectScaffold(conversationId: string, state: RuntimeState) {
@@ -899,22 +912,20 @@ export async function restoreStreamingRuntime(
     if (guarded.output) appendOutput(state, guarded.output);
     state.nativeTarget = state.nativeTarget || nativeTargetFromActions(safeActions);
     const fileActions = safeNonSupabase.filter((action) => action.type === "file" &&
-      (!state.nativeTarget || (!isViteOnlyMobileArtifact(action.filePath || "") &&
-        !/^(?:src\/index\.css|src\/App\.(?:jsx?|tsx?))$/.test(action.filePath || "") &&
-        !["package.json", "app.json", "tsconfig.json", "index.ts"].includes(action.filePath || ""))));
+      (!state.nativeTarget || !isViteOnlyMobileArtifact(action.filePath || "")));
     state.files = fileMapFromActions(fileActions);
     emit(state);
     if (state.nativeTarget) {
       await ensureExpoStarter(conversationId, state);
-      // Restore extra dependency declarations without replacing tested SDK versions.
-      const previousManifest = [...safeNonSupabase].reverse().find(a => a.type === "file" && a.filePath === "package.json");
-      if (previousManifest) {
-        try { updateFileMap(state, { ...previousManifest, content: reconcileExpoPackage(previousManifest.content, fileContent(state, "package.json")) }); }
-        catch { appendOutput(state, "Preserved valid Expo manifest after malformed generated package.json.\n"); }
-      }
       const wc = await ensureContainer(conversationId, state);
       await writeFiles(wc, Object.entries(state.files).filter(([,entry]) => entry.type === "file").map(([filePath,entry]) => ({ type: "file" as const, filePath, content: entry.content || "" })));
       appendOutput(state, `Restored ${fileActions.length} native app files in Vivari.\n`);
+      const migrated = ["package.json", "app.json"].flatMap(path => {
+        const content = state.files[path]?.content;
+        const original = [...safeNonSupabase].reverse().find(a => a.type === "file" && a.filePath === path)?.content;
+        return content && content !== original ? [{path, content}] : [];
+      });
+      if (migrated.length && typeof window !== "undefined") window.dispatchEvent(new CustomEvent("cryzo:workspace-files-changed", {detail: {conversationId, files: migrated}}));
       await startNativeMetro(conversationId, state);
       return;
     }
@@ -1167,7 +1178,7 @@ export async function syncWorkspaceFiles(conversationId: string) {
   async function walk(dir: string) {
     for (const entry of await runtime.fs.readdir(dir)) {
       if (++visited > 1500) return;
-      if (/^(node_modules|\.git|\.expo|\.next|dist|build|coverage|\.cache)$/.test(entry.name)) continue;
+      if (/^(node_modules|\.git|\.cryzo-expo|\.expo|\.next|dist|build|coverage|\.cache)$/.test(entry.name)) continue;
       const path = (dir === "." ? "" : dir + "/") + entry.name;
       if (entry.isDirectory()) { await walk(path); continue; }
       if (!entry.isFile() || !/\.(?:[cm]?[jt]sx?|json|html|css|md|txt|ya?ml|toml|svg)$/.test(path)) continue;

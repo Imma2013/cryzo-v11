@@ -51,7 +51,7 @@ html[data-theme="light"] * {
 
 @media (max-width: 767px) {
   input:not([type="file"]),
-  textarea,
+  textarea:not(.xterm-helper-textarea),
   select {
     font-size: 16px !important;
   }
@@ -163,3 +163,8 @@ html[data-theme="light"] input,
 html[data-theme="light"] textarea {
   color-scheme: light;
 }
+
+/* Keep xterm helper geometry intact, including accessibility and IME input. */
+.cryzo-terminal .xterm { height: 100%; padding: 0; }
+.cryzo-terminal .xterm-viewport { background: #09090b !important; }
+.cryzo-terminal .xterm .composition-view { background: #09090b; color: #d4d4d8; }
