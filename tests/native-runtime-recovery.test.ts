@@ -16,6 +16,7 @@ let runtime:typeof import("@/lib/workspace/streaming-runtime");
 beforeAll(async()=>{
  vi.stubGlobal("fetch",vi.fn(async(_url:string,init:RequestInit)=>{const input=JSON.parse(String(init.body||"{}"));return{ok:true,json:async()=>({actions:input.actions || [],action:input.action,output:""})};}));
  runtime=await import("@/lib/workspace/streaming-runtime");runtime.setStreamingRuntimeAuthToken("test");
+
 });
 describe("native Vivari restoration",()=>{
  it("mounts saved native source before starting one Metro process",async()=>{
@@ -45,4 +46,15 @@ describe("native Vivari restoration",()=>{
   const installed=fake.starts;await runtime.ensureNativePreview("migrating-sdk57");expect(fake.starts).toBe(installed);
  });
 
+ it("Retry mounts saved source after an initial kernel boot failure", async () => {
+  const {getSandbox}=await import("@/lib/workspace/sandbox");
+  vi.mocked(getSandbox).mockRejectedValueOnce(Object.assign(new Error("kernel did not report ready"), {code:"ERR_BOOT_TIMEOUT"}));
+  const app='import { View } from "react-native"; export default function App(){return <View/>}';
+  await runtime.restoreStreamingRuntime("retry-after-boot-failure",[{type:"file",filePath:"App.tsx",content:app}],true);
+  expect(runtime.getStreamingRuntimeSnapshot("retry-after-boot-failure").progress).toBe("error");
+  await runtime.restartStreamingRuntime("retry-after-boot-failure");
+  expect(fake.files["App.tsx"]).toBe(app);
+  expect(fake.files["index.ts"]).toContain("registerRootComponent");
+  expect(runtime.getStreamingRuntimeSnapshot("retry-after-boot-failure").error).toBeNull();
+ });
 });

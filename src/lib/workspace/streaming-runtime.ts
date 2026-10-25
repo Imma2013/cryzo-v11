@@ -281,6 +281,10 @@ async function ensureContainer(conversationId: string, state: RuntimeState) {
     // orphaned files absent from preflight validation.
     sourceWatcher?.();sourceWatcher=null;if(sourceWatchTimer)clearTimeout(sourceWatchTimer);
     await resetSandboxProject(wc);
+    // A failed boot can leave authoritative files in memory without ever mounting
+    // them. A fresh kernel must receive those files before Retry starts Metro.
+    await writeFiles(wc, Object.entries(state.files).filter(([, entry]) => entry.type === "file")
+      .map(([filePath, entry]) => ({type: "file" as const, filePath, content: entry.content || ""})));
     activeConversationId = conversationId;
     sourceWatcher=wc.watchSource?.(path=>{
       const relative=path.replace(/^\/cryzo-project\//,"");

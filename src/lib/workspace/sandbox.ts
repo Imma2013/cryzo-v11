@@ -1,5 +1,6 @@
 import type { Vivari } from "@vivari/core";
 import type { ArtifactAction } from "./types";
+import { RuntimeBoot } from "./runtime-boot";
 
 /**
  * Cryzo's in-browser project runtime, backed by Vivari (MIT, https://vivari.run).
@@ -50,17 +51,25 @@ function resolvePath(path: string) {
 
 export class Sandbox {
   private readonly previewListeners = new Set<SandboxEventMap["preview-message"]>();
+  private previewMessage: ((event: MessageEvent) => void) | null = null;
 
   constructor(private readonly vivari: Vivari) {
     if (typeof window !== "undefined") {
       // Sent by public/inspector-script.js, which Vivari injects into every preview page.
-      window.addEventListener("message", (event: MessageEvent) => {
+      this.previewMessage = (event: MessageEvent) => {
         if (event.origin !== window.location.origin) return;
         const type = event.data?.type;
         if (type !== "PREVIEW_UNCAUGHT_EXCEPTION" && type !== "PREVIEW_UNHANDLED_REJECTION" && type !== "PREVIEW_LAYOUT_DIAGNOSTIC") return;
         for (const listener of this.previewListeners) listener(event.data as PreviewMessage);
-      });
+      };
+      window.addEventListener("message", this.previewMessage);
     }
+  }
+
+  dispose() {
+    if (typeof window !== "undefined" && this.previewMessage) window.removeEventListener("message", this.previewMessage);
+    this.previewListeners.clear();
+    this.vivari.teardown();
   }
 
   /** Project-relative filesystem access (paths resolve inside the project dir). */
@@ -122,8 +131,7 @@ export class Sandbox {
   }
 }
 
-let instance: Sandbox | null = null;
-let bootPromise: Promise<Sandbox> | null = null;
+const runtimeBoot = new RuntimeBoot(bootSandbox);
 let isolationFailure: Error | null = null;
 
 function reloadRequiredError(message: string) {
@@ -170,11 +178,12 @@ function assertCrossOriginIsolation() {
   }
 }
 
-async function bootSandbox(): Promise<Sandbox> {
+async function bootSandbox(signal: AbortSignal): Promise<Sandbox> {
   assertCrossOriginIsolation();
   const { Vivari: VivariRuntime } = (await import(
     /* webpackIgnore: true */ /* turbopackIgnore: true */ VIVARI_ENTRY
   )) as VivariModule;
+  signal.throwIfAborted();
   // Mode B can isolate arbitrary preview code from Cryzo's authenticated UI.
   // Enable only after a dedicated static bridge origin is fully provisioned.
   const configuredPreviewOrigin = process.env.NEXT_PUBLIC_VIVARI_PREVIEW_ORIGIN?.trim();
@@ -194,54 +203,58 @@ async function bootSandbox(): Promise<Sandbox> {
     serviceWorkerUrl: false,
     ...(previewOrigin ? { previewOrigin, previewPopout: "isolated" as const } : {}),
     workerName: "Cryzo Runtime",
-    timeout: 45_000,
+    timeout: 60_000,
+    signal,
   });
-  await vivari.fs.mkdir(SANDBOX_PROJECT_DIR, { recursive: true });
-
-  const previewReady = await vivari.internal.registerServiceWorker(VIVARI_SERVICE_WORKER);
-  if (!previewReady) {
+  const stop = () => vivari.teardown();
+  signal.addEventListener("abort", stop, {once: true});
+  try {
+    signal.throwIfAborted();
+    await startupStep(vivari.fs.mkdir(SANDBOX_PROJECT_DIR, { recursive: true }), signal, 10_000);
+    const previewReady = await startupStep(vivari.internal.registerServiceWorker(VIVARI_SERVICE_WORKER), signal, 20_000);
+    if (!previewReady) {
+      const error = new Error("The Cryzo preview Service Worker could not be registered.") as Error & { code?: string };
+      error.code = "ERR_PREVIEW_SERVICE_WORKER";
+      throw error;
+    }
+    vivari.internal.setDevtoolsEnabled(true);
+    return new Sandbox(vivari);
+  } catch (error) {
     vivari.teardown();
-    const error = new Error("The Cryzo preview Service Worker could not be registered.") as Error & { code?: string };
-    error.code = "ERR_PREVIEW_SERVICE_WORKER";
     throw error;
+  } finally {
+    signal.removeEventListener("abort", stop);
   }
-  vivari.internal.setDevtoolsEnabled(true);
-  return new Sandbox(vivari);
+}
+
+async function startupStep<T>(operation: Promise<T>, signal: AbortSignal, timeout: number): Promise<T> {
+  signal.throwIfAborted();
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (ok: boolean, value: unknown) => {
+      if (settled) return;
+      settled = true; clearTimeout(timer); signal.removeEventListener("abort", aborted);
+      if (ok) resolve(value as T); else reject(value);
+    };
+    const aborted = () => finish(false, Object.assign(new Error("Runtime startup cancelled"), {code: "ERR_ABORTED"}));
+    const timer = setTimeout(() => finish(false, Object.assign(new Error("Runtime setup did not finish. Retry preview to restore the project."), {code: "ERR_BOOT_TIMEOUT"})), timeout);
+    signal.addEventListener("abort", aborted, {once: true});
+    operation.then(value => finish(true, value), error => finish(false, error));
+  });
 }
 
 export async function getSandbox(): Promise<Sandbox> {
-  if (instance) return instance;
   if (isolationFailure) throw isolationFailure;
-  if (bootPromise) return bootPromise;
-
-  bootPromise = bootSandbox()
-    .then((sandbox) => {
-      instance = sandbox;
-      return sandbox;
-    })
-    .catch((error) => {
-      // Unlike a missing isolation header, an ordinary boot failure (slow network,
-      // worker load error) is retryable: clear the promise so the next call boots again.
-      bootPromise = null;
-      if (isSandboxReloadRequiredError(error)) {
-        isolationFailure =
-          (error as { code?: string }).code === SANDBOX_RELOAD_ERROR_CODE
-            ? (error as Error)
-            : reloadRequiredError(
-                "Cryzo could not enable the browser isolation its live preview needs. Reload the builder and try again.",
-              );
-        throw isolationFailure;
-      }
-      const wrapped = new Error(
-        `The Cryzo runtime could not start in this browser. ${error instanceof Error ? error.message : String(error)}`,
-      ) as Error & { code?: string };
-      if (error && typeof error === "object" && "code" in error) {
-        wrapped.code = String((error as { code?: unknown }).code || "");
-      }
-      throw wrapped;
-    });
-
-  return bootPromise;
+  try { return await runtimeBoot.get(); }
+  catch (error) {
+    if (isSandboxReloadRequiredError(error)) {
+      isolationFailure = reloadRequiredError("Cryzo needs to reload the builder to enable browser isolation. Your saved project will be restored.");
+      throw isolationFailure;
+    }
+    const wrapped = new Error("The Cryzo runtime could not start. Retry preview to restore your saved project.", {cause: error}) as Error & {code?: string};
+    if (error && typeof error === "object" && "code" in error) wrapped.code = String((error as {code?: unknown}).code || "");
+    throw wrapped;
+  }
 }
 
 export function prebootSandbox() {
@@ -250,9 +263,9 @@ export function prebootSandbox() {
 
 /** Attach HMR delivery to a preview iframe if the runtime is up; a no-op otherwise. */
 export function attachSandboxPreview(frame: HTMLIFrameElement): () => void {
-  if (!instance) return () => {};
+  if (!runtimeBoot.current) return () => {};
   try {
-    return instance.attachPreview(frame);
+    return runtimeBoot.current.attachPreview(frame);
   } catch {
     return () => {};
   }
@@ -275,19 +288,13 @@ export async function resetSandboxProject(sandbox: Sandbox) {
 /** Force a fresh browser runtime after iOS Safari suspends its workers.
  * Do not unregister the origin Service Worker: it also serves other tabs. */
 export async function rebootSandboxRuntime() {
-  const previous = instance;
-  instance = null;
-  bootPromise = null;
+  runtimeBoot.reset();
   isolationFailure = null;
-  if (previous) {
-    const kernel = (previous as any).vivari;
-    try { await (kernel?.dispose?.() ?? kernel?.destroy?.()); } catch { /* Worker may already be gone. */ }
-  }
 }
 
 export async function teardownSandbox() {
   if (isolationFailure) throw isolationFailure;
-  const sandbox = instance ?? (bootPromise ? await bootPromise : null);
+  const sandbox = runtimeBoot.current ?? (runtimeBoot.pending ? await runtimeBoot.pending : null);
   if (!sandbox) return;
   await resetSandboxProject(sandbox);
 }

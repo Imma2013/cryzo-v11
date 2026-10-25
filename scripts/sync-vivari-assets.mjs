@@ -20,6 +20,7 @@
 import { createHash } from "node:crypto";
 import { patchVivariRelay } from "./vivari-relay-patch.mjs";
 import { patchVivariPreview } from "./vivari-preview-patch.mjs";
+import { patchVivariFilesystem } from "./vivari-boot-patch.mjs";
 import { execSync } from "node:child_process";
 import {
   copyFileSync,
@@ -86,10 +87,17 @@ function syncRuntime() {
   const { version } = readJson(join(dist, "..", "package.json"));
   const originals = readdirSync(join(dist, "assets")).filter((name) => name !== "sw.js");
   const kernelName = originals.find(name => /^kernel-worker-.*\.js$/.test(name));
-  if (!kernelName) throw new Error("Vivari kernel asset was not found");
-  const patched = patchVivariRelay(readFileSync(join(dist,"assets",kernelName),"utf8"),version);
+  const filesystemName = originals.find(name => /^fs-worker-.*\.js$/.test(name));
+  if (!kernelName || !filesystemName) throw new Error("Vivari worker asset was not found");
+  const filesystem = patchVivariFilesystem(readFileSync(join(dist,"assets",filesystemName),"utf8"),version);
+  const filesystemOutput = "fs-worker-cryzo-" + createHash("sha256").update(filesystem).digest("hex").slice(0,16) + ".js";
+  const kernel = patchVivariRelay(readFileSync(join(dist,"assets",kernelName),"utf8"),version);
+  if (!kernel.includes(filesystemName)) throw new Error("Pinned kernel filesystem reference changed");
+  const patched = kernel.replaceAll(filesystemName,filesystemOutput);
   const kernelOutput = "kernel-worker-cryzo-" + createHash("sha256").update(patched).digest("hex").slice(0,16) + ".js";
   const files = originals.map(name => name === kernelName ? kernelOutput : name);
+  files.push(filesystemOutput);
+  writeFileSync(join(assetsDir,filesystemOutput),filesystem);
   for (const name of originals) {
     if (name === kernelName) writeFileSync(join(assetsDir,kernelOutput),patched);
     else copyFileSync(join(dist,"assets",name),join(assetsDir,name));
