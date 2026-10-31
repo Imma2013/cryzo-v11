@@ -23,6 +23,16 @@ const runtimeResourceHeaders = [
 ];
 
 const nextConfig: NextConfig = {
+  // Cryzo desktop Marketing: each social network returns its OAuth sign-in here. Google and Meta only
+  // accept return URLs on a domain we own, so cryzo.me forwards them to Cryzo cloud's Convex deployment.
+  async rewrites() {
+    return [
+      {
+        source: "/api/market/oauth/:network(x|linkedin|youtube|tiktok|facebook|instagram|reddit)/callback",
+        destination: "https://benevolent-rhinoceros-399.convex.site/market/oauth/:network/callback",
+      },
+    ];
+  },
   outputFileTracingIncludes: { "/api/**/*": ["./managed-model-smoke.json", "./vendor/design-recipes/**/*"] },
   async headers() {
     return [

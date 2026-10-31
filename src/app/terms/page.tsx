@@ -7,8 +7,8 @@ export const metadata: Metadata = {
   description: "Terms governing use of Cryzo and cryzo.me.",
 };
 
-const CONTACT_EMAIL = "lloyd.ebncheneg@gmail.com";
-const UPDATED = "September 8, 2026";
+const CONTACT_EMAIL = "lloyd.ebnchenge@gmail.com";
+const UPDATED = "October 31, 2026";
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -93,61 +93,66 @@ export default function TermsPage() {
             <p>You are responsible for selecting trusted servers and integrations, reviewing requested permissions, and complying with the third party&apos;s terms. Cryzo is not responsible for actions, outages, data practices, or charges caused by third-party services you choose to connect.</p>
           </Section>
 
-          <Section title="8. Publishing, hosting, and mobile apps">
+          <Section title="8. Marketing and social publishing">
+            <p>Cryzo desktop Marketing publishes posts to social networks you connect, on your instruction or at times you schedule. You are responsible for the content you publish, for having the rights to it, and for complying with each network&apos;s terms, community guidelines, and advertising rules. Posts drafted by Cryzo&apos;s AI are suggestions; review them before you approve them.</p>
+            <p>Networks can change, limit, or end access to their APIs at any time. Cryzo does not guarantee that a post will publish, that a network will keep supporting a feature, or that analytics are complete. You can disconnect an account at any time.</p>
+          </Section>
+
+          <Section title="9. Publishing, hosting, and mobile apps">
             <p>Cryzo may help you deploy to Cryzo-managed hosting or providers you connect, such as source-control, web-hosting, or mobile-build services. Availability, quotas, and managed compute limits may vary by feature and plan.</p>
             <p>Cryzo does not charge a separate platform fee merely for access to generated native source or the store-readiness/submission workflow. You remain responsible for third-party costs such as Apple Developer Program fees, Google Play fees, hosting charges, domain fees, build-provider fees, or other external costs that may apply.</p>
             <p>Approval by Apple, Google, hosting providers, registrars, or other third parties is not guaranteed. Those providers control their own review standards and policies.</p>
           </Section>
 
-          <Section title="9. Subscriptions, credits, and payments">
+          <Section title="10. Subscriptions, credits, and payments">
             <p>Cryzo may offer free and paid plans. Paid subscriptions may be billed monthly or annually and may renew automatically until canceled. Current prices, included message credits, integration credits, and plan features are shown in the product&apos;s billing interface or other pricing materials.</p>
             <p>Credits are service-usage units, not cash, stored value, currency, or a financial instrument. Except where required by law, subscriptions, consumed credits, and credit purchases are non-refundable. Free or promotional credits may be subject to additional limits or expiration rules.</p>
             <p>Payments are processed by third-party payment providers such as Stripe. You authorize those providers and Cryzo to process charges you initiate and any applicable recurring subscription payments. You are responsible for applicable taxes and fees not already included in the price.</p>
           </Section>
 
-          <Section title="10. Service availability and experimental features">
+          <Section title="11. Service availability and experimental features">
             <p>Cryzo depends on browsers, hosting providers, AI providers, payment systems, databases, build services, and other third parties. Interruptions, provider outages, model failures, API changes, rate limits, or other errors may occur.</p>
             <p>Features identified as beta, preview, experimental, free, or early access may change, become unavailable, or be removed at any time. We do not guarantee uninterrupted availability or that any specific model, integration, or provider will remain available.</p>
           </Section>
 
-          <Section title="11. Suspension and termination">
+          <Section title="12. Suspension and termination">
             <p>You may stop using Cryzo at any time. We may suspend or terminate access if we reasonably believe you materially violated these Terms, engaged in fraud or abuse, created a security risk, failed to pay amounts due, or if suspension is required by law or a third-party provider.</p>
             <p>On termination, your right to access the hosted Services ends. You remain responsible for charges incurred before termination. We may retain certain information when required for security, fraud prevention, legal compliance, billing, or dispute resolution, as described in our Privacy Policy.</p>
           </Section>
 
-          <Section title="12. Intellectual property and feedback">
+          <Section title="13. Intellectual property and feedback">
             <p>Cryzo and its licensors retain rights in the hosted Service, branding, interfaces, proprietary software, documentation, and technology, excluding your Customer Data and rights granted under separate open-source licenses.</p>
             <p>If you send us feedback, ideas, or suggestions about Cryzo, you grant us permission to use them without restriction or compensation, unless we agree otherwise in writing.</p>
           </Section>
 
-          <Section title="13. Disclaimers">
+          <Section title="14. Disclaimers">
             <p className="font-medium text-[var(--cryzo-text)]">THE SERVICES AND AI OUTPUT ARE PROVIDED "AS IS" AND "AS AVAILABLE" TO THE FULLEST EXTENT PERMITTED BY LAW. WE DISCLAIM IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, NON-INFRINGEMENT, AND ANY WARRANTY THAT THE SERVICES WILL BE ERROR-FREE, SECURE, UNINTERRUPTED, OR PRODUCE A PARTICULAR RESULT.</p>
             <p>You are responsible for reviewing backups, testing generated code, securing applications you deploy, and determining whether the Services and any AI output are appropriate for your use case.</p>
           </Section>
 
-          <Section title="14. Limitation of liability">
+          <Section title="15. Limitation of liability">
             <p className="font-medium text-[var(--cryzo-text)]">TO THE FULLEST EXTENT PERMITTED BY LAW, CRYZO AND ITS SERVICE PROVIDERS WILL NOT BE LIABLE FOR INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, EXEMPLARY, OR PUNITIVE DAMAGES, OR FOR LOST PROFITS, LOST DATA, LOST BUSINESS, OR BUSINESS INTERRUPTION ARISING FROM THE SERVICES.</p>
             <p>To the fullest extent permitted by law, Cryzo&apos;s total liability for claims arising from the Services or these Terms will not exceed the amount you paid Cryzo during the twelve months immediately before the event giving rise to the claim. Nothing here limits liability that cannot legally be limited.</p>
           </Section>
 
-          <Section title="15. Indemnification">
+          <Section title="16. Indemnification">
             <p>To the extent permitted by law, you agree to defend, indemnify, and hold Cryzo harmless from third-party claims, losses, liabilities, and reasonable costs arising from your applications, Customer Data, misuse of the Services, violation of these Terms, violation of law, or violation of a third party&apos;s rights or provider terms.</p>
           </Section>
 
-          <Section title="16. Governing law">
+          <Section title="17. Governing law">
             <p>These Terms are governed by the laws of the State of Texas, United States, without regard to conflict-of-law principles, except where mandatory consumer law requires otherwise. Any dispute that must be brought in court will be brought in a court with lawful jurisdiction in Texas unless applicable law gives you the right to bring it elsewhere.</p>
           </Section>
 
-          <Section title="17. Changes to these Terms">
+          <Section title="18. Changes to these Terms">
             <p>We may update these Terms as the Services, business, or law changes. For material changes, we will provide reasonable notice through the Services, by email, or by updating this page before the changes take effect when required by law. Continued use after the effective date of revised Terms means you accept them.</p>
           </Section>
 
-          <Section title="18. General terms">
+          <Section title="19. General terms">
             <p>If any provision is unenforceable, the remaining provisions remain in effect. Failure to enforce a provision is not a waiver. You may not assign these Terms without our consent; we may assign them as part of a merger, acquisition, reorganization, asset transfer, or similar transaction.</p>
             <p>These Terms and the Privacy Policy are the agreement between you and Cryzo regarding the Services unless separate written terms apply to a specific feature or customer relationship.</p>
           </Section>
 
-          <Section title="19. Contact">
+          <Section title="20. Contact">
             <p>Questions, legal notices, and support requests about these Terms may be sent to <a href={`mailto:${CONTACT_EMAIL}`} className="text-[var(--cryzo-text)] underline underline-offset-4">{CONTACT_EMAIL}</a>.</p>
           </Section>
         </div>
