@@ -7,8 +7,8 @@ export const metadata: Metadata = {
   description: "How Cryzo collects, uses, and protects information.",
 };
 
-const CONTACT_EMAIL = "lloyd.ebncheneg@gmail.com";
-const UPDATED = "September 8, 2026";
+const CONTACT_EMAIL = "lloyd.ebnchenge@gmail.com";
+const UPDATED = "October 31, 2026";
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -120,16 +120,33 @@ export default function PrivacyPage() {
             <p>MCP servers can be operated by third parties outside Cryzo. You should review the server&apos;s operator, permissions, and privacy practices before connecting it. Data sent to a third-party MCP server is subject to that server operator&apos;s practices.</p>
           </Section>
 
-          <Section title="8. Payments">
+          <Section title="8. Cryzo desktop Marketing and connected social accounts">
+            <p>The Cryzo desktop app includes Marketing, which lets you connect X, LinkedIn, YouTube, TikTok, Facebook, Instagram, and Reddit accounts so you can plan, schedule, and publish posts you write or approve, and see how those accounts perform. You connect each account yourself through that network&apos;s own sign-in and permission screen.</p>
+            <p>Depending on the network and the permissions you grant, Cryzo accesses:</p>
+            <BulletList>
+              <li><strong className="text-[var(--cryzo-text)]">Profile information:</strong> your account or channel identifier, name or handle, and profile picture, so Cryzo can show which account a post goes to.</li>
+              <li><strong className="text-[var(--cryzo-text)]">Pages and business accounts:</strong> the Facebook Pages, Instagram professional accounts, and LinkedIn organizations you manage, so you can choose where to post.</li>
+              <li><strong className="text-[var(--cryzo-text)]">Publishing:</strong> permission to create the posts, videos, and images you schedule or publish in Cryzo. Cryzo never posts without your action or approval, and does not read, change, or delete your other content.</li>
+              <li><strong className="text-[var(--cryzo-text)]">Analytics:</strong> follower counts, views, reach, impressions, and engagement for your connected accounts and for posts published through Cryzo.</li>
+              <li><strong className="text-[var(--cryzo-text)]">Media you upload:</strong> images and videos you add to Marketing, stored so they can be attached to your posts until you delete them.</li>
+            </BulletList>
+            <p>We use this information only to provide Marketing to you: to publish what you schedule, show your accounts and analytics, and keep the connection working. We do not sell it, use it for advertising, share it with other users, or use it to train AI models. If you ask Cryzo&apos;s AI assistant to draft posts, the text you request is generated for you and saved as a draft for your review.</p>
+            <p>Access tokens issued by the networks are encrypted with AES-256-GCM and stored in Cryzo&apos;s cloud backend (Convex). They are never sent to the desktop app or to anyone else, and are used only to make the requests described above.</p>
+            <p><strong className="text-[var(--cryzo-text)]">Disconnecting and deletion:</strong> you can disconnect an account at any time in Cryzo under Marketing &gt; Channels, which deletes its stored tokens immediately. You can also revoke Cryzo&apos;s access in the network&apos;s own settings, for example your <a href="https://myaccount.google.com/permissions" className="text-[var(--cryzo-text)] underline underline-offset-4">Google account permissions</a>. To delete your Marketing data, including posts, media, and analytics, follow the steps on our <Link href="/data-deletion" className="text-[var(--cryzo-text)] underline underline-offset-4">data deletion page</Link>; we complete requests within 30 days.</p>
+            <p><strong className="text-[var(--cryzo-text)]">Google and YouTube:</strong> Cryzo&apos;s use and transfer of information received from Google APIs to any other app will adhere to the <a href="https://developers.google.com/terms/api-services-user-data-policy" className="text-[var(--cryzo-text)] underline underline-offset-4">Google API Services User Data Policy</a>, including the Limited Use requirements. Cryzo uses YouTube API Services; by connecting YouTube you agree to the <a href="https://www.youtube.com/t/terms" className="text-[var(--cryzo-text)] underline underline-offset-4">YouTube Terms of Service</a>, and Google&apos;s handling of your data is described in the <a href="https://policies.google.com/privacy" className="text-[var(--cryzo-text)] underline underline-offset-4">Google Privacy Policy</a>.</p>
+            <p>Each network also processes your data under its own terms and privacy policy, including those of X, LinkedIn, TikTok, Meta (Facebook and Instagram), and Reddit.</p>
+          </Section>
+
+          <Section title="9. Payments">
             <p>When you purchase a plan or credits, payment information is processed by Stripe or another payment provider we may designate. Cryzo receives information such as payment status, plan, transaction identifiers, billing email, and other information needed to manage your subscription, but we do not need to store your full card number.</p>
           </Section>
 
-          <Section title="9. Cookies, browser storage, and similar technologies">
+          <Section title="10. Cookies, browser storage, and similar technologies">
             <p>Cryzo uses browser storage, cookies, and similar technologies where needed for sign-in, session management, security, theme preferences, device-level API-key preferences, product state, and other core functionality.</p>
             <p>We may also use limited analytics or diagnostics to understand reliability and feature usage. If we later add non-essential advertising or marketing tracking that legally requires consent, we will provide appropriate controls before using it where required.</p>
           </Section>
 
-          <Section title="10. When we share information">
+          <Section title="11. When we share information">
             <p>We do not sell your personal information. We may disclose information:</p>
             <BulletList>
               <li>to service providers and subprocessors that help operate Cryzo;</li>
@@ -141,35 +158,35 @@ export default function PrivacyPage() {
             </BulletList>
           </Section>
 
-          <Section title="11. Data retention and deletion">
+          <Section title="12. Data retention and deletion">
             <p>We retain information for as long as reasonably necessary to provide the Services, maintain your account and projects, process billing, resolve disputes, prevent abuse, meet legal obligations, and protect the Services.</p>
             <p>When information is no longer needed, we may delete or de-identify it. Backup, security, fraud-prevention, and legal records may remain for a limited additional period where reasonably necessary or required by law.</p>
             <p>You may request account or personal-data deletion by contacting us at the email below. Some project data may also be removable through product controls as those features are available.</p>
           </Section>
 
-          <Section title="12. Security">
+          <Section title="13. Security">
             <p>We use reasonable technical and organizational safeguards designed to protect information, including encrypted transport, access controls, authentication protections, and encrypted storage for supported account-saved provider secrets.</p>
             <p>No online service can guarantee absolute security. You are responsible for securing your own devices, API keys, connected accounts, repositories, deployed applications, and any secrets you place in project code.</p>
           </Section>
 
-          <Section title="13. Your privacy choices and rights">
+          <Section title="14. Your privacy choices and rights">
             <p>Depending on where you live, you may have rights to request access to, correction of, deletion of, or a copy of personal information we hold about you, or to object to or restrict certain processing.</p>
             <p>To make a privacy request, email <a href={`mailto:${CONTACT_EMAIL}`} className="text-[var(--cryzo-text)] underline underline-offset-4">{CONTACT_EMAIL}</a>. We may need to verify your identity before completing a request. We will respond within the period required by applicable law.</p>
           </Section>
 
-          <Section title="14. International processing">
+          <Section title="15. International processing">
             <p>Cryzo and its providers may process information in the United States and other countries. Those countries may have privacy laws that differ from the laws where you live. Where required, we will use legally recognized mechanisms for international data transfers.</p>
           </Section>
 
-          <Section title="15. Children">
+          <Section title="16. Children">
             <p>The Services are not intended for children under 18. We do not knowingly collect personal information from children under 18 through the standard Cryzo service. If you believe a child has provided personal information to Cryzo, contact us so we can review and address the issue.</p>
           </Section>
 
-          <Section title="16. Changes to this Policy">
+          <Section title="17. Changes to this Policy">
             <p>We may update this Policy as Cryzo, our providers, or applicable laws change. We will update the date at the top of this page and provide additional notice for material changes when required by law.</p>
           </Section>
 
-          <Section title="17. Contact">
+          <Section title="18. Contact">
             <p>For privacy questions, requests, or concerns, contact Cryzo at <a href={`mailto:${CONTACT_EMAIL}`} className="text-[var(--cryzo-text)] underline underline-offset-4">{CONTACT_EMAIL}</a>.</p>
           </Section>
         </div>
