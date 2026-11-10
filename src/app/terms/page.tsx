@@ -47,7 +47,7 @@ export default function TermsPage() {
           <h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em] sm:text-5xl">Terms of Service</h1>
           <p className="mt-4 text-sm text-[var(--cryzo-muted)]">Last updated and effective: {UPDATED}</p>
           <p className="mt-6 text-base leading-8 text-[var(--cryzo-muted)]">
-            These Terms of Service ("Terms") govern your access to and use of cryzo.me and the Cryzo software, AI builder, browser workspace, cloud features, publishing tools, integrations, connectors, and related services (collectively, the "Services"). For these Terms, "Cryzo," "we," "us," and "our" mean the operator of the Services.
+            These Terms of Service ("Terms") govern your access to and use of cryzo.me and the Cryzo software, AI builder, browser workspace, cloud features, publishing tools, integrations, connectors, and related services (collectively, the "Services"). Cryzo is a product of Tenacious Finance LLC, a Texas limited liability company. For these Terms, "Cryzo," "we," "us," and "our" mean Tenacious Finance LLC.
           </p>
           <p className="mt-4 text-base leading-8 text-[var(--cryzo-muted)]">
             By creating an account, clicking to continue, or using the Services, you agree to these Terms and our <Link href="/privacy" className="text-[var(--cryzo-text)] underline underline-offset-4">Privacy Policy</Link>. If you do not agree, do not use the Services.
@@ -160,7 +160,7 @@ export default function TermsPage() {
 
       <footer className="border-t border-[var(--cryzo-border)]">
         <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-3 px-5 py-6 text-xs text-[var(--cryzo-muted)] sm:px-8">
-          <span>© 2026 Cryzo</span>
+          <span>© 2026 Cryzo, a product of Tenacious Finance LLC</span>
           <div className="flex gap-4">
             <Link href="/terms" className="text-[var(--cryzo-text)]">Terms</Link>
             <Link href="/privacy" className="hover:text-[var(--cryzo-text)]">Privacy</Link>

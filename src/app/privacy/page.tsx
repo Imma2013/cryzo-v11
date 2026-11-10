@@ -51,7 +51,7 @@ export default function PrivacyPage() {
           <h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em] sm:text-5xl">Privacy Policy</h1>
           <p className="mt-4 text-sm text-[var(--cryzo-muted)]">Last updated and effective: {UPDATED}</p>
           <p className="mt-6 text-base leading-8 text-[var(--cryzo-muted)]">
-            This Privacy Policy explains how Cryzo ("Cryzo," "we," "us," or "our") collects, uses, stores, and shares information when you use cryzo.me and the Cryzo software, AI builder, cloud features, deployment tools, integrations, and related services (the "Services").
+            This Privacy Policy explains how Cryzo, a product of Tenacious Finance LLC, a Texas limited liability company ("Cryzo," "we," "us," or "our"), collects, uses, stores, and shares information when you use cryzo.me and the Cryzo software, AI builder, cloud features, deployment tools, integrations, and related services (the "Services").
           </p>
           <p className="mt-4 text-base leading-8 text-[var(--cryzo-muted)]">
             By using the Services, you acknowledge this Policy and our <Link href="/terms" className="text-[var(--cryzo-text)] underline underline-offset-4">Terms of Service</Link>.
@@ -194,7 +194,7 @@ export default function PrivacyPage() {
 
       <footer className="border-t border-[var(--cryzo-border)]">
         <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-3 px-5 py-6 text-xs text-[var(--cryzo-muted)] sm:px-8">
-          <span>© 2026 Cryzo</span>
+          <span>© 2026 Cryzo, a product of Tenacious Finance LLC</span>
           <div className="flex gap-4">
             <Link href="/terms" className="hover:text-[var(--cryzo-text)]">Terms</Link>
             <Link href="/privacy" className="text-[var(--cryzo-text)]">Privacy</Link>
