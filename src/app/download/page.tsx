@@ -8,7 +8,7 @@ export const metadata: Metadata = {
 };
 
 const WINDOWS_ZIP =
-  "https://github.com/Imma2013/cryzo-desktop/releases/download/v0.1.0-preview/Cryzo-Desktop-Windows-x64.zip";
+  "https://github.com/jlois552-ui/cryzo-desktop/releases/download/v0.1.0-preview/Cryzo-Desktop-Windows-x64.zip";
 
 export default function DownloadPage() {
   return (
